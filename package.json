@@ -28,6 +28,7 @@
   "dependencies": {
     "@xterm/addon-serialize": "^0.13.0",
     "@xterm/headless": "^5.5.0",
+    "chalk": "^4.1.2",
     "chokidar": "^3.6.0",
     "fossil-delta": "^1.0.2",
     "jsonwebtoken": "^9.0.2",

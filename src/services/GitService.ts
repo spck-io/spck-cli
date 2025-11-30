@@ -5,6 +5,7 @@
 import { spawn } from 'child_process';
 import * as path from 'path';
 import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types';
+import { logGitRead, logGitWrite } from '../utils/logger';
 
 interface ExecGitOptions {
   cwd?: string;
@@ -25,66 +26,135 @@ export class GitService {
    * Handle git RPC methods
    */
   async handle(method: string, params: any, socket: AuthenticatedSocket): Promise<any> {
+    const uid = socket.data?.uid || 'unknown';
+    let result: any;
+    let error: any;
+
     // Validate and resolve git directory
     const dir = this.validateGitDir(params.dir);
+
+    // Define read and write operations
+    const readOps = ['readCommit', 'readObject', 'getHeadTree', 'getOidAtPath', 'listFiles', 'resolveRef',
+                     'currentBranch', 'log', 'status', 'statusCounts', 'getConfig', 'listBranches',
+                     'listRemotes', 'isIgnored', 'requestAuth'];
+    const writeOps = ['add', 'remove', 'resetIndex', 'commit', 'setConfig', 'checkout', 'init',
+                      'addRemote', 'deleteRemote', 'clearIndex'];
 
     try {
       switch (method) {
         case 'readCommit':
-          return await this.readCommit(dir, params);
+          result = await this.readCommit(dir, params);
+          logGitRead(method, params, uid, true, undefined, { oid: params.oid });
+          return result;
         case 'readObject':
-          return await this.readObject(dir, params);
+          result = await this.readObject(dir, params);
+          logGitRead(method, params, uid, true, undefined, { oid: params.oid });
+          return result;
         case 'getHeadTree':
-          return await this.getHeadTree(dir, params);
+          result = await this.getHeadTree(dir, params);
+          logGitRead(method, params, uid, true, undefined, { oid: result.oid });
+          return result;
         case 'getOidAtPath':
-          return await this.getOidAtPath(dir, params);
+          result = await this.getOidAtPath(dir, params);
+          logGitRead(method, params, uid, true, undefined, { path: params.path, oid: result.oid });
+          return result;
         case 'listFiles':
-          return await this.listFiles(dir, params);
+          result = await this.listFiles(dir, params);
+          logGitRead(method, params, uid, true, undefined, { count: result.files.length });
+          return result;
         case 'resolveRef':
-          return await this.resolveRef(dir, params);
+          result = await this.resolveRef(dir, params);
+          logGitRead(method, params, uid, true, undefined, { ref: params.ref, oid: result.oid });
+          return result;
         case 'currentBranch':
-          return await this.currentBranch(dir, params);
+          result = await this.currentBranch(dir, params);
+          logGitRead(method, params, uid, true, undefined, { branch: result.branch });
+          return result;
         case 'log':
-          return await this.log(dir, params);
+          result = await this.log(dir, params);
+          logGitRead(method, params, uid, true, undefined, { commits: result.commits.length });
+          return result;
         case 'status':
-          return await this.status(dir, params);
+          result = await this.status(dir, params);
+          logGitRead(method, params, uid, true, undefined, { files: result.length });
+          return result;
         case 'statusCounts':
-          return await this.statusCounts(dir, params);
+          result = await this.statusCounts(dir, params);
+          logGitRead(method, params, uid, true, undefined, result);
+          return result;
         case 'add':
-          return await this.add(dir, params, socket);
+          result = await this.add(dir, params, socket);
+          logGitWrite(method, params, uid, true, undefined, { count: params.filepaths?.length || 0 });
+          return result;
         case 'remove':
-          return await this.remove(dir, params, socket);
+          result = await this.remove(dir, params, socket);
+          logGitWrite(method, params, uid, true, undefined, { count: params.filepaths?.length || 0 });
+          return result;
         case 'resetIndex':
-          return await this.resetIndex(dir, params, socket);
+          result = await this.resetIndex(dir, params, socket);
+          logGitWrite(method, params, uid, true);
+          return result;
         case 'commit':
-          return await this.commit(dir, params, socket);
+          result = await this.commit(dir, params, socket);
+          logGitWrite(method, params, uid, true, undefined, { oid: result.oid });
+          return result;
         case 'getConfig':
-          return await this.getConfig(dir, params);
+          result = await this.getConfig(dir, params);
+          logGitRead(method, params, uid, true, undefined, { path: params.path });
+          return result;
         case 'setConfig':
-          return await this.setConfig(dir, params);
+          result = await this.setConfig(dir, params);
+          logGitWrite(method, params, uid, true, undefined, { path: params.path });
+          return result;
         case 'listBranches':
-          return await this.listBranches(dir, params);
+          result = await this.listBranches(dir, params);
+          logGitRead(method, params, uid, true, undefined, { count: result.branches.length });
+          return result;
         case 'checkout':
-          return await this.checkout(dir, params);
+          result = await this.checkout(dir, params);
+          logGitWrite(method, params, uid, true);
+          return result;
         case 'init':
-          return await this.init(dir, params);
+          result = await this.init(dir, params);
+          logGitWrite(method, params, uid, true);
+          return result;
         case 'listRemotes':
-          return await this.listRemotes(dir, params);
+          result = await this.listRemotes(dir, params);
+          logGitRead(method, params, uid, true, undefined, { count: result.remotes.length });
+          return result;
         case 'addRemote':
-          return await this.addRemote(dir, params);
+          result = await this.addRemote(dir, params);
+          logGitWrite(method, params, uid, true, undefined, { remote: params.remote, url: params.url });
+          return result;
         case 'deleteRemote':
-          return await this.deleteRemote(dir, params);
+          result = await this.deleteRemote(dir, params);
+          logGitWrite(method, params, uid, true, undefined, { remote: params.remote });
+          return result;
         case 'clearIndex':
-          return await this.clearIndex(dir, params);
+          result = await this.clearIndex(dir, params);
+          logGitWrite(method, params, uid, true);
+          return result;
         case 'isIgnored':
-          return await this.isIgnored(dir, params);
+          result = await this.isIgnored(dir, params);
+          logGitRead(method, params, uid, true, undefined, { filepath: params.filepath, ignored: result });
+          return result;
         case 'requestAuth':
           // This is called by server to request credentials from client
-          return await this.requestAuth(socket, params);
+          result = await this.requestAuth(socket, params);
+          logGitRead(method, params, uid, true);
+          return result;
         default:
           throw createRPCError(ErrorCode.METHOD_NOT_FOUND, `Method not found: git.${method}`);
       }
-    } catch (error: any) {
+    } catch (err: any) {
+      error = err;
+      // Log error based on operation type
+      if (readOps.includes(method)) {
+        logGitRead(method, params, uid, false, error);
+      } else if (writeOps.includes(method)) {
+        logGitWrite(method, params, uid, false, error);
+      }
+
       if (error.code && error.message) {
         throw error; // Re-throw RPC errors
       }
@@ -286,7 +356,7 @@ export class GitService {
       // If tree is provided, read from tree object (original behavior)
       if (tree) {
         const { stdout } = await this.execGit(['ls-tree', tree, path], { cwd: dir });
-        const match = stdout.match(/^(\d+)\s+(\w+)\s+([a-f0-9]+)\s+(.+)$/);
+        const match = stdout.trim().match(/^(\d+)\s+(\w+)\s+([a-f0-9]+)\s+(.+)$/);
         if (match) {
           return { oid: match[3] };
         }

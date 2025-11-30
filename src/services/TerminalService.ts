@@ -6,6 +6,7 @@ import * as pty from 'node-pty';
 import { Terminal as XtermHeadless } from '@xterm/headless';
 import { SerializeAddon } from '@xterm/addon-serialize';
 import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types';
+import { logTerminalRead, logTerminalWrite } from '../utils/logger';
 
 interface TerminalSession {
   id: string;
@@ -31,26 +32,66 @@ export class TerminalService {
   ) {}
 
   /**
+   * Get UID from socket with fallback
+   */
+  private getUid(): string {
+    return this.socket.data?.uid || 'unknown';
+  }
+
+  /**
    * Handle terminal RPC methods
    */
   async handle(method: string, params: any): Promise<any> {
-    switch (method) {
-      case 'create':
-        return await this.create(params);
-      case 'destroy':
-        return await this.destroy(params);
-      case 'activate':
-        return await this.activate(params);
-      case 'send':
-        return await this.send(params);
-      case 'resize':
-        return await this.resize(params);
-      case 'refresh':
-        return await this.refresh(params);
-      case 'list':
-        return await this.list();
-      default:
-        throw createRPCError(ErrorCode.METHOD_NOT_FOUND, `Method not found: terminal.${method}`);
+    const uid = this.getUid();
+    let result: any;
+    let error: any;
+
+    // Define read and write operations
+    const readOps = ['list', 'refresh'];
+    const writeOps = ['create', 'destroy', 'activate', 'send', 'resize'];
+
+    try {
+      switch (method) {
+        case 'create':
+          result = await this.create(params);
+          logTerminalWrite(method, params, uid, true, undefined, { terminalId: result });
+          return result;
+        case 'destroy':
+          result = await this.destroy(params);
+          logTerminalWrite(method, params, uid, true);
+          return result;
+        case 'activate':
+          result = await this.activate(params);
+          logTerminalWrite(method, params, uid, true);
+          return result;
+        case 'send':
+          result = await this.send(params);
+          logTerminalWrite(method, params, uid, true);
+          return result;
+        case 'resize':
+          result = await this.resize(params);
+          logTerminalWrite(method, params, uid, true);
+          return result;
+        case 'refresh':
+          result = await this.refresh(params);
+          logTerminalRead(method, params, uid, true);
+          return result;
+        case 'list':
+          result = await this.list();
+          logTerminalRead(method, params, uid, true, undefined, { count: result.length });
+          return result;
+        default:
+          throw createRPCError(ErrorCode.METHOD_NOT_FOUND, `Method not found: terminal.${method}`);
+      }
+    } catch (err: any) {
+      error = err;
+      // Log error based on operation type
+      if (readOps.includes(method)) {
+        logTerminalRead(method, params, uid, false, error);
+      } else if (writeOps.includes(method)) {
+        logTerminalWrite(method, params, uid, false, error);
+      }
+      throw error;
     }
   }
 
@@ -58,7 +99,7 @@ export class TerminalService {
    * Create new terminal session
    */
   private async create(params: { cols: number; rows: number }): Promise<string> {
-    const uid = this.socket.data.uid;
+    const uid = this.getUid();
 
     // Check terminal limit
     const userTerminals = Array.from(this.sessions.values()).filter((s) => s.uid === uid);
@@ -153,7 +194,7 @@ export class TerminalService {
     }
 
     // Verify ownership
-    if (session.uid !== this.socket.data.uid) {
+    if (session.uid !== this.getUid()) {
       throw createRPCError(ErrorCode.PERMISSION_DENIED, 'Permission denied');
     }
 
@@ -180,7 +221,7 @@ export class TerminalService {
     }
 
     // Verify ownership
-    if (session.uid !== this.socket.data.uid) {
+    if (session.uid !== this.getUid()) {
       throw createRPCError(ErrorCode.PERMISSION_DENIED, 'Permission denied');
     }
 
@@ -201,7 +242,7 @@ export class TerminalService {
     }
 
     // Verify ownership
-    if (session.uid !== this.socket.data.uid) {
+    if (session.uid !== this.getUid()) {
       throw createRPCError(ErrorCode.PERMISSION_DENIED, 'Permission denied');
     }
 
@@ -226,7 +267,7 @@ export class TerminalService {
     }
 
     // Verify ownership
-    if (session.uid !== this.socket.data.uid) {
+    if (session.uid !== this.getUid()) {
       throw createRPCError(ErrorCode.PERMISSION_DENIED, 'Permission denied');
     }
 
@@ -251,7 +292,7 @@ export class TerminalService {
     }
 
     // Verify ownership
-    if (session.uid !== this.socket.data.uid) {
+    if (session.uid !== this.getUid()) {
       throw createRPCError(ErrorCode.PERMISSION_DENIED, 'Permission denied');
     }
 
@@ -262,7 +303,7 @@ export class TerminalService {
    * List terminals for current user
    */
   private async list(): Promise<string[]> {
-    const uid = this.socket.data.uid;
+    const uid = this.getUid();
     return Array.from(this.sessions.values())
       .filter((s) => s.uid === uid)
       .map((s) => s.id);

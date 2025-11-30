@@ -105,7 +105,7 @@ export async function startServer(configPath?: string) {
 
       // Attach user data to socket
       (socket as AuthenticatedSocket).data = {
-        uid: payload.uid,
+        uid: payload.sub,
       };
 
       next();
