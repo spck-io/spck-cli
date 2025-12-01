@@ -6,10 +6,12 @@ import { AuthenticatedSocket, JSONRPCRequest, ErrorCode, createRPCError } from '
 import { FilesystemService } from '../services/FilesystemService';
 import { GitService } from '../services/GitService';
 import { TerminalService } from '../services/TerminalService';
+import { SearchService } from '../services/SearchService';
 
 export class RPCRouter {
   private static filesystemService: FilesystemService;
   private static gitService: GitService;
+  private static searchService: SearchService;
   private static terminalServices: Map<string, TerminalService> = new Map();
 
   /**
@@ -18,6 +20,7 @@ export class RPCRouter {
   static initialize(rootPath: string, config: any) {
     this.filesystemService = new FilesystemService(rootPath, config.filesystem);
     this.gitService = new GitService(rootPath);
+    this.searchService = new SearchService(rootPath);
   }
 
   /**
@@ -57,6 +60,9 @@ export class RPCRouter {
 
         case 'git':
           return await this.gitService.handle(methodName, params, socket);
+
+        case 'search':
+          return await this.searchService.handle(methodName, params);
 
         case 'terminal':
           const terminalService = this.getTerminalService(socket);

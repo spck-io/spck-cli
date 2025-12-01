@@ -408,13 +408,16 @@ export class FilesystemService {
       const entries = await fs.readdir(safePath);
       const result = [];
 
+      const ignoreSet = new Set<string>(['.git', '.spck-editor']);
       for (const name of entries) {
+        if (ignoreSet.has(name)) continue;
+
         const entryPath = path.join(safePath, name);
         const stats = await fs.stat(entryPath);
 
         // Skip based on filters
         if (params.skipFiles && stats.isFile()) continue;
-        if (params.skipFolders && stats.isDirectory()) continue;
+        else if (params.skipFolders && stats.isDirectory()) continue;
 
         // Return just the name string, not the object
         result.push(name);
