@@ -131,6 +131,7 @@ export class TerminalService {
       cols: params.cols || 80,
       rows: params.rows || 24,
       scrollback: this.maxBufferedLines,
+      allowProposedApi: true
     });
 
     const serializeAddon = new SerializeAddon();

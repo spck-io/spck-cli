@@ -10,7 +10,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { ErrorCode, createRPCError } from '../types';
+import { ErrorCode, createRPCError, AuthenticatedSocket } from '../types';
+import { logSearchRead } from '../utils/logger';
 
 interface SearchParams {
   path: string;
@@ -48,10 +49,10 @@ export class SearchService {
   /**
    * Handle search RPC methods
    */
-  async handle(method: string, params: any): Promise<any> {
+  async handle(method: string, params: any, socket: AuthenticatedSocket): Promise<any> {
     switch (method) {
       case 'findInFile':
-        return await this.findInFile(params);
+        return await this.findInFile(params, socket);
       default:
         throw createRPCError(ErrorCode.METHOD_NOT_FOUND, `Method not found: search.${method}`);
     }
@@ -60,51 +61,77 @@ export class SearchService {
   /**
    * Find matches in a file
    */
-  private async findInFile(params: SearchParams): Promise<SearchResult[] | null> {
+  private async findInFile(params: SearchParams, socket: AuthenticatedSocket): Promise<SearchResult[] | null> {
     const { path: relativePath, maxMatchPerFile, maxLength, searchTerm, matchCase, useRegEx, onlyWholeWords } = params;
+    const uid = socket.data.uid;
+    let searchMethod: string | undefined;
+    let fileSize: number | undefined;
 
-    // Validate path is within root
-    const absolutePath = path.resolve(this.rootPath, relativePath);
-    if (!absolutePath.startsWith(this.rootPath)) {
-      throw createRPCError(ErrorCode.PERMISSION_DENIED, 'Access denied: path outside root');
-    }
-
-    // Check file exists and is readable
     try {
+      // Validate path is within root
+      const absolutePath = path.resolve(this.rootPath, relativePath);
+      if (!absolutePath.startsWith(this.rootPath)) {
+        throw createRPCError(ErrorCode.PERMISSION_DENIED, 'Access denied: path outside root');
+      }
+
+      // Check file exists and is readable
+      try {
+        const stats = await fs.promises.stat(absolutePath);
+        fileSize = stats.size;
+
+        // Skip directories
+        if (stats.isDirectory()) {
+          logSearchRead('findInFile', params, uid, true, undefined, { matches: 0, method: 'skipped-dir' });
+          return null;
+        }
+
+        // Skip files that are too large
+        if (stats.size > this.maxFileSize) {
+          logSearchRead('findInFile', params, uid, true, undefined, { matches: 0, method: 'skipped-large' });
+          return null;
+        }
+
+        // Skip empty files
+        if (stats.size === 0) {
+          logSearchRead('findInFile', params, uid, true, undefined, { matches: 0, method: 'skipped-empty' });
+          return null;
+        }
+      } catch (error: any) {
+        if (error.code === 'ENOENT') {
+          logSearchRead('findInFile', params, uid, true, undefined, { matches: 0, method: 'not-found' });
+          return null;
+        }
+        throw createRPCError(ErrorCode.INTERNAL_ERROR, `Failed to stat file: ${error.message}`);
+      }
+
+      // Build regex pattern
+      const regex = this.buildRegExp(searchTerm, useRegEx, matchCase, onlyWholeWords);
+
+      // For small files, read entirely for better performance
       const stats = await fs.promises.stat(absolutePath);
-
-      // Skip directories
-      if (stats.isDirectory()) {
-        return null;
+      let results: SearchResult[] | null;
+      if (stats.size < this.chunkSize * 2) {
+        searchMethod = 'full-read';
+        results = await this.searchSmallFile(absolutePath, relativePath, regex, maxMatchPerFile, maxLength);
+      } else {
+        searchMethod = 'streaming';
+        results = await this.searchLargeFile(absolutePath, relativePath, regex, maxMatchPerFile, maxLength);
       }
 
-      // Skip files that are too large
-      if (stats.size > this.maxFileSize) {
-        return null;
-      }
+      // Log success
+      const matches = results?.length || 0;
+      logSearchRead('findInFile', params, uid, true, undefined, {
+        matches,
+        method: searchMethod,
+        size: fileSize
+      });
 
-      // Skip empty files
-      if (stats.size === 0) {
-        return null;
-      }
+      return results;
     } catch (error: any) {
-      if (error.code === 'ENOENT') {
-        return null;
-      }
-      throw createRPCError(ErrorCode.INTERNAL_ERROR, `Failed to stat file: ${error.message}`);
+      // Log error
+      logSearchRead('findInFile', params, uid, false, error, { method: searchMethod, size: fileSize });
+      throw error;
     }
-
-    // Build regex pattern
-    const regex = this.buildRegExp(searchTerm, useRegEx, matchCase, onlyWholeWords);
-
-    // For small files, read entirely for better performance
-    const stats = await fs.promises.stat(absolutePath);
-    if (stats.size < this.chunkSize * 2) {
-      return await this.searchSmallFile(absolutePath, relativePath, regex, maxMatchPerFile, maxLength);
-    }
-
-    // For larger files, use streaming search
-    return await this.searchLargeFile(absolutePath, relativePath, regex, maxMatchPerFile, maxLength);
   }
 
   /**

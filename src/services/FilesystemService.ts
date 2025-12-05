@@ -468,12 +468,16 @@ export class FilesystemService {
 
           if (stats.isDirectory()) {
             if (includeFolders) {
-              folders.push(entryPath);
+              // Convert path based on relative parameter
+              const outputPath = path.relative(this.rootPath, entryPath);
+              folders.push(outputPath);
             }
             // Recurse into subdirectory
             await walk(entryPath);
           } else if (stats.isFile() && includeFiles) {
-            files.push(entryPath);
+            // Convert path based on relative parameter
+            const outputPath = path.relative(this.rootPath, entryPath);
+            files.push(outputPath);
           }
         }
       };

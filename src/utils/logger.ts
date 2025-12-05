@@ -316,6 +316,44 @@ export function logTerminalWrite(
   }
 }
 
+/**
+ * Log a search operation
+ */
+export function logSearchRead(
+  method: string,
+  params: {
+    path?: string;
+    searchTerm?: string;
+    [key: string]: any;
+  },
+  uid: string,
+  success: boolean,
+  error?: any,
+  metadata?: Record<string, any>
+): void {
+  const filepath = formatPath(params.path);
+  const searchTerm = params.searchTerm ? `"${params.searchTerm.substring(0, 30)}${params.searchTerm.length > 30 ? '...' : ''}'"` : '';
+  const details = [];
+  if (searchTerm) details.push(searchTerm);
+  if (metadata?.matches !== undefined) details.push(`matches=${metadata.matches}`);
+  if (metadata?.method) details.push(metadata.method);
+  const detailStr = details.length ? ` ${chalk.gray(details.join(' '))}` : '';
+  const metaStr = metadata && !metadata.matches && !metadata.method ? ` ${chalk.gray(JSON.stringify(metadata))}` : '';
+  const timestamp = chalk.gray(formatTimeCompact());
+  const uidStr = chalk.gray(formatUid(uid));
+
+  if (success) {
+    const msg = `${timestamp} ${uidStr} ${chalk.green('✓')} ${chalk.green('SEARCH')} ${chalk.white(method.padEnd(12))} ${chalk.gray(filepath)}${detailStr}${metaStr}`;
+    console.log(msg);
+    writeToFile(`[INFO] SEARCH ${method} ${params.path} searchTerm="${params.searchTerm}" uid=${uid} success=true${detailStr}${metaStr}`);
+  } else {
+    const errMsg = error?.message || String(error);
+    const msg = `${timestamp} ${uidStr} ${chalk.red('✗')} ${chalk.green('SEARCH')} ${chalk.white(method.padEnd(12))} ${chalk.gray(filepath)} ${chalk.red(errMsg)}`;
+    console.log(msg);
+    writeToFile(`[ERROR] SEARCH ${method} ${params.path} searchTerm="${params.searchTerm}" uid=${uid} success=false error="${errMsg}"`);
+  }
+}
+
 export default {
   logFsRead,
   logFsWrite,
@@ -323,4 +361,5 @@ export default {
   logGitWrite,
   logTerminalRead,
   logTerminalWrite,
+  logSearchRead,
 };

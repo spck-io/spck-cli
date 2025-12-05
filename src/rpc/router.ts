@@ -62,7 +62,7 @@ export class RPCRouter {
           return await this.gitService.handle(methodName, params, socket);
 
         case 'search':
-          return await this.searchService.handle(methodName, params);
+          return await this.searchService.handle(methodName, params, socket);
 
         case 'terminal':
           const terminalService = this.getTerminalService(socket);
