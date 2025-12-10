@@ -408,7 +408,7 @@ export class FilesystemService {
       const entries = await fs.readdir(safePath);
       const result = [];
 
-      const ignoreSet = new Set<string>(['.git', '.spck-editor']);
+      const ignoreSet = new Set<string>(['.git', '.spck-editor', '.DS_Store']);
       for (const name of entries) {
         if (ignoreSet.has(name)) continue;
 

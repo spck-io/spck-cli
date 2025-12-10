@@ -459,8 +459,8 @@ export class GitService {
    * Get working directory status
    */
   private async status(dir: string, params: any): Promise<any> {
-    // Use --porcelain=v1 with -M for rename detection and -C for copy detection
-    const { stdout } = await this.execGit(['status', '--porcelain=v1', '-M'], { cwd: dir });
+    // Use --porcelain=v1 with -M for rename detection and --ignored to include ignored files and --untracked-files=all to show all untracked files instead of parent folder
+    const { stdout } = await this.execGit(['status', '--porcelain=v1', '-M', '--ignored', '--untracked-files=all'], { cwd: dir });
     const result: Array<{ path: string; status: string }> = [];
 
     // Extract filepath filter from params (for single-file status queries)
@@ -495,12 +495,12 @@ export class GitService {
       // Direct mapping from git porcelain codes to status strings
       let status: string;
       switch (gitStatus) {
-        // Untracked/Ignored
+        // Untracked
         case '??':
           status = ' ?';
           break;
         case '!!':
-          status = '!!';
+          status = ' I';
           break;
 
         // Added
