@@ -461,30 +461,76 @@ export class GitService {
 
   /**
    * Get working directory status
+   * Uses two git commands:
+   * 1. With -uall for detailed untracked files
+   * 2. With --ignored (no -uall) for rolled-up ignored directories
    */
   private async status(dir: string, params: any): Promise<any> {
-    // Use --porcelain=v1 with -M for rename detection and --ignored to include ignored files and --untracked-files=all to show all untracked files instead of parent folder
-    const { stdout } = await this.execGit(['status', '--porcelain=v1', '-M', '--ignored', '--untracked-files=all'], { cwd: dir });
-    const result: Array<{ path: string; status: string }> = [];
-
-    // Extract filepath filter from params (for single-file status queries)
     const filterFilepath = params?.filepath;
 
-    // Conflict status codes from git documentation
+    // Run two git status commands in parallel
+    const [untrackedResult, ignoredResult] = await Promise.all([
+      // Get all untracked files individually with -uall
+      this.execGit(['status', '--porcelain=v1', '-M', '-uall'], { cwd: dir }),
+      // Get ignored files rolled up to directories (without -uall)
+      this.execGit(['status', '--porcelain=v1', '--ignored'], { cwd: dir })
+    ]);
+
+    // Parse untracked files (exclude ignored files from this result)
+    const untrackedFiles = await this.parseGitStatus(
+      untrackedResult.stdout,
+      dir,
+      filterFilepath,
+      new Set(['!!']) // Exclude ignored files
+    );
+
+    // Parse ignored files only
+    const ignoredFiles = await this.parseGitStatus(
+      ignoredResult.stdout,
+      dir,
+      filterFilepath,
+      new Set(), // Include all
+      new Set(['!!']) // Only include ignored files
+    );
+
+    // Merge results: untracked + ignored
+    return [...untrackedFiles, ...ignoredFiles];
+  }
+
+  /**
+   * Parse git status output into status array
+   */
+  private async parseGitStatus(
+    stdout: string,
+    dir: string,
+    filterFilepath: string | undefined,
+    excludeStatuses: Set<string> = new Set(),
+    includeOnlyStatuses?: Set<string>
+  ): Promise<Array<{ path: string; status: string }>> {
+    const result: Array<{ path: string; status: string }> = [];
     const conflictCodes = new Set(['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU']);
 
     const lines = stdout.split('\n').filter((l) => l.trim());
     for (const line of lines) {
       const gitStatus = line.substring(0, 2);
+
+      // Skip excluded statuses
+      if (excludeStatuses.has(gitStatus)) {
+        continue;
+      }
+
+      // If includeOnlyStatuses is specified, only include those
+      if (includeOnlyStatuses && !includeOnlyStatuses.has(gitStatus)) {
+        continue;
+      }
+
       let filepath = line.substring(3);
 
       // Handle rename format: "R  old_name -> new_name"
-      let isRenamed = false;
       if (gitStatus.startsWith('R')) {
         const renameMatch = filepath.match(/^(.+)\s+->\s+(.+)$/);
         if (renameMatch) {
           filepath = renameMatch[2]; // Use new filename
-          isRenamed = true;
         }
       }
 
