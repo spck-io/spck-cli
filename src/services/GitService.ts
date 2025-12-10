@@ -36,7 +36,7 @@ export class GitService {
     // Define read and write operations
     const readOps = ['readCommit', 'readObject', 'getHeadTree', 'getOidAtPath', 'listFiles', 'resolveRef',
                      'currentBranch', 'log', 'status', 'statusCounts', 'getConfig', 'listBranches',
-                     'listRemotes', 'isIgnored', 'requestAuth'];
+                     'listRemotes', 'isIgnored', 'isInitialized', 'requestAuth'];
     const writeOps = ['add', 'remove', 'resetIndex', 'commit', 'setConfig', 'checkout', 'init',
                       'addRemote', 'deleteRemote', 'clearIndex'];
 
@@ -137,6 +137,10 @@ export class GitService {
         case 'isIgnored':
           result = await this.isIgnored(dir, params);
           logGitRead(method, params, uid, true, undefined, { filepath: params.filepath, ignored: result });
+          return result;
+        case 'isInitialized':
+          result = await this.isInitialized(dir, params);
+          logGitRead(method, params, uid, true, undefined, { initialized: result });
           return result;
         case 'requestAuth':
           // This is called by server to request credentials from client
@@ -865,6 +869,21 @@ export class GitService {
       return true;
     } catch (error) {
       // Exit code 1 means file is not ignored
+      return false;
+    }
+  }
+
+  /**
+   * Check if directory is a git repository
+   * Uses git rev-parse --is-inside-work-tree
+   */
+  private async isInitialized(dir: string, params: any): Promise<boolean> {
+    try {
+      const { stdout } = await this.execGit(['rev-parse', '--is-inside-work-tree'], { cwd: dir });
+      // Exit code 0 and stdout "true" means it's a git repository
+      return stdout.trim() === 'true';
+    } catch (error) {
+      // Exit code 128 means not a git repository
       return false;
     }
   }
