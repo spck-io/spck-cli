@@ -97,7 +97,7 @@ describe('TerminalService', () => {
     (SerializeAddon as unknown as jest.Mock).mockImplementation(() => mockSerializeAddon);
 
     // Create service
-    service = new TerminalService(mockSocket, 10, 10000, '/test/root');
+    service = new TerminalService(() => mockSocket, 10, 10000, '/test/root');
 
     // Reset handlers
     ptyDataHandler = null;
@@ -169,7 +169,7 @@ describe('TerminalService', () => {
 
     it('should enforce terminal limit', async () => {
       // Create service with limit of 2
-      service = new TerminalService(mockSocket, 2, 10000, '/test/root');
+      service = new TerminalService(() => mockSocket, 2, 10000, '/test/root');
 
       // Create 2 terminals successfully
       await service.handle('create', { cols: 80, rows: 24 });
@@ -282,7 +282,7 @@ describe('TerminalService', () => {
         ...mockSocket,
         data: { uid: 'different-user' },
       };
-      const otherService = new TerminalService(otherSocket, 10, 10000, '/test/root');
+      const otherService = new TerminalService(() => otherSocket, 10, 10000, '/test/root');
 
       // Try to activate terminal from different user
       await expect(
@@ -333,7 +333,7 @@ describe('TerminalService', () => {
         ...mockSocket,
         data: { uid: 'different-user' },
       };
-      const otherService = new TerminalService(otherSocket, 10, 10000, '/test/root');
+      const otherService = new TerminalService(() => otherSocket, 10, 10000, '/test/root');
 
       await expect(
         otherService.handle('send', { terminalId, data: 'test' })
@@ -370,7 +370,7 @@ describe('TerminalService', () => {
         ...mockSocket,
         data: { uid: 'different-user' },
       };
-      const otherService = new TerminalService(otherSocket, 10, 10000, '/test/root');
+      const otherService = new TerminalService(() => otherSocket, 10, 10000, '/test/root');
 
       await expect(
         otherService.handle('resize', { terminalId, cols: 100, rows: 50 })
@@ -437,7 +437,7 @@ describe('TerminalService', () => {
         ...mockSocket,
         data: { uid: 'different-user' },
       };
-      const otherService = new TerminalService(otherSocket, 10, 10000, '/test/root');
+      const otherService = new TerminalService(() => otherSocket, 10, 10000, '/test/root');
 
       await expect(
         otherService.handle('destroy', { terminalId })
@@ -483,7 +483,7 @@ describe('TerminalService', () => {
         ...mockSocket,
         data: { uid: 'different-user' },
       };
-      const otherService = new TerminalService(otherSocket, 10, 10000, '/test/root');
+      const otherService = new TerminalService(() => otherSocket, 10, 10000, '/test/root');
 
       await expect(
         otherService.handle('refresh', { terminalId })
@@ -518,7 +518,7 @@ describe('TerminalService', () => {
         ...mockSocket,
         data: { uid: 'different-user' },
       };
-      const otherService = new TerminalService(otherSocket, 10, 10000, '/test/root');
+      const otherService = new TerminalService(() => otherSocket, 10, 10000, '/test/root');
 
       // Different user should see empty list
       const result = await otherService.handle('list', {});

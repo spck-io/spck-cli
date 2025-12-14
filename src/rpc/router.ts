@@ -13,6 +13,7 @@ export class RPCRouter {
   private static gitService: GitService;
   private static searchService: SearchService;
   private static terminalServices: Map<string, TerminalService> = new Map();
+  private static currentSockets: Map<string, AuthenticatedSocket> = new Map();
 
   /**
    * Initialize services
@@ -28,9 +29,22 @@ export class RPCRouter {
    */
   private static getTerminalService(socket: AuthenticatedSocket): TerminalService {
     const uid = socket.data.uid;
+
+    // Update current socket for this UID (handles reconnections)
+    this.currentSockets.set(uid, socket);
+
     if (!this.terminalServices.has(uid)) {
-      this.terminalServices.set(uid, new TerminalService(socket));
+      // Create new service with getter function that returns current socket
+      const getSocket = () => {
+        const currentSocket = this.currentSockets.get(uid);
+        if (!currentSocket) {
+          throw new Error(`No active socket for UID: ${uid}`);
+        }
+        return currentSocket;
+      };
+      this.terminalServices.set(uid, new TerminalService(getSocket));
     }
+
     return this.terminalServices.get(uid)!;
   }
 
@@ -99,6 +113,7 @@ export class RPCRouter {
     if (service) {
       service.cleanup();
       this.terminalServices.delete(uid);
+      this.currentSockets.delete(uid);
     }
   }
 }

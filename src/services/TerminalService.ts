@@ -18,6 +18,7 @@ interface TerminalSession {
   exited: boolean;
   exitCode?: number;
   uid: string;
+  pendingWrites: number; // Track number of pending write operations
 }
 
 export class TerminalService {
@@ -25,7 +26,7 @@ export class TerminalService {
   private activeTerminalId: string | null = null;
 
   constructor(
-    private socket: AuthenticatedSocket,
+    private getSocket: () => AuthenticatedSocket,
     private maxTerminals: number = 10,
     private maxBufferedLines: number = 10000,
     private rootPath: string = process.cwd()
@@ -35,7 +36,7 @@ export class TerminalService {
    * Get UID from socket with fallback
    */
   private getUid(): string {
-    return this.socket.data?.uid || 'unknown';
+    return this.getSocket().data?.uid || 'unknown';
   }
 
   /**
@@ -139,11 +140,23 @@ export class TerminalService {
 
     // Connect PTY to xterm buffer
     ptyProcess.onData((data) => {
-      xterm.write(data);
+      const session = this.sessions.get(terminalId);
+      if (session) {
+        // Track pending write
+        session.pendingWrites++;
+
+        // Write to xterm with callback
+        xterm.write(data, () => {
+          // Decrement pending writes when complete
+          if (session.pendingWrites > 0) {
+            session.pendingWrites--;
+          }
+        });
+      }
 
       // If this is the active terminal, stream to client
       if (this.activeTerminalId === terminalId) {
-        this.socket.emit('rpc', {
+        this.getSocket().emit('rpc', {
           jsonrpc: '2.0',
           method: 'terminal.output',
           params: { terminalId, data },
@@ -159,7 +172,7 @@ export class TerminalService {
         session.exitCode = exitCode;
 
         // Notify client
-        this.socket.emit('rpc', {
+        this.getSocket().emit('rpc', {
           jsonrpc: '2.0',
           method: 'terminal.exited',
           params: { terminalId, exitCode },
@@ -177,10 +190,11 @@ export class TerminalService {
       rows: params.rows || 24,
       exited: false,
       uid,
+      pendingWrites: 0,
     });
 
     // Send initial buffer
-    this.sendBufferRefresh(terminalId);
+    await this.sendBufferRefresh(terminalId);
 
     return terminalId;
   }
@@ -230,7 +244,7 @@ export class TerminalService {
     this.activeTerminalId = params.terminalId;
 
     // Send full buffer refresh
-    this.sendBufferRefresh(params.terminalId);
+    await this.sendBufferRefresh(params.terminalId);
   }
 
   /**
@@ -297,7 +311,7 @@ export class TerminalService {
       throw createRPCError(ErrorCode.PERMISSION_DENIED, 'Permission denied');
     }
 
-    this.sendBufferRefresh(params.terminalId);
+    await this.sendBufferRefresh(params.terminalId);
   }
 
   /**
@@ -313,15 +327,33 @@ export class TerminalService {
   /**
    * Send buffer refresh notification
    */
-  private sendBufferRefresh(terminalId: string): void {
+  private async sendBufferRefresh(terminalId: string): Promise<void> {
     const session = this.sessions.get(terminalId);
     if (!session) return;
 
+    // Wait for pending writes to complete
+    const waitForWrites = async () => {
+      const maxWaitTime = 5000; // 5 seconds max
+      const checkInterval = 10; // Check every 10ms
+      let elapsed = 0;
+
+      while (session.pendingWrites > 0 && elapsed < maxWaitTime) {
+        await new Promise(resolve => setTimeout(resolve, checkInterval));
+        elapsed += checkInterval;
+      }
+
+      if (elapsed >= maxWaitTime) {
+        console.warn(`Timeout waiting for pending writes (${session.pendingWrites} remaining)`);
+      }
+    };
+
+    await waitForWrites();
+
     // Serialize xterm buffer
     const buffer = session.serializeAddon.serialize();
-
+    console.log("buffer", buffer)
     // Send to client
-    this.socket.emit('rpc', {
+    this.getSocket().emit('rpc', {
       jsonrpc: '2.0',
       method: 'terminal.bufferRefresh',
       params: { terminalId, buffer },
