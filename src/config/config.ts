@@ -115,7 +115,15 @@ export function createDefaultConfig(overrides: Partial<ServerConfig> = {}): Serv
     },
     filesystem: {
       maxFileSize: '100MB',
-      watchIgnorePatterns: ['.git', '.spck-editor', 'node_modules', '*.log', '.DS_Store', 'dist', 'build'],
+      watchIgnorePatterns: [
+        '**/.git/**',
+        '**/.spck-editor/**',
+        '**/node_modules/**',
+        '**/*.log',
+        '**/.DS_Store',
+        '**/dist/**',
+        '**/build/**'
+      ],
     },
     ...overrides,
   };
