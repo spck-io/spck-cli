@@ -15,20 +15,11 @@ import { ErrorCode, createRPCError, AuthenticatedSocket } from '../types';
 import { logSearchRead } from '../utils/logger';
 import { isRipgrepAvailable, executeRipgrep, executeRipgrepStream } from '../utils/ripgrep';
 
-interface SearchParams {
-  path: string;
-  maxMatchPerFile: number;
-  maxLength: number;
-  searchTerm: string;
-  matchCase: boolean;
-  useRegEx: boolean;
-  onlyWholeWords: boolean;
-}
-
 interface StreamSearchParams {
   glob: string;
   rootDir?: string;
   maxResults: number;
+  maxLength: number;
   searchTerm: string;
   matchCase: boolean;
   useRegEx: boolean;
@@ -72,118 +63,160 @@ export class SearchService {
   }
 
   /**
-   * Search using ripgrep
+   * Check if character is a word boundary (space or punctuation)
    */
-  private async searchWithRipgrep(
-    absolutePath: string,
-    relativePath: string,
-    params: SearchParams
-  ): Promise<SearchResult[] | null> {
-    const { searchTerm, matchCase, useRegEx, onlyWholeWords, maxMatchPerFile, maxLength } = params;
+  private isWordBoundary(char: string): boolean {
+    return /[\s.,;:!?()\[\]{}]/.test(char);
+  }
 
-    // Build ripgrep arguments
-    const args: string[] = [
-      '--json',              // Output as JSON for easy parsing
-      '--max-count', String(maxMatchPerFile), // Limit matches per file
-      '--max-columns', String(maxLength * 2), // Limit line length
-    ];
+  /**
+   * Find word boundary going backwards from position
+   */
+  private findWordBoundaryBackward(text: string, pos: number): number {
+    if (pos <= 0) return 0;
 
-    // Case sensitivity
-    if (matchCase) {
-      args.push('--case-sensitive');
-    } else {
-      args.push('--ignore-case');
+    // Move back to find a word boundary
+    for (let i = pos; i >= 0; i--) {
+      if (this.isWordBoundary(text[i])) {
+        // Return position after the boundary character
+        return i + 1;
+      }
+    }
+    return 0;
+  }
+
+  /**
+   * Find word boundary going forward from position
+   */
+  private findWordBoundaryForward(text: string, pos: number): number {
+    if (pos >= text.length) return text.length;
+
+    // Move forward to find a word boundary
+    for (let i = pos; i < text.length; i++) {
+      if (this.isWordBoundary(text[i])) {
+        // Return position of the boundary character
+        return i;
+      }
+    }
+    return text.length;
+  }
+
+  /**
+   * Trim line text to show context around match
+   * - Trims to word boundaries
+   * - Adds "…" prefix/suffix if trimmed
+   * - Returns trimmed line and offset
+   */
+  private trimLineToMatch(lineText: string, matchStart: number, matchEnd: number, maxLength: number): { line: string; offset: number } {
+    // Default maxLength if not provided or invalid
+    if (!maxLength || maxLength <= 0) {
+      maxLength = 500;
     }
 
-    // Regex mode
-    if (!useRegEx) {
-      args.push('--fixed-strings'); // Literal string search
+    // Ensure valid match positions
+    if (matchStart < 0 || matchEnd > lineText.length || matchStart >= matchEnd) {
+      return { line: lineText, offset: 0 };
     }
 
-    // Whole words
-    if (onlyWholeWords) {
-      args.push('--word-regexp');
+    // If line is short enough, return as-is
+    if (lineText.length <= maxLength) {
+      return { line: lineText, offset: 0 };
     }
 
-    // Add pattern and file path
-    args.push('--', searchTerm, absolutePath);
+    const matchLength = matchEnd - matchStart;
 
-    // Execute ripgrep
-    const { stdout, exitCode } = await executeRipgrep(args, {
-      timeout: 30000
-    });
-
-    // Exit code 0 = matches found, 1 = no matches, anything else = error
-    if (exitCode !== 0 && exitCode !== 1) {
-      throw new Error(`Ripgrep exited with code ${exitCode}`);
+    // If match itself is longer than maxLength, just show the match
+    if (matchLength >= maxLength) {
+      const trimmed = lineText.substring(matchStart, matchStart + maxLength);
+      return {
+        line: '…' + trimmed + '…',
+        offset: matchStart
+      };
     }
 
-    if (exitCode === 1 || !stdout) {
-      return null; // No matches found
-    }
+    // Calculate initial context on each side
+    const contextPerSide = Math.floor((maxLength - matchLength) / 2);
 
-    // Parse ripgrep JSON output
-    const results: SearchResult[] = [];
-    const lines = stdout.trim().split('\n');
+    // Initial positions
+    let start = Math.max(0, matchStart - contextPerSide);
+    let end = Math.min(lineText.length, matchEnd + contextPerSide);
 
-    for (const line of lines) {
-      if (!line) continue;
-
-      try {
-        const json = JSON.parse(line);
-
-        // Ripgrep outputs different message types, we only want 'match' messages
-        if (json.type === 'match') {
-          const data = json.data;
-          const lineText = data.lines.text;
-          const submatches = data.submatches || [];
-
-          // Process each submatch in the line
-          for (const submatch of submatches) {
-            const matchStart = submatch.start;
-            const matchEnd = submatch.end;
-            const matchValue = lineText.substring(matchStart, matchEnd);
-
-            // Get surrounding context
-            const contextStart = Math.max(0, matchStart - Math.floor((maxLength - matchValue.length) / 2));
-            const contextEnd = Math.min(lineText.length, matchEnd + Math.floor((maxLength - matchValue.length) / 2));
-            const context = lineText.substring(contextStart, contextEnd);
-
-            results.push({
-              start: {
-                row: data.line_number - 1, // ripgrep uses 1-indexed lines
-                column: matchStart
-              },
-              end: {
-                row: data.line_number - 1,
-                column: matchEnd
-              },
-              range: {
-                start: data.absolute_offset + contextStart,
-                end: data.absolute_offset + contextEnd
-              },
-              line: context,
-              value: matchValue,
-              match: {
-                start: matchStart - contextStart,
-                end: matchEnd - contextStart
-              },
-              path: relativePath
-            });
-
-            // Stop if we've reached the max matches
-            if (results.length >= maxMatchPerFile) {
-              return results;
-            }
-          }
-        }
-      } catch (error) {
-        // Skip malformed JSON lines
-        continue;
+    // Adjust to word boundaries
+    if (start > 0) {
+      const wordStart = this.findWordBoundaryBackward(lineText, start);
+      // Only use word boundary if it doesn't shrink the context too much
+      if (matchStart - wordStart >= contextPerSide * 0.5) {
+        start = wordStart;
       }
     }
 
-    return results.length > 0 ? results : null;
+    if (end < lineText.length) {
+      const wordEnd = this.findWordBoundaryForward(lineText, end);
+      // Only use word boundary if it doesn't shrink the context too much
+      if (wordEnd - matchEnd >= contextPerSide * 0.5) {
+        end = wordEnd;
+      }
+    }
+
+    // Try to extend to include more complete words if we have room
+    let currentLength = end - start;
+
+    // Extend backward
+    while (start > 0 && currentLength < maxLength) {
+      const prevBoundary = this.findWordBoundaryBackward(lineText, start - 1);
+
+      // Break if we didn't move (no progress)
+      if (prevBoundary >= start) break;
+
+      const newLength = end - prevBoundary;
+
+      // Don't extend if it would exceed maxLength by too much (>20%)
+      if (newLength > maxLength * 1.2) break;
+
+      start = prevBoundary;
+      currentLength = newLength;
+
+      if (currentLength >= maxLength) break;
+    }
+
+    // Extend forward
+    while (end < lineText.length && currentLength < maxLength) {
+      const nextBoundary = this.findWordBoundaryForward(lineText, end + 1);
+
+      // Break if we didn't move (no progress)
+      if (nextBoundary <= end) break;
+
+      const newLength = nextBoundary - start;
+
+      // Don't extend if it would exceed maxLength by too much (>20%)
+      if (newLength > maxLength * 1.2) break;
+
+      end = nextBoundary;
+      currentLength = newLength;
+
+      if (currentLength >= maxLength) break;
+    }
+
+    // Build result with ellipsis
+    let result = lineText.substring(start, end);
+    let adjustedOffset = start;
+
+    // Add leading ellipsis if not at start
+    if (start > 0) {
+      result = '…' + result;
+      // Adjust offset to account for the leading ellipsis
+      adjustedOffset = start - 1;
+    }
+
+    // Add trailing ellipsis if not at end
+    if (end < lineText.length) {
+      result = result + '…';
+    }
+
+    return {
+      line: result,
+      offset: adjustedOffset
+    };
   }
 
   /**
@@ -192,7 +225,7 @@ export class SearchService {
    * Sends results in batches of 50 via RPC notifications
    */
   private async findWithStream(params: StreamSearchParams, socket: AuthenticatedSocket): Promise<void> {
-    const { glob, rootDir, maxResults, searchTerm, matchCase, useRegEx, onlyWholeWords } = params;
+    const { glob, maxLength, maxResults, searchTerm, matchCase, useRegEx, onlyWholeWords } = params;
     const uid = socket.data.uid;
 
     // Check ripgrep availability
@@ -239,12 +272,12 @@ export class SearchService {
     try {
       let batch: SearchResult[] = [];
       let totalResults = 0;
-      const searchRoot = rootDir || this.rootPath;
+      const searchRoot = this.rootPath;
 
       // Execute ripgrep with streaming - process results as they arrive
-      await executeRipgrepStream(args, {
+      await executeRipgrepStream(searchRoot, args, {
         timeout: 300000, // 5 minute timeout for large searches
-        onLine: (line) => {
+        onLine: (line: string) => {
           if (totalResults >= maxResults) return;
 
           try {
@@ -253,8 +286,13 @@ export class SearchService {
             // Only process match messages
             if (json.type === 'match') {
               const data = json.data;
-              const lineText = data.lines.text;
+              const lineText = data.lines?.text || '';
               const submatches = data.submatches || [];
+
+              // Skip if no line text
+              if (!lineText) {
+                return;
+              }
 
               // Process each submatch
               for (const submatch of submatches) {
@@ -263,6 +301,13 @@ export class SearchService {
                 const matchStart = submatch.start;
                 const matchEnd = submatch.end;
                 const matchValue = lineText.substring(matchStart, matchEnd);
+
+                // Trim line to show context around match
+                const { line: trimmedLine, offset: trimOffset } = this.trimLineToMatch(lineText, matchStart, matchEnd, maxLength);
+
+                // Calculate match positions relative to trimmed line
+                const relativeMatchStart = matchStart - trimOffset;
+                const relativeMatchEnd = matchEnd - trimOffset;
 
                 // Get file path relative to root
                 const relativePath = path.relative(searchRoot, data.path.text);
@@ -280,18 +325,18 @@ export class SearchService {
                     start: data.absolute_offset + matchStart,
                     end: data.absolute_offset + matchEnd
                   },
-                  line: lineText,
+                  line: trimmedLine,
                   value: matchValue,
                   match: {
-                    start: matchStart,
-                    end: matchEnd
+                    start: relativeMatchStart,
+                    end: relativeMatchEnd
                   },
                   path: relativePath
                 });
 
                 totalResults++;
 
-                if (batch.length >= 10) {
+                if (batch.length >= 25) {
                   socket.emit('rpc', {
                     jsonrpc: '2.0',
                     method: 'search.results',
@@ -364,11 +409,10 @@ export class SearchService {
   private async findWithStreamNode(params: StreamSearchParams, socket: AuthenticatedSocket): Promise<void> {
     const { glob, rootDir, maxResults, searchTerm, matchCase, useRegEx, onlyWholeWords } = params;
     const uid = socket.data.uid;
-    const searchRoot = rootDir || this.rootPath;
 
     try {
       // Get all files in the directory
-      const files = await this.getAllFiles(searchRoot, glob);
+      const files = await this.getAllFiles(this.rootPath, glob);
 
       let batch: SearchResult[] = [];
       let totalResults = 0;
@@ -378,7 +422,7 @@ export class SearchService {
         if (totalResults >= maxResults) break;
 
         try {
-          const relativePath = path.relative(searchRoot, file);
+          const relativePath = path.relative(this.rootPath, file);
 
           // Check file size
           const stats = await fs.promises.stat(file);
@@ -512,105 +556,10 @@ export class SearchService {
    */
   async handle(method: string, params: any, socket: AuthenticatedSocket): Promise<any> {
     switch (method) {
-      case 'findInFile':
-        return await this.findInFile(params, socket);
       case 'findWithStream':
         return await this.findWithStream(params, socket);
       default:
         throw createRPCError(ErrorCode.METHOD_NOT_FOUND, `Method not found: search.${method}`);
-    }
-  }
-
-  /**
-   * Find matches in a file
-   */
-  private async findInFile(params: SearchParams, socket: AuthenticatedSocket): Promise<SearchResult[] | null> {
-    const { path: relativePath, maxMatchPerFile, maxLength, searchTerm, matchCase, useRegEx, onlyWholeWords } = params;
-    const uid = socket.data.uid;
-    let searchMethod: string | undefined;
-    let fileSize: number | undefined;
-
-    try {
-      // Validate path is within root
-      const absolutePath = path.resolve(this.rootPath, relativePath);
-      if (!absolutePath.startsWith(this.rootPath)) {
-        throw createRPCError(ErrorCode.PERMISSION_DENIED, 'Access denied: path outside root');
-      }
-
-      // Check file exists and is readable
-      try {
-        const stats = await fs.promises.stat(absolutePath);
-        fileSize = stats.size;
-
-        // Skip directories
-        if (stats.isDirectory()) {
-          logSearchRead('findInFile', params, uid, true, undefined, { matches: 0, method: 'skipped-dir' });
-          return null;
-        }
-
-        // Skip files that are too large
-        if (stats.size > this.maxFileSize) {
-          logSearchRead('findInFile', params, uid, true, undefined, { matches: 0, method: 'skipped-large' });
-          return null;
-        }
-
-        // Skip empty files
-        if (stats.size === 0) {
-          logSearchRead('findInFile', params, uid, true, undefined, { matches: 0, method: 'skipped-empty' });
-          return null;
-        }
-      } catch (error: any) {
-        if (error.code === 'ENOENT') {
-          logSearchRead('findInFile', params, uid, true, undefined, { matches: 0, method: 'not-found' });
-          return null;
-        }
-        throw createRPCError(ErrorCode.INTERNAL_ERROR, `Failed to stat file: ${error.message}`);
-      }
-
-      // Try ripgrep first if available
-      await this.checkRipgrepAvailability();
-      let results: SearchResult[] | null = null;
-
-      if (this.ripgrepAvailable) {
-        try {
-          searchMethod = 'ripgrep';
-          results = await this.searchWithRipgrep(absolutePath, relativePath, params);
-        } catch (error: any) {
-          // Ripgrep failed, fall back to native search
-          console.warn('Ripgrep search failed, falling back to native search:', error.message);
-          results = null;
-        }
-      }
-
-      // Fall back to native search if ripgrep not available or failed
-      if (results === null) {
-        // Build regex pattern
-        const regex = this.buildRegExp(searchTerm, useRegEx, matchCase, onlyWholeWords);
-
-        // For small files, read entirely for better performance
-        const stats = await fs.promises.stat(absolutePath);
-        if (stats.size < this.chunkSize * 2) {
-          searchMethod = 'full-read';
-          results = await this.searchSmallFile(absolutePath, relativePath, regex, maxMatchPerFile, maxLength);
-        } else {
-          searchMethod = 'streaming';
-          results = await this.searchLargeFile(absolutePath, relativePath, regex, maxMatchPerFile, maxLength);
-        }
-      }
-
-      // Log success
-      const matches = results?.length || 0;
-      logSearchRead('findInFile', params, uid, true, undefined, {
-        matches,
-        method: searchMethod,
-        size: fileSize
-      });
-
-      return results;
-    } catch (error: any) {
-      // Log error
-      logSearchRead('findInFile', params, uid, false, error, { method: searchMethod, size: fileSize });
-      throw error;
     }
   }
 

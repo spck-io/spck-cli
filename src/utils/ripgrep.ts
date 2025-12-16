@@ -42,6 +42,7 @@ export async function isRipgrepAvailable(): Promise<boolean> {
  * Execute ripgrep search (buffered - waits for completion)
  */
 export async function executeRipgrep(
+  path: string,
   args: string[],
   options?: {
     timeout?: number;
@@ -51,7 +52,7 @@ export async function executeRipgrep(
 
   return new Promise((resolve, reject) => {
     const proc = spawn(rgCommand, args, {
-      cwd: process.cwd(),
+      cwd: path,
       stdio: 'pipe',
       shell: false
     });
@@ -104,6 +105,7 @@ export async function executeRipgrep(
  * Calls onLine for each line of output as it arrives
  */
 export async function executeRipgrepStream(
+  path: string,
   args: string[],
   options: {
     timeout?: number;
@@ -114,7 +116,7 @@ export async function executeRipgrepStream(
 
   return new Promise((resolve, reject) => {
     const proc = spawn(rgCommand, args, {
-      cwd: process.cwd(),
+      cwd: path,
       stdio: 'pipe',
       shell: false
     });
