@@ -66,7 +66,7 @@ export class SearchService {
    * Check if character is a word boundary (space or punctuation)
    */
   private isWordBoundary(char: string): boolean {
-    return /[\s.,;:!?()\[\]{}]/.test(char);
+    return /[\W]/.test(char);
   }
 
   /**
