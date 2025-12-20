@@ -2,24 +2,57 @@
  * Core type definitions for spck-networking server
  */
 
-import { Socket } from 'socket.io';
+// Minimal Socket interface for our needs (not dependent on socket.io)
+export interface SocketInterface {
+  id: string;
+  emit(event: string, data?: any): boolean;
+  on(event: string, listener: (...args: any[]) => void): this;
+  off(event: string, listener: (...args: any[]) => void): this;
+  broadcast: {
+    emit(event: string, data?: any): boolean;
+  };
+  data: {
+    uid: string;
+  };
+}
 
 // Server Configuration
 export interface ServerConfig {
   version: number;
-  port: number;
   root: string;
-  allowedUids: string[];
-  signingKey?: string;
-  firebaseProjectId: string;
+  proxyUrl: string;
+
   terminal: {
+    enabled: boolean;
     maxBufferedLines: number;
     maxTerminals: number;
   };
+
+  security: {
+    userAuthenticationEnabled: boolean;
+  };
+
   filesystem: {
     maxFileSize: string;
     watchIgnorePatterns: string[];
   };
+}
+
+// Connection Settings (stored in .spck-editor/connection-settings.json)
+export interface ConnectionSettings {
+  serverToken: string;
+  serverTokenExpiry: number;
+  clientId: string;
+  secret: string;
+  userId: string;
+  connectedAt: number;
+}
+
+// Firebase Credentials (stored in ~/.spck-editor/.credentials.json)
+export interface FirebaseCredentials {
+  firebaseToken: string;
+  firebaseTokenExpiry: number;
+  userId: string;
 }
 
 // JSON-RPC 2.0 Types
@@ -61,12 +94,8 @@ export interface JWTPayload {
   [key: string]: any;
 }
 
-// Socket with user data
-export interface AuthenticatedSocket extends Socket {
-  data: {
-    uid: string;
-  };
-}
+// Socket with user data (extends our minimal socket interface)
+export interface AuthenticatedSocket extends SocketInterface {}
 
 // Error codes (JSON-RPC 2.0 + custom)
 export enum ErrorCode {
@@ -113,4 +142,114 @@ export function createRPCError(
   data?: any
 ): JSONRPCError {
   return { code, message, data };
+}
+
+// Proxy Protocol Messages
+
+// Handshake protocol message types
+export type HandshakeMessageType =
+  | 'auth'
+  | 'auth_result'
+  | 'request_user_verification'
+  | 'user_verification'
+  | 'protocol_info'
+  | 'protocol_selected'
+  | 'connected';
+
+// Client authentication message (JWT signed with shared secret)
+export interface ClientAuthMessage {
+  type: 'auth';
+  jwt: string;
+}
+
+// Auth result message (CLI -> Client)
+export interface AuthResultMessage {
+  type: 'auth_result';
+  success: boolean;
+  error?: string;
+}
+
+// User verification request (CLI -> Client)
+export interface UserVerificationRequestMessage {
+  type: 'request_user_verification';
+  message: string;
+}
+
+// User verification response (Client -> CLI)
+export interface UserVerificationMessage {
+  type: 'user_verification';
+  firebaseToken: string;
+}
+
+// Protocol info message (CLI -> Client)
+export interface ProtocolInfoMessage {
+  type: 'protocol_info';
+  minVersion: number;
+  maxVersion: number;
+  features: {
+    terminal: boolean;
+    git: boolean;
+    fastSearch: boolean;
+  };
+}
+
+// Protocol selected message (Client -> CLI)
+export interface ProtocolSelectedMessage {
+  type: 'protocol_selected';
+  version: number;
+  ready: boolean;
+}
+
+// Connection established message (CLI -> Client)
+export interface ConnectedMessage {
+  type: 'connected';
+  message: string;
+}
+
+// Union type for all handshake messages
+export type HandshakeMessage =
+  | ClientAuthMessage
+  | AuthResultMessage
+  | UserVerificationRequestMessage
+  | UserVerificationMessage
+  | ProtocolInfoMessage
+  | ProtocolSelectedMessage
+  | ConnectedMessage;
+
+// Proxy server events (from server to CLI)
+export interface ProxyAuthenticatedEvent {
+  token: string;
+  clientId: string;
+  userId: string;
+  expiresAt: number;
+}
+
+export interface ProxyClientConnectingEvent {
+  connectionId: string;
+}
+
+export interface ProxyMultipleConnectionEvent {
+  existingConnections: string[];
+  newConnectionId: string;
+}
+
+export interface ProxyClientMessageEvent {
+  connectionId: string;
+  data: any;
+}
+
+export interface ProxyClientDisconnectedEvent {
+  connectionId: string;
+}
+
+export interface ProxyErrorEvent {
+  code: string;
+  message: string;
+  [key: string]: any;
+}
+
+// Tool detection result
+export interface ToolDetectionResult {
+  git: boolean;
+  ripgrep: boolean;
 }

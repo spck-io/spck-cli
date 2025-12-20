@@ -125,11 +125,11 @@ export class SearchService {
 
     const matchLength = matchEnd - matchStart;
 
-    // If match itself is longer than maxLength, just show the match
+    // If match itself is longer than maxLength, just show the start of the match
     if (matchLength >= maxLength) {
       const trimmed = lineText.substring(matchStart, matchStart + maxLength);
       return {
-        line: '…' + trimmed + '…',
+        line: trimmed,
         offset: matchStart
       };
     }
@@ -170,8 +170,8 @@ export class SearchService {
 
       const newLength = end - prevBoundary;
 
-      // Don't extend if it would exceed maxLength by too much (>20%)
-      if (newLength > maxLength * 1.2) break;
+      // Don't extend if it would exceed maxLength
+      if (newLength > maxLength) break;
 
       start = prevBoundary;
       currentLength = newLength;
@@ -188,8 +188,8 @@ export class SearchService {
 
       const newLength = nextBoundary - start;
 
-      // Don't extend if it would exceed maxLength by too much (>20%)
-      if (newLength > maxLength * 1.2) break;
+      // Don't extend if it would exceed maxLength
+      if (newLength > maxLength) break;
 
       end = nextBoundary;
       currentLength = newLength;
@@ -211,6 +211,30 @@ export class SearchService {
     // Add trailing ellipsis if not at end
     if (end < lineText.length) {
       result = result + '…';
+    }
+
+    // Final check: ensure result doesn't exceed maxLength
+    // This can happen when ellipsis are added
+    if (result.length > maxLength) {
+      // Trim from the end, preserving the match
+      const hasLeadingEllipsis = start > 0;
+      const hasTrailingEllipsis = end < lineText.length;
+
+      // Calculate how much to trim
+      const excess = result.length - maxLength;
+
+      // Remove trailing ellipsis temporarily if present
+      if (hasTrailingEllipsis) {
+        result = result.slice(0, -1);
+      }
+
+      // Trim the excess from the end
+      result = result.slice(0, result.length - excess);
+
+      // Re-add trailing ellipsis if it was there
+      if (hasTrailingEllipsis) {
+        result = result + '…';
+      }
     }
 
     return {

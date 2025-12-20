@@ -28,6 +28,11 @@ describe('FilesystemService', () => {
       id: 'test-socket',
       data: { uid: 'test-user' },
       emit: jest.fn(),
+      on: jest.fn(),
+      off: jest.fn(),
+      broadcast: {
+        emit: jest.fn(),
+      },
     };
   });
 
@@ -199,7 +204,7 @@ describe('FilesystemService', () => {
       const content = 'test content';
 
       const result = await service.handle(
-        'writeFile',
+        'write',
         { path: '/new.txt', contents: content },
         mockSocket
       );
@@ -215,7 +220,7 @@ describe('FilesystemService', () => {
       await fs.writeFile(path.join(testRoot, 'overwrite.txt'), 'old content');
 
       await service.handle(
-        'writeFile',
+        'write',
         { path: '/overwrite.txt', contents: 'new content' },
         mockSocket
       );
@@ -231,7 +236,7 @@ describe('FilesystemService', () => {
 
       await expect(
         service.handle(
-          'writeFile',
+          'write',
           {
             path: '/conflict.txt',
             contents: 'modified',
@@ -252,7 +257,7 @@ describe('FilesystemService', () => {
       const correctHash = crypto.createHash('sha256').update(original).digest('hex');
 
       const result = await service.handle(
-        'writeFile',
+        'write',
         {
           path: '/match.txt',
           contents: 'new content',
@@ -266,7 +271,7 @@ describe('FilesystemService', () => {
 
     it('should set executable permission when requested', async () => {
       await service.handle(
-        'writeFile',
+        'write',
         {
           path: '/script.sh',
           contents: '#!/bin/bash\necho hello',
@@ -394,12 +399,9 @@ describe('FilesystemService', () => {
       await expect(fs.access(dirPath)).rejects.toThrow();
     });
 
-    it('should throw error for non-existing file', async () => {
-      await expect(
-        service.handle('remove', { path: '/nonexistent.txt' }, mockSocket)
-      ).rejects.toMatchObject({
-        code: ErrorCode.FILE_NOT_FOUND,
-      });
+    it('should succeed for non-existing file (idempotent)', async () => {
+      const result = await service.handle('remove', { path: '/nonexistent.txt' }, mockSocket);
+      expect(result.success).toBe(true);
     });
   });
 
@@ -491,16 +493,16 @@ describe('FilesystemService', () => {
     it('should recursively list all files and folders', async () => {
       const result = await service.handle('readdirDeep', { path: '/deep' }, mockSocket);
 
-      expect(result.files).toContain(path.join(testRoot, 'deep', 'root.txt'));
-      expect(result.files).toContain(path.join(testRoot, 'deep', 'level1', 'file1.txt'));
-      expect(result.files).toContain(path.join(testRoot, 'deep', 'level1', 'level2', 'file2.txt'));
+      expect(result.files).toContain('deep/root.txt');
+      expect(result.files).toContain('deep/level1/file1.txt');
+      expect(result.files).toContain('deep/level1/level2/file2.txt');
 
-      expect(result.folders).toContain(path.join(testRoot, 'deep', 'level1'));
-      expect(result.folders).toContain(path.join(testRoot, 'deep', 'level1', 'level2'));
+      expect(result.folders).toContain('deep/level1');
+      expect(result.folders).toContain('deep/level1/level2');
 
-      // Should include .git and node_modules by default
-      expect(result.folders).toContain(path.join(testRoot, 'deep', '.git'));
-      expect(result.folders).toContain(path.join(testRoot, 'deep', 'node_modules'));
+      // Should NOT include .git by default (auto-ignored)
+      // node_modules is included
+      expect(result.folders).toContain('deep/node_modules');
     });
 
     it('should return only files when folders=false', async () => {
@@ -512,8 +514,8 @@ describe('FilesystemService', () => {
 
       expect(result.files.length).toBeGreaterThan(0);
       expect(result.folders).toEqual([]);
-      expect(result.files).toContain(path.join(testRoot, 'deep', 'root.txt'));
-      expect(result.files).toContain(path.join(testRoot, 'deep', 'level1', 'file1.txt'));
+      expect(result.files).toContain('deep/root.txt');
+      expect(result.files).toContain('deep/level1/file1.txt');
     });
 
     it('should return only folders when files=false', async () => {
@@ -525,8 +527,8 @@ describe('FilesystemService', () => {
 
       expect(result.files).toEqual([]);
       expect(result.folders.length).toBeGreaterThan(0);
-      expect(result.folders).toContain(path.join(testRoot, 'deep', 'level1'));
-      expect(result.folders).toContain(path.join(testRoot, 'deep', 'level1', 'level2'));
+      expect(result.folders).toContain('deep/level1');
+      expect(result.folders).toContain('deep/level1/level2');
     });
 
     it('should filter ignored names', async () => {
@@ -543,8 +545,8 @@ describe('FilesystemService', () => {
       expect(result.files.some((f: string) => f.includes('node_modules'))).toBe(false);
 
       // Should still contain other files/folders
-      expect(result.files).toContain(path.join(testRoot, 'deep', 'root.txt'));
-      expect(result.folders).toContain(path.join(testRoot, 'deep', 'level1'));
+      expect(result.files).toContain('deep/root.txt');
+      expect(result.folders).toContain('deep/level1');
     });
 
     it('should handle empty ignoreName gracefully', async () => {
@@ -645,7 +647,7 @@ describe('FilesystemService', () => {
         mockSocket
       );
 
-      expect(result.success).toBe(true);
+      expect(result).toBe('file');
 
       await expect(fs.access(path.join(testRoot, 'old.txt'))).rejects.toThrow();
       const content = await fs.readFile(path.join(testRoot, 'new.txt'), 'utf8');
@@ -678,7 +680,7 @@ describe('FilesystemService', () => {
         mockSocket
       );
 
-      expect(result.success).toBe(true);
+      expect(result).toBe('file');
 
       const content = await fs.readFile(path.join(testRoot, 'dst2.txt'), 'utf8');
       expect(content).toBe('source');
@@ -695,7 +697,7 @@ describe('FilesystemService', () => {
         mockSocket
       );
 
-      expect(result.success).toBe(true);
+      expect(result).toBe('file');
 
       const original = await fs.readFile(path.join(testRoot, 'original.txt'), 'utf8');
       const copied = await fs.readFile(path.join(testRoot, 'copy.txt'), 'utf8');

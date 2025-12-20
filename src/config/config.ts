@@ -11,6 +11,8 @@ const DEFAULT_CONFIG_PATH = '.spck-editor/spck-networking.config.json';
 /**
  * Load server configuration from file
  * If config file doesn't exist, runs setup wizard
+ * @throws {ConfigNotFoundError} if file doesn't exist
+ * @throws {Error} with code 'CORRUPTED' if file is corrupted
  */
 export function loadConfig(configPath?: string): ServerConfig {
   const resolvedPath = configPath || DEFAULT_CONFIG_PATH;
@@ -24,13 +26,28 @@ export function loadConfig(configPath?: string): ServerConfig {
     throw new ConfigNotFoundError(fullPath);
   }
 
-  const configData = fs.readFileSync(fullPath, 'utf8');
-  const config: ServerConfig = JSON.parse(configData);
+  try {
+    const configData = fs.readFileSync(fullPath, 'utf8');
+    const config: ServerConfig = JSON.parse(configData);
 
-  // Validate required fields
-  validateConfig(config);
+    // Validate required fields
+    validateConfig(config);
 
-  return config;
+    return config;
+  } catch (error: any) {
+    // JSON parse error or validation error
+    if (error instanceof SyntaxError || (error.message && error.message.includes('Invalid'))) {
+      console.warn('⚠️  Configuration file is corrupted:', fullPath);
+      console.warn('   Will run setup wizard to recreate...\n');
+      const corruptedError: any = new Error('Configuration file is corrupted');
+      corruptedError.code = 'CORRUPTED';
+      corruptedError.path = fullPath;
+      corruptedError.originalError = error;
+      throw corruptedError;
+    }
+    // Other errors (permission, etc.)
+    throw error;
+  }
 }
 
 /**
@@ -45,22 +62,31 @@ export class ConfigNotFoundError extends Error {
 
 /**
  * Save server configuration to file
+ * @throws {Error} with code 'EACCES' for permission errors
+ * @throws {Error} with code 'ENOSPC' for disk full errors
  */
 export function saveConfig(config: ServerConfig, configPath?: string): void {
   const resolvedPath = configPath || DEFAULT_CONFIG_PATH;
   const fullPath = path.resolve(process.cwd(), resolvedPath);
 
-  // Ensure directory exists
-  const dir = path.dirname(fullPath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  try {
+    // Ensure directory exists
+    const dir = path.dirname(fullPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    // Validate before saving
+    validateConfig(config);
+
+    // Write config file
+    fs.writeFileSync(fullPath, JSON.stringify(config, null, 2), 'utf8');
+  } catch (error: any) {
+    // Add context to error
+    error.path = error.path || fullPath;
+    error.operation = 'save config';
+    throw error;
   }
-
-  // Validate before saving
-  validateConfig(config);
-
-  // Write config file
-  fs.writeFileSync(fullPath, JSON.stringify(config, null, 2), 'utf8');
 }
 
 /**
@@ -71,10 +97,6 @@ function validateConfig(config: ServerConfig): void {
     throw new Error('Invalid config version. Expected version 1.');
   }
 
-  if (!config.port || typeof config.port !== 'number') {
-    throw new Error('Invalid or missing port in configuration.');
-  }
-
   if (!config.root || typeof config.root !== 'string') {
     throw new Error('Invalid or missing root directory in configuration.');
   }
@@ -83,15 +105,20 @@ function validateConfig(config: ServerConfig): void {
     throw new Error(`Root directory does not exist: ${config.root}`);
   }
 
-  // Allow empty allowedUids for development/setup
-  // But warn the user
-  if (!Array.isArray(config.allowedUids) || config.allowedUids.length === 0) {
-    console.warn('⚠️  WARNING: No allowed UIDs configured. Authentication will fail.');
-    console.warn('   Update "allowedUids" in the config file or run --setup');
+  if (!config.proxyUrl || typeof config.proxyUrl !== 'string') {
+    throw new Error('Invalid or missing proxy URL in configuration.');
   }
 
   if (!config.terminal || typeof config.terminal !== 'object') {
     throw new Error('Invalid or missing terminal configuration.');
+  }
+
+  if (typeof config.terminal.enabled !== 'boolean') {
+    throw new Error('Terminal enabled must be a boolean.');
+  }
+
+  if (!config.security || typeof config.security !== 'object') {
+    throw new Error('Invalid or missing security configuration.');
   }
 
   if (!config.filesystem || typeof config.filesystem !== 'object') {
@@ -105,13 +132,15 @@ function validateConfig(config: ServerConfig): void {
 export function createDefaultConfig(overrides: Partial<ServerConfig> = {}): ServerConfig {
   return {
     version: 1,
-    port: 3000,
     root: process.cwd(),
-    allowedUids: [],
-    firebaseProjectId: '',
+    proxyUrl: 'wss://proxy.spck.io:3002',
     terminal: {
-      maxBufferedLines: 10000,
+      enabled: true,
+      maxBufferedLines: 5000,
       maxTerminals: 10,
+    },
+    security: {
+      userAuthenticationEnabled: false,
     },
     filesystem: {
       maxFileSize: '100MB',

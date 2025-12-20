@@ -57,13 +57,16 @@ describe('TerminalService', () => {
     // Reset all mocks
     jest.clearAllMocks();
 
-    // Set up mock socket
+    // Set up mock socket (with all SocketInterface properties)
     mockSocket = {
       id: 'test-socket',
       data: { uid: 'test-user-123' },
       emit: jest.fn(),
       on: jest.fn(),
       off: jest.fn(),
+      broadcast: {
+        emit: jest.fn(),
+      },
     };
 
     // Set up mock PTY process
@@ -120,6 +123,7 @@ describe('TerminalService', () => {
         })
       );
       expect(XtermHeadless).toHaveBeenCalledWith({
+        allowProposedApi: true,
         cols: 80,
         rows: 24,
         scrollback: 10000,
@@ -540,7 +544,7 @@ describe('TerminalService', () => {
         ptyDataHandler('hello world');
       }
 
-      expect(mockXterm.write).toHaveBeenCalledWith('hello world');
+      expect(mockXterm.write).toHaveBeenCalledWith('hello world', expect.any(Function));
     });
 
     it('should stream output to client when terminal is active', async () => {

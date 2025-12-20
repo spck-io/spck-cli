@@ -29,10 +29,20 @@ describe('RPCRouter', () => {
       data: {
         uid: 'test-user-123',
       },
+      emit: jest.fn(),
+      on: jest.fn(),
+      off: jest.fn(),
+      broadcast: {
+        emit: jest.fn(),
+      },
     };
 
     // Clear all mocks
     jest.clearAllMocks();
+
+    // Clear router state between tests
+    (RPCRouter as any).terminalServices = new Map();
+    (RPCRouter as any).currentSockets = new Map();
 
     // Set up default mock implementations
     mockFsHandle = jest.fn().mockResolvedValue({ success: true });
@@ -44,11 +54,12 @@ describe('RPCRouter', () => {
     MockGitService.prototype.handle = mockGitHandle;
 
     // Create mock instance for terminal service that will be returned by constructor
-    const terminalMockInstance = {
+    // Use a single tracked cleanup function across all instances
+    const mockCleanupFn = jest.fn();
+    MockTerminalService.mockImplementation(() => ({
       handle: mockTerminalHandle,
-      cleanup: jest.fn(),
-    };
-    MockTerminalService.mockImplementation(() => terminalMockInstance as any);
+      cleanup: mockCleanupFn,
+    }) as any);
 
     // Initialize router
     RPCRouter.initialize('/test/root', {

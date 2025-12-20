@@ -41,15 +41,10 @@ async function main() {
     const { runSetup } = require('../dist/setup/wizard');
     await runSetup();
   } else {
-    // Start server
-    const { startServer } = require('../dist/index');
+    // Start proxy client (new proxy mode)
+    const { startProxyClient } = require('../dist/index');
 
-    // Override config if CLI options provided
-    if (argv.port || argv.root) {
-      console.log('Note: CLI options override config file values');
-    }
-
-    await startServer(argv.config);
+    await startProxyClient(argv.config);
   }
 }
 

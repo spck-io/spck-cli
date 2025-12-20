@@ -26,7 +26,7 @@ export class GitService {
    * Handle git RPC methods
    */
   async handle(method: string, params: any, socket: AuthenticatedSocket): Promise<any> {
-    const uid = socket.data?.uid || 'unknown';
+    const uid = socket.data.uid;
     let result: any;
     let error: any;
 
