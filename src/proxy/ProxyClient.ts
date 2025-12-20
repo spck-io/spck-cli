@@ -30,6 +30,7 @@ import {
   isServerTokenExpired,
 } from '../config/credentials';
 import { RPCRouter } from '../rpc/router';
+import { validateHandshakeTimestamp } from './handshake-validation';
 
 const KILL_TIMEOUT = 3000; // 3 seconds
 const SECRET_LENGTH = 40; // 40 characters
@@ -336,12 +337,14 @@ export class ProxyClient {
         throw new Error('Client ID mismatch');
       }
 
-      // Verify timestamp (within 5 minutes)
-      const age = Date.now() - payload.timestamp;
-      const maxAge = 5 * 60 * 1000; // 5 minutes
+      // Verify timestamp - replay attack prevention (1 minute tolerance)
+      const timestampValidation = validateHandshakeTimestamp(payload.timestamp, {
+        maxAge: 60 * 1000, // 1 minute
+        clockSkewTolerance: 60 * 1000, // 1 minute
+      });
 
-      if (age > maxAge || age < -60000) {
-        throw new Error('Timestamp invalid (message too old or clock skew)');
+      if (!timestampValidation.valid) {
+        throw new Error(timestampValidation.error);
       }
 
       console.log(`✅ Client authenticated: ${connectionId}`);

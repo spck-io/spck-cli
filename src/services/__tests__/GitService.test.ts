@@ -888,4 +888,192 @@ describe('GitService', () => {
       expect(result.commit.message.trim()).toBe(multilineMessage);
     });
   });
+
+  describe('Git Operations - listRemotes', () => {
+    it('should return empty array when no remotes', async () => {
+      await execGit(['init'], repoPath);
+
+      const result = await service.handle(
+        'listRemotes',
+        { dir: '/repo' },
+        mockSocket
+      );
+
+      expect(result.remotes).toEqual([]);
+    });
+
+    it('should list configured remotes', async () => {
+      await execGit(['init'], repoPath);
+      await execGit(['remote', 'add', 'origin', 'https://github.com/user/repo.git'], repoPath);
+      await execGit(['remote', 'add', 'upstream', 'https://github.com/upstream/repo.git'], repoPath);
+
+      const result = await service.handle(
+        'listRemotes',
+        { dir: '/repo' },
+        mockSocket
+      );
+
+      expect(result.remotes).toHaveLength(2);
+      expect(result.remotes.some((r: any) => r.remote === 'origin')).toBe(true);
+      expect(result.remotes.some((r: any) => r.remote === 'upstream')).toBe(true);
+      expect(result.remotes[0]).toHaveProperty('url');
+    });
+  });
+
+  describe('Git Operations - addRemote', () => {
+    it('should add a new remote', async () => {
+      await execGit(['init'], repoPath);
+
+      const result = await service.handle(
+        'addRemote',
+        { dir: '/repo', remote: 'origin', url: 'https://github.com/user/repo.git' },
+        mockSocket
+      );
+
+      expect(result.success).toBe(true);
+
+      // Verify remote was added
+      const remotes = await execGit(['remote', '-v'], repoPath);
+      expect(remotes).toContain('origin');
+      expect(remotes).toContain('https://github.com/user/repo.git');
+    });
+  });
+
+  describe('Git Operations - deleteRemote', () => {
+    it('should delete an existing remote', async () => {
+      await execGit(['init'], repoPath);
+      await execGit(['remote', 'add', 'origin', 'https://github.com/user/repo.git'], repoPath);
+
+      const result = await service.handle(
+        'deleteRemote',
+        { dir: '/repo', remote: 'origin' },
+        mockSocket
+      );
+
+      expect(result.success).toBe(true);
+
+      // Verify remote was deleted
+      const remotes = await execGit(['remote'], repoPath);
+      expect(remotes).not.toContain('origin');
+    });
+  });
+
+  describe('Git Operations - clearIndex', () => {
+    it('should clear the git index', async () => {
+      await execGit(['init'], repoPath);
+      await execGit(['config', 'user.email', 'test@example.com'], repoPath);
+      await execGit(['config', 'user.name', 'Test User'], repoPath);
+
+      // Add files to index
+      await fs.writeFile(path.join(repoPath, 'file1.txt'), 'content1');
+      await fs.writeFile(path.join(repoPath, 'file2.txt'), 'content2');
+      await execGit(['add', '.'], repoPath);
+
+      const result = await service.handle(
+        'clearIndex',
+        { dir: '/repo' },
+        mockSocket
+      );
+
+      expect(result.success).toBe(true);
+
+      // Verify index is empty
+      const status = await execGit(['status', '--porcelain'], repoPath);
+      expect(status).toContain('??'); // Files should be untracked now
+    });
+  });
+
+  describe('Git Operations - isIgnored', () => {
+    it('should return false for non-ignored files', async () => {
+      await execGit(['init'], repoPath);
+      await fs.writeFile(path.join(repoPath, 'regular.txt'), 'content');
+
+      const result = await service.handle(
+        'isIgnored',
+        { dir: '/repo', filepath: 'regular.txt' },
+        mockSocket
+      );
+
+      expect(result).toBe(false);
+    });
+
+    it('should return true for ignored files', async () => {
+      await execGit(['init'], repoPath);
+      await fs.writeFile(path.join(repoPath, '.gitignore'), '*.log\nnode_modules/');
+      await fs.writeFile(path.join(repoPath, 'test.log'), 'logs');
+
+      const result = await service.handle(
+        'isIgnored',
+        { dir: '/repo', filepath: 'test.log' },
+        mockSocket
+      );
+
+      expect(result).toBe(true);
+    });
+  });
+
+  describe('Git Operations - isInitialized', () => {
+    it('should return false for non-git directory', async () => {
+      const result = await service.handle(
+        'isInitialized',
+        { dir: '/repo' },
+        mockSocket
+      );
+
+      expect(result).toBe(false);
+    });
+
+    it('should return true for initialized git repository', async () => {
+      await execGit(['init'], repoPath);
+
+      const result = await service.handle(
+        'isInitialized',
+        { dir: '/repo' },
+        mockSocket
+      );
+
+      expect(result).toBe(true);
+    });
+  });
+
+  describe('Git Operations - resolveRef', () => {
+    it('should resolve HEAD to commit oid', async () => {
+      await execGit(['init'], repoPath);
+      await execGit(['config', 'user.email', 'test@example.com'], repoPath);
+      await execGit(['config', 'user.name', 'Test User'], repoPath);
+      await fs.writeFile(path.join(repoPath, 'file.txt'), 'content');
+      await execGit(['add', '.'], repoPath);
+      await execGit(['commit', '-m', 'Initial'], repoPath);
+
+      const expected = await execGit(['rev-parse', 'HEAD'], repoPath);
+
+      const result = await service.handle(
+        'resolveRef',
+        { dir: '/repo', ref: 'HEAD' },
+        mockSocket
+      );
+
+      expect(result.oid).toBe(expected);
+    });
+
+    it('should resolve branch name to commit oid', async () => {
+      await execGit(['init'], repoPath);
+      await execGit(['config', 'user.email', 'test@example.com'], repoPath);
+      await execGit(['config', 'user.name', 'Test User'], repoPath);
+      await fs.writeFile(path.join(repoPath, 'file.txt'), 'content');
+      await execGit(['add', '.'], repoPath);
+      await execGit(['commit', '-m', 'Initial'], repoPath);
+
+      const branch = await execGit(['symbolic-ref', '--short', 'HEAD'], repoPath);
+      const expected = await execGit(['rev-parse', 'HEAD'], repoPath);
+
+      const result = await service.handle(
+        'resolveRef',
+        { dir: '/repo', ref: branch },
+        mockSocket
+      );
+
+      expect(result.oid).toBe(expected);
+    });
+  });
 });

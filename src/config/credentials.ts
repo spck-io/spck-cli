@@ -100,25 +100,145 @@ export function saveCredentials(credentials: FirebaseCredentials): void {
 }
 
 /**
- * Check if Firebase token is expired
+ * Validate Firebase ID token structure and claims
+ * @param token - Firebase ID token to validate
+ * @param options - Validation options
+ * @returns Validation result with decoded token or error
  */
-export function isTokenExpired(credentials: FirebaseCredentials): boolean {
-  // Check expiry timestamp first
-  if (credentials.firebaseTokenExpiry && credentials.firebaseTokenExpiry < Date.now()) {
-    return true;
-  }
+export function validateFirebaseToken(
+  token: string,
+  options: {
+    projectId?: string;
+    checkExpiry?: boolean;
+    expiryBuffer?: number; // milliseconds
+  } = {}
+): { valid: boolean; decoded?: any; error?: string } {
+  const {
+    checkExpiry = true,
+    expiryBuffer = 5 * 60 * 1000, // 5 minutes default
+  } = options;
 
-  // Also decode JWT to double-check
   try {
-    const decoded = jwt.decode(credentials.firebaseToken) as any;
-    if (!decoded || !decoded.exp) {
-      return true;
+    // Decode token WITHOUT verification (we can't verify signature without Firebase public keys)
+    // NOTE: For full security, this should fetch and verify against Firebase's public keys
+    // See: https://firebase.google.com/docs/auth/admin/verify-id-tokens
+    const decoded = jwt.decode(token, { complete: true }) as any;
+
+    if (!decoded || !decoded.payload) {
+      return { valid: false, error: 'Invalid token format' };
     }
 
-    // Add 5-minute buffer for safety
-    const expiryWithBuffer = (decoded.exp * 1000) - (5 * 60 * 1000);
-    return Date.now() > expiryWithBuffer;
+    const payload = decoded.payload;
+
+    // Validate required claims exist
+    if (!payload.sub || !payload.iss || !payload.aud || !payload.exp || !payload.iat) {
+      return {
+        valid: false,
+        error: 'Missing required claims (sub, iss, aud, exp, iat)',
+      };
+    }
+
+    // Validate issuer format (should be https://securetoken.google.com/<project-id>)
+    if (!payload.iss.startsWith('https://securetoken.google.com/')) {
+      return {
+        valid: false,
+        error: `Invalid issuer: ${payload.iss}`,
+      };
+    }
+
+    // Validate audience matches project ID if provided
+    if (options.projectId && payload.aud !== options.projectId) {
+      return {
+        valid: false,
+        error: `Audience mismatch: expected ${options.projectId}, got ${payload.aud}`,
+      };
+    }
+
+    // Validate issued-at time is in the past
+    const now = Math.floor(Date.now() / 1000);
+    if (payload.iat > now) {
+      return {
+        valid: false,
+        error: 'Token issued in the future',
+      };
+    }
+
+    // Validate auth_time is in the past
+    if (payload.auth_time && payload.auth_time > now) {
+      return {
+        valid: false,
+        error: 'Auth time is in the future',
+      };
+    }
+
+    // Check expiry if requested
+    if (checkExpiry) {
+      const expiryWithBuffer = payload.exp - Math.floor(expiryBuffer / 1000);
+      if (now > expiryWithBuffer) {
+        return {
+          valid: false,
+          error: `Token expired at ${new Date(payload.exp * 1000).toISOString()}`,
+        };
+      }
+    }
+
+    // NOTE: This function does NOT verify signatures - it's for client-side pre-flight checks only.
+    // Full signature verification is handled by auth.ts:verifyFirebaseToken() which:
+    // - Fetches Firebase public keys from Google
+    // - Verifies RS256 signatures using jsonwebtoken
+    // - Handles key rotation via kid
+    // - Acts as the production security boundary
+    //
+    // This function is just an optimization to:
+    // - Avoid sending obviously invalid tokens over the network
+    // - Provide early validation feedback
+    // - Check token structure and basic claims
+
+    return {
+      valid: true,
+      decoded: payload,
+    };
+  } catch (error: any) {
+    return {
+      valid: false,
+      error: `Token validation error: ${error.message}`,
+    };
+  }
+}
+
+/**
+ * Check if Firebase token is expired
+ * Enhanced with comprehensive validation
+ */
+export function isTokenExpired(credentials: FirebaseCredentials): boolean {
+  // Primary check: Use expiry timestamp if available
+  if (credentials.firebaseTokenExpiry) {
+    const isExpiredByTimestamp = credentials.firebaseTokenExpiry < Date.now();
+    if (isExpiredByTimestamp) {
+      return true; // Definitely expired
+    }
+    // If timestamp says not expired, still do comprehensive validation
+    // but only if token looks like a valid JWT
+    if (!credentials.firebaseToken || typeof credentials.firebaseToken !== 'string') {
+      return true;
+    }
+    // Check if token looks like a JWT (has 3 parts separated by dots)
+    if (credentials.firebaseToken.split('.').length !== 3) {
+      // Not a JWT format, rely on timestamp only
+      return false;
+    }
+  }
+
+  // Secondary check: Validate token structure and claims
+  // This catches cases where timestamp is missing or token is malformed
+  try {
+    const validation = validateFirebaseToken(credentials.firebaseToken, {
+      checkExpiry: true,
+      expiryBuffer: 5 * 60 * 1000, // 5-minute safety buffer
+    });
+    return !validation.valid;
   } catch {
+    // If validation throws, assume expired for safety
     return true;
   }
 }
