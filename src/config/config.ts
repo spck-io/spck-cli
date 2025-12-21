@@ -4,7 +4,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { ServerConfig } from '../types';
+import { ServerConfig } from '../types.js';
 
 const DEFAULT_CONFIG_PATH = '.spck-editor/spck-networking.config.json';
 

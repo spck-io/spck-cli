@@ -17,8 +17,8 @@ import {
   getConnectionSettingsPath,
   clearCredentials,
   clearConnectionSettings,
-} from '../credentials';
-import { FirebaseCredentials } from '../../types';
+} from '../credentials.js';
+import { FirebaseCredentials } from '../../types.js';
 
 // Mock modules
 jest.mock('fs');

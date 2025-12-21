@@ -10,8 +10,8 @@ import {
   ConfigNotFoundError,
   createDefaultConfig,
   parseFileSize,
-} from '../config';
-import { ServerConfig } from '../../types';
+} from '../config.js';
+import { ServerConfig } from '../../types.js';
 
 // Mock fs module
 jest.mock('fs');

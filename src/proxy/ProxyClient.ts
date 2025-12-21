@@ -7,8 +7,8 @@ import { io, Socket } from 'socket.io-client';
 import * as crypto from 'crypto';
 import * as jwt from 'jsonwebtoken';
 import * as qrcode from 'qrcode-terminal';
-import { verifyFirebaseToken } from '../connection/auth';
-import { ProxySocketWrapper } from './ProxySocketWrapper';
+import { verifyFirebaseToken } from '../connection/auth.js';
+import { ProxySocketWrapper } from './ProxySocketWrapper.js';
 import {
   ServerConfig,
   ConnectionSettings,
@@ -23,14 +23,14 @@ import {
   JSONRPCResponse,
   ErrorCode,
   createRPCError,
-} from '../types';
+} from '../types.js';
 import {
   saveConnectionSettings,
   loadConnectionSettings,
   isServerTokenExpired,
-} from '../config/credentials';
-import { RPCRouter } from '../rpc/router';
-import { validateHandshakeTimestamp } from './handshake-validation';
+} from '../config/credentials.js';
+import { RPCRouter } from '../rpc/router.js';
+import { validateHandshakeTimestamp } from './handshake-validation.js';
 
 const KILL_TIMEOUT = 3000; // 3 seconds
 const SECRET_LENGTH = 40; // 40 characters

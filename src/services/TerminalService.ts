@@ -3,16 +3,19 @@
  */
 
 import * as pty from 'node-pty';
-import { Terminal as XtermHeadless } from '@xterm/headless';
-import { SerializeAddon } from '@xterm/addon-serialize';
-import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types';
-import { logTerminalRead, logTerminalWrite } from '../utils/logger';
+import XtermHeadlessModule from '@xterm/headless';
+import SerializeAddonModule from '@xterm/addon-serialize';
+import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types.js';
+import { logTerminalRead, logTerminalWrite } from '../utils/logger.js';
+
+const { Terminal: XtermHeadless } = XtermHeadlessModule as any;
+const { SerializeAddon } = SerializeAddonModule as any;
 
 interface TerminalSession {
   id: string;
   pty: pty.IPty;
-  xterm: XtermHeadless;
-  serializeAddon: SerializeAddon;
+  xterm: any;
+  serializeAddon: any;
   cols: number;
   rows: number;
   exited: boolean;

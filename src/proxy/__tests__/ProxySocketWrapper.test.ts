@@ -2,7 +2,7 @@
  * Unit tests for ProxySocketWrapper
  */
 
-import { ProxySocketWrapper } from '../ProxySocketWrapper';
+import { ProxySocketWrapper } from '../ProxySocketWrapper.js';
 
 describe('ProxySocketWrapper', () => {
   let wrapper: ProxySocketWrapper;

@@ -2,7 +2,7 @@
  * Tests for SearchService - Line Trimming Functionality
  */
 
-import { SearchService } from '../SearchService';
+import { SearchService } from '../SearchService.js';
 
 // Mock ripgrep utilities to prevent spawning child processes during tests
 jest.mock('../../utils/ripgrep', () => ({

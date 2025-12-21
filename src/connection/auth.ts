@@ -4,7 +4,7 @@
 
 import * as jwt from 'jsonwebtoken';
 import fetch from 'node-fetch';
-import { JWTPayload, ErrorCode, createRPCError } from '../types';
+import { JWTPayload, ErrorCode, createRPCError } from '../types.js';
 
 const FIREBASE_KEYS_URL =
   'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com';

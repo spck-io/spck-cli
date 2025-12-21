@@ -3,19 +3,19 @@
  * Connects to proxy server for remote filesystem, git, and terminal access
  */
 
-import { loadConfig, ConfigNotFoundError } from './config/config';
+import { loadConfig, ConfigNotFoundError } from './config/config.js';
 import {
   loadCredentials,
   isTokenExpired,
   loadConnectionSettings,
   isServerTokenExpired,
-} from './config/credentials';
-import { authenticateWithFirebase, refreshFirebaseToken } from './connection/firebase-auth';
-import { runSetup } from './setup/wizard';
-import { detectTools, displayFeatureSummary } from './utils/tool-detection';
-import { ProxyClient } from './proxy/ProxyClient';
-import { RPCRouter } from './rpc/router';
-import { ServerConfig, FirebaseCredentials } from './types';
+} from './config/credentials.js';
+import { authenticateWithFirebase, refreshFirebaseToken } from './connection/firebase-auth.js';
+import { runSetup } from './setup/wizard.js';
+import { detectTools, displayFeatureSummary } from './utils/tool-detection.js';
+import { ProxyClient } from './proxy/ProxyClient.js';
+import { RPCRouter } from './rpc/router.js';
+import { ServerConfig, FirebaseCredentials } from './types.js';
 
 let proxyClient: ProxyClient | null = null;
 
@@ -217,7 +217,7 @@ function setupGracefulShutdown(): void {
 }
 
 // Start client if run directly
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   setupGracefulShutdown();
 
   startProxyClient().catch((error) => {

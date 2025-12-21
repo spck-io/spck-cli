@@ -4,8 +4,8 @@
  */
 
 import * as readline from 'readline';
-import { ServerConfig } from '../types';
-import { saveConfig, createDefaultConfig } from '../config/config';
+import { ServerConfig } from '../types.js';
+import { saveConfig, createDefaultConfig } from '../config/config.js';
 
 const DEFAULT_PROXY_URL = 'wss://proxy.spck.io:3002';
 const USER_AUTH_DOCS_URL = 'https://docs.spck.io/networking/user-auth';

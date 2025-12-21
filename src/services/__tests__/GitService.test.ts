@@ -6,8 +6,8 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import { spawn } from 'child_process';
-import { GitService } from '../GitService';
-import { ErrorCode } from '../../types';
+import { GitService } from '../GitService.js';
+import { ErrorCode } from '../../types.js';
 
 // Helper to execute git commands for test setup
 async function execGit(args: string[], cwd: string): Promise<string> {

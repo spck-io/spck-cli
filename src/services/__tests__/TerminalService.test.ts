@@ -2,8 +2,8 @@
  * Tests for TerminalService
  */
 
-import { TerminalService } from '../TerminalService';
-import { ErrorCode } from '../../types';
+import { TerminalService } from '../TerminalService.js';
+import { ErrorCode } from '../../types.js';
 
 // Mock node-pty
 jest.mock('node-pty', () => {
@@ -41,8 +41,11 @@ jest.mock('@xterm/addon-serialize', () => {
 });
 
 import * as pty from 'node-pty';
-import { Terminal as XtermHeadless } from '@xterm/headless';
-import { SerializeAddon } from '@xterm/addon-serialize';
+import XtermHeadlessModule from '@xterm/headless';
+import SerializeAddonModule from '@xterm/addon-serialize';
+
+const { Terminal: XtermHeadless } = XtermHeadlessModule as any;
+const { SerializeAddon } = SerializeAddonModule as any;
 
 describe('TerminalService', () => {
   let service: TerminalService;

@@ -2,11 +2,11 @@
  * Tests for JSON-RPC Router
  */
 
-import { RPCRouter } from '../router';
-import { ErrorCode, createRPCError } from '../../types';
-import { FilesystemService } from '../../services/FilesystemService';
-import { GitService } from '../../services/GitService';
-import { TerminalService } from '../../services/TerminalService';
+import { RPCRouter } from '../router.js';
+import { ErrorCode, createRPCError } from '../../types.js';
+import { FilesystemService } from '../../services/FilesystemService.js';
+import { GitService } from '../../services/GitService.js';
+import { TerminalService } from '../../services/TerminalService.js';
 
 // Mock services
 jest.mock('../../services/FilesystemService');

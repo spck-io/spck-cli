@@ -2,6 +2,7 @@
   "name": "spck-networking",
   "version": "1.0.0",
   "description": "Unified network server for Spck Editor - provides remote filesystem, git, and terminal access",
+  "type": "module",
   "main": "dist/index.js",
   "bin": {
     "spck-networking": "./bin/server.js"
@@ -32,7 +33,7 @@
     "chokidar": "^3.6.0",
     "fossil-delta": "^1.0.2",
     "jsonwebtoken": "^9.0.2",
-    "node-fetch": "^2.7.0",
+    "node-fetch": "^3.3.2",
     "node-pty": "^1.0.0",
     "open": "^8.4.2",
     "qrcode-terminal": "^0.12.0",

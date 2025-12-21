@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as jwt from 'jsonwebtoken';
-import { FirebaseCredentials } from '../types';
+import { FirebaseCredentials } from '../types.js';
 
 /**
  * Get the user-level credentials directory

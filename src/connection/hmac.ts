@@ -3,7 +3,7 @@
  */
 
 import * as crypto from 'crypto';
-import { JSONRPCRequest, ErrorCode, createRPCError } from '../types';
+import { JSONRPCRequest, ErrorCode, createRPCError } from '../types.js';
 
 /**
  * Validate HMAC signature on JSON-RPC request

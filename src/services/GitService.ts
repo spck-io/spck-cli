@@ -4,8 +4,8 @@
 
 import { spawn } from 'child_process';
 import * as path from 'path';
-import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types';
-import { logGitRead, logGitWrite } from '../utils/logger';
+import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types.js';
+import { logGitRead, logGitWrite } from '../utils/logger.js';
 
 interface ExecGitOptions {
   cwd?: string;

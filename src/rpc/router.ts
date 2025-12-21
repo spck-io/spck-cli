@@ -2,11 +2,11 @@
  * JSON-RPC 2.0 request router
  */
 
-import { AuthenticatedSocket, JSONRPCRequest, ErrorCode, createRPCError } from '../types';
-import { FilesystemService } from '../services/FilesystemService';
-import { GitService } from '../services/GitService';
-import { TerminalService } from '../services/TerminalService';
-import { SearchService } from '../services/SearchService';
+import { AuthenticatedSocket, JSONRPCRequest, ErrorCode, createRPCError } from '../types.js';
+import { FilesystemService } from '../services/FilesystemService.js';
+import { GitService } from '../services/GitService.js';
+import { TerminalService } from '../services/TerminalService.js';
+import { SearchService } from '../services/SearchService.js';
 
 export class RPCRouter {
   private static filesystemService: FilesystemService;

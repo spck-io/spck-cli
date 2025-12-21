@@ -7,8 +7,8 @@ import * as http from 'http';
 import * as crypto from 'crypto';
 import * as jwt from 'jsonwebtoken';
 import open from 'open';
-import { FirebaseCredentials } from '../types';
-import { saveCredentials } from '../config/credentials';
+import { FirebaseCredentials } from '../types.js';
+import { saveCredentials } from '../config/credentials.js';
 
 const AUTH_TIMEOUT = 10 * 60 * 1000; // 10 minutes
 const FIREBASE_AUTH_BASE_URL = 'https://spck.io/firebase-auth';

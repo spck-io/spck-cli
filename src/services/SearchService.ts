@@ -11,9 +11,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { ErrorCode, createRPCError, AuthenticatedSocket } from '../types';
-import { logSearchRead } from '../utils/logger';
-import { isRipgrepAvailable, executeRipgrep, executeRipgrepStream } from '../utils/ripgrep';
+import { ErrorCode, createRPCError, AuthenticatedSocket } from '../types.js';
+import { logSearchRead } from '../utils/logger.js';
+import { isRipgrepAvailable, executeRipgrep, executeRipgrepStream } from '../utils/ripgrep.js';
 
 interface StreamSearchParams {
   glob: string;

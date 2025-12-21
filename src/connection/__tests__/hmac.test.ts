@@ -3,8 +3,8 @@
  */
 
 import * as crypto from 'crypto';
-import { validateHMAC, requireValidHMAC } from '../hmac';
-import { JSONRPCRequest, ErrorCode } from '../../types';
+import { validateHMAC, requireValidHMAC } from '../hmac.js';
+import { JSONRPCRequest, ErrorCode } from '../../types.js';
 
 describe('HMAC Validation', () => {
   const signingKey = 'test-signing-key-12345';

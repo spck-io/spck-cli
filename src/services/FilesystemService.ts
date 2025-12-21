@@ -8,9 +8,9 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import * as fossilDelta from 'fossil-delta';
 import writeFileAtomic from 'write-file-atomic';
-import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types';
-import { parseFileSize } from '../config/config';
-import { logFsRead, logFsWrite } from '../utils/logger';
+import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types.js';
+import { parseFileSize } from '../config/config.js';
+import { logFsRead, logFsWrite } from '../utils/logger.js';
 
 export class FilesystemService {
   constructor(

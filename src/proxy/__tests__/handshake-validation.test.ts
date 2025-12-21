@@ -2,7 +2,7 @@
  * Tests for handshake validation - Replay attack prevention
  */
 
-import { validateHandshakeTimestamp } from '../handshake-validation';
+import { validateHandshakeTimestamp } from '../handshake-validation.js';
 
 describe('validateHandshakeTimestamp - Replay Attack Prevention', () => {
   const ONE_MINUTE = 60 * 1000;

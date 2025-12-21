@@ -7,8 +7,8 @@ import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
 import * as fossilDelta from 'fossil-delta';
-import { FilesystemService } from '../FilesystemService';
-import { ErrorCode } from '../../types';
+import { FilesystemService } from '../FilesystemService.js';
+import { ErrorCode } from '../../types.js';
 
 describe('FilesystemService', () => {
   let service: FilesystemService;
