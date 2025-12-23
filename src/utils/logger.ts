@@ -19,7 +19,7 @@ if (!fs.existsSync(LOG_DIR)) {
  */
 function getCurrentLogFile(): string {
   const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-  return path.join(LOG_DIR, `spck-networking-${date}.log`);
+  return path.join(LOG_DIR, `spck-cli-${date}.log`);
 }
 
 /**
@@ -32,7 +32,7 @@ function cleanOldLogs(): void {
     const retentionMs = LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
     for (const file of files) {
-      if (file.startsWith('spck-networking-') && file.endsWith('.log')) {
+      if (file.startsWith('spck-cli-') && file.endsWith('.log')) {
         const filePath = path.join(LOG_DIR, file);
         const stats = fs.statSync(filePath);
 

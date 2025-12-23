@@ -20,7 +20,7 @@ const mockFs = fs as jest.Mocked<typeof fs>;
 
 describe('config', () => {
   const mockCwd = '/mock/project';
-  const defaultConfigPath = `${mockCwd}/.spck-editor/spck-networking.config.json`;
+  const defaultConfigPath = `${mockCwd}/.spck-editor/spck-cli.config.json`;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -194,7 +194,7 @@ describe('config', () => {
       saveConfig(validConfig);
 
       expect(mockFs.writeFileSync).toHaveBeenCalledWith(
-        expect.stringContaining('spck-networking.config.json'),
+        expect.stringContaining('spck-cli.config.json'),
         JSON.stringify(validConfig, null, 2),
         'utf8'
       );

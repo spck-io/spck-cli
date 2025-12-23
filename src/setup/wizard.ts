@@ -1,5 +1,5 @@
 /**
- * Interactive setup wizard for spck-networking
+ * Interactive setup wizard for spck-cli
  * Configures CLI to connect to proxy server
  */
 

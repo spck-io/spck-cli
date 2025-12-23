@@ -1,11 +1,11 @@
 {
-  "name": "spck-networking",
+  "name": "spck-cli",
   "version": "1.0.0",
   "description": "Unified network server for Spck Editor - provides remote filesystem, git, and terminal access",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "spck-networking": "./bin/server.js"
+    "spck-cli": "./bin/server.js"
   },
   "scripts": {
     "build": "tsc",

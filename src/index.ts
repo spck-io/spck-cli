@@ -79,7 +79,7 @@ export async function startProxyClient(configPath?: string): Promise<void> {
     if (!fs.existsSync(config.root)) {
       console.error(`\n❌ Root directory not found: ${config.root}\n`);
       console.error('Please ensure the directory exists and is accessible, or run setup wizard:');
-      console.error('  spck-networking --setup\n');
+      console.error('  spck-cli --setup\n');
       process.exit(1);
     }
 

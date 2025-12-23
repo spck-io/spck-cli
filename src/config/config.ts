@@ -1,12 +1,12 @@
 /**
- * Configuration management for spck-networking server
+ * Configuration management for spck-cli server
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import { ServerConfig } from '../types.js';
 
-const DEFAULT_CONFIG_PATH = '.spck-editor/spck-networking.config.json';
+const DEFAULT_CONFIG_PATH = '.spck-editor/spck-cli.config.json';
 
 /**
  * Load server configuration from file

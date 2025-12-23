@@ -1,5 +1,5 @@
 /**
- * Core type definitions for spck-networking server
+ * Core type definitions for spck-cli server
  */
 
 // Minimal Socket interface for our needs (not dependent on socket.io)

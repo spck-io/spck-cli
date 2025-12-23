@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * CLI entry point for spck-networking server
+ * CLI entry point for spck-cli server
  */
 
 const yargs = require('yargs/yargs');
@@ -13,7 +13,7 @@ const argv = yargs(hideBin(process.argv))
     alias: 'c',
     type: 'string',
     description: 'Path to configuration file',
-    default: '.spck-editor/spck-networking.config.json',
+    default: '.spck-editor/spck-cli.config.json',
   })
   .option('setup', {
     type: 'boolean',
