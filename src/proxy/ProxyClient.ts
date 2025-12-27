@@ -77,9 +77,10 @@ export class ProxyClient {
     // Determine if we're renewing an existing connection
     const existingToken = existingConnectionSettings?.serverToken;
 
-    // Create Socket.IO client
-    this.socket = io(config.proxyUrl, {
-      path: '/listen',
+    // Create Socket.IO client - connect to /listen namespace
+    // Note: /listen is a Socket.IO namespace, not an HTTP path
+    const namespaceUrl = config.proxyUrl + '/listen';
+    this.socket = io(namespaceUrl, {
       transports: ['websocket'],
       auth: {
         firebaseToken,
@@ -134,6 +135,7 @@ export class ProxyClient {
         return;
       }
 
+      const proxyUrl = this.config.proxyUrl;
       const timeout = setTimeout(() => {
         reject(new Error('Authentication timeout'));
       }, 30000); // 30 second timeout
@@ -145,12 +147,28 @@ export class ProxyClient {
 
       this.socket.once('error', (error: any) => {
         clearTimeout(timeout);
-        reject(error);
+        const enhancedError = new Error(
+          `Connection error: ${error.message || error.toString()}\n` +
+          `  Proxy URL: ${proxyUrl}\n` +
+          `  Namespace: /listen\n` +
+          `  Error type: ${error.type || 'unknown'}`
+        );
+        reject(enhancedError);
       });
 
       this.socket.once('connect_error', (error: any) => {
         clearTimeout(timeout);
-        reject(error);
+        const enhancedError = new Error(
+          `Failed to connect to proxy server\n` +
+          `  URL: ${proxyUrl}/listen\n` +
+          `  Error: ${error.message || error.toString()}\n` +
+          `  \n` +
+          `  Possible causes:\n` +
+          `  - Proxy server is not running (run: node bin/proxy-server.js)\n` +
+          `  - Incorrect proxy URL in config\n` +
+          `  - Network/firewall blocking connection`
+        );
+        reject(enhancedError);
       });
     });
   }
@@ -561,23 +579,63 @@ export class ProxyClient {
   private handleError(error: ProxyErrorEvent): void {
     console.error(`\n❌ Proxy error [${error.code}]: ${error.message}`);
 
-    if (error.code === 'subscription_required') {
-      console.error('\nThis feature requires a paid subscription.');
-      console.error('Visit https://spck.io/subscription to upgrade.\n');
-      process.exit(1);
+    switch (error.code) {
+      case 'subscription_error_4020':
+        console.error('\n⚠️  Your access token has expired or timed out.');
+        console.error('Please try again or re-authenticate with: spck auth login\n');
+        break;
+
+      case 'subscription_error_4021':
+        console.error('\n⚠️  Your login token has been revoked.');
+        console.error('Please re-authenticate: spck auth logout && spck auth login\n');
+        break;
+
+      case 'subscription_error_9996':
+        console.error('\n⚠️  Privacy policy consent required.');
+        console.error('Please accept the privacy policy in the Spck Editor app');
+        console.error('under Account Settings to use this feature.\n');
+        break;
+
+      case 'subscription_error_9997':
+        console.error('\n⚠️  Your account is being deleted.');
+        console.error('Please wait 72 hours before trying again.\n');
+        break;
+
+      case 'subscription_error_9998':
+        console.error('\n⛔ This account has been banned.');
+        console.error('Your account has been banned for violation of the');
+        console.error('Terms of Service agreement.\n');
+        break;
+
+      case 'subscription_check_failed':
+        console.error('\n⚠️  Unable to verify subscription status.');
+        console.error('This may be a temporary issue. Please try again later.\n');
+        break;
+
+      case 'subscription_required':
+        console.error('\n⚠️  This feature requires a paid subscription.');
+        console.error('Visit https://spck.io/subscription to upgrade.\n');
+        break;
+
+      case 'max_connections_reached': {
+        const maxConnections = (error as any).maxConnections || 5;
+        console.error(`\n⚠️  Maximum of ${maxConnections} CLI connections reached.`);
+        console.error('Close other CLI instances and try again.\n');
+        break;
+      }
+
+      case 'invalid_firebase_token':
+        console.error('\n⚠️  Firebase authentication failed.');
+        console.error('Please re-authenticate: spck auth login\n');
+        break;
+
+      default:
+        console.error('\n⚠️  A problem occurred when verifying your subscription.');
+        console.error(error.message)
+        break;
     }
 
-    if (error.code === 'max_connections_reached') {
-      console.error('\nMaximum of 5 CLI connections per account.');
-      console.error('Close other CLI instances and try again.\n');
-      process.exit(1);
-    }
-
-    if (error.code === 'invalid_firebase_token') {
-      console.error('\nFirebase authentication failed.');
-      console.error('Please re-authenticate and try again.\n');
-      process.exit(1);
-    }
+    process.exit(1);
   }
 
   /**

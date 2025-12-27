@@ -48,10 +48,18 @@ export interface ConnectionSettings {
   connectedAt: number;
 }
 
-// Firebase Credentials (stored in ~/.spck-editor/.credentials.json)
+// Stored credentials (persisted to ~/.spck-editor/.credentials.json)
+// Only refreshToken and userId are persisted - firebaseToken is generated on demand
+export interface StoredCredentials {
+  refreshToken: string;
+  userId: string;
+}
+
+// Firebase Credentials (runtime - includes ephemeral ID token)
 export interface FirebaseCredentials {
   firebaseToken: string;
   firebaseTokenExpiry: number;
+  refreshToken: string;
   userId: string;
 }
 

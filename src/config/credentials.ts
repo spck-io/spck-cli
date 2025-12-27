@@ -6,8 +6,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import * as jwt from 'jsonwebtoken';
-import { FirebaseCredentials } from '../types.js';
+import { StoredCredentials } from '../types.js';
 
 /**
  * Get the user-level credentials directory
@@ -31,10 +30,11 @@ export function getConnectionSettingsPath(): string {
 }
 
 /**
- * Load Firebase credentials from user-level storage
+ * Load stored credentials from user-level storage
+ * Returns only refreshToken + userId; firebaseToken is generated on demand
  * @throws {Error} with code 'CORRUPTED' if file is corrupted
  */
-export function loadCredentials(): FirebaseCredentials | null {
+export function loadCredentials(): StoredCredentials | null {
   const credentialsPath = getCredentialsPath();
 
   if (!fs.existsSync(credentialsPath)) {
@@ -43,17 +43,21 @@ export function loadCredentials(): FirebaseCredentials | null {
 
   try {
     const data = fs.readFileSync(credentialsPath, 'utf8');
-    const credentials: FirebaseCredentials = JSON.parse(data);
+    const credentials = JSON.parse(data);
 
-    // Validate structure
-    if (!credentials.firebaseToken || !credentials.userId) {
-      const error: any = new Error('Invalid credentials format - missing required fields');
+    // Validate required fields for stored credentials
+    if (!credentials.refreshToken || !credentials.userId) {
+      const error: any = new Error('Invalid credentials format - missing refreshToken or userId');
       error.code = 'CORRUPTED';
       error.path = credentialsPath;
       throw error;
     }
 
-    return credentials;
+    // Return only the stored fields (refreshToken + userId)
+    return {
+      refreshToken: credentials.refreshToken,
+      userId: credentials.userId
+    };
   } catch (error: any) {
     // JSON parse error or validation error
     if (error instanceof SyntaxError || error.code === 'CORRUPTED') {
@@ -71,11 +75,12 @@ export function loadCredentials(): FirebaseCredentials | null {
 }
 
 /**
- * Save Firebase credentials to user-level storage
+ * Save stored credentials to user-level storage
+ * Only persists refreshToken + userId (not firebaseToken or expiry)
  * @throws {Error} with code 'EACCES' for permission errors
  * @throws {Error} with code 'ENOSPC' for disk full errors
  */
-export function saveCredentials(credentials: FirebaseCredentials): void {
+export function saveCredentials(credentials: StoredCredentials): void {
   const credentialsDir = getCredentialsDir();
   const credentialsPath = getCredentialsPath();
 
@@ -85,10 +90,16 @@ export function saveCredentials(credentials: FirebaseCredentials): void {
       fs.mkdirSync(credentialsDir, { recursive: true, mode: 0o700 });
     }
 
+    // Only persist refreshToken + userId
+    const storedData: StoredCredentials = {
+      refreshToken: credentials.refreshToken,
+      userId: credentials.userId
+    };
+
     // Write credentials file with restricted permissions
     fs.writeFileSync(
       credentialsPath,
-      JSON.stringify(credentials, null, 2),
+      JSON.stringify(storedData, null, 2),
       { encoding: 'utf8', mode: 0o600 }
     );
   } catch (error: any) {
@@ -99,149 +110,6 @@ export function saveCredentials(credentials: FirebaseCredentials): void {
   }
 }
 
-/**
- * Validate Firebase ID token structure and claims
- * @param token - Firebase ID token to validate
- * @param options - Validation options
- * @returns Validation result with decoded token or error
- */
-export function validateFirebaseToken(
-  token: string,
-  options: {
-    projectId?: string;
-    checkExpiry?: boolean;
-    expiryBuffer?: number; // milliseconds
-  } = {}
-): { valid: boolean; decoded?: any; error?: string } {
-  const {
-    checkExpiry = true,
-    expiryBuffer = 5 * 60 * 1000, // 5 minutes default
-  } = options;
-
-  try {
-    // Decode token WITHOUT verification (we can't verify signature without Firebase public keys)
-    // NOTE: For full security, this should fetch and verify against Firebase's public keys
-    // See: https://firebase.google.com/docs/auth/admin/verify-id-tokens
-    const decoded = jwt.decode(token, { complete: true }) as any;
-
-    if (!decoded || !decoded.payload) {
-      return { valid: false, error: 'Invalid token format' };
-    }
-
-    const payload = decoded.payload;
-
-    // Validate required claims exist
-    if (!payload.sub || !payload.iss || !payload.aud || !payload.exp || !payload.iat) {
-      return {
-        valid: false,
-        error: 'Missing required claims (sub, iss, aud, exp, iat)',
-      };
-    }
-
-    // Validate issuer format (should be https://securetoken.google.com/<project-id>)
-    if (!payload.iss.startsWith('https://securetoken.google.com/')) {
-      return {
-        valid: false,
-        error: `Invalid issuer: ${payload.iss}`,
-      };
-    }
-
-    // Validate audience matches project ID if provided
-    if (options.projectId && payload.aud !== options.projectId) {
-      return {
-        valid: false,
-        error: `Audience mismatch: expected ${options.projectId}, got ${payload.aud}`,
-      };
-    }
-
-    // Validate issued-at time is in the past
-    const now = Math.floor(Date.now() / 1000);
-    if (payload.iat > now) {
-      return {
-        valid: false,
-        error: 'Token issued in the future',
-      };
-    }
-
-    // Validate auth_time is in the past
-    if (payload.auth_time && payload.auth_time > now) {
-      return {
-        valid: false,
-        error: 'Auth time is in the future',
-      };
-    }
-
-    // Check expiry if requested
-    if (checkExpiry) {
-      const expiryWithBuffer = payload.exp - Math.floor(expiryBuffer / 1000);
-      if (now > expiryWithBuffer) {
-        return {
-          valid: false,
-          error: `Token expired at ${new Date(payload.exp * 1000).toISOString()}`,
-        };
-      }
-    }
-
-    // NOTE: This function does NOT verify signatures - it's for client-side pre-flight checks only.
-    // Full signature verification is handled by auth.ts:verifyFirebaseToken() which:
-    // - Fetches Firebase public keys from Google
-    // - Verifies RS256 signatures using jsonwebtoken
-    // - Handles key rotation via kid
-    // - Acts as the production security boundary
-    //
-    // This function is just an optimization to:
-    // - Avoid sending obviously invalid tokens over the network
-    // - Provide early validation feedback
-    // - Check token structure and basic claims
-
-    return {
-      valid: true,
-      decoded: payload,
-    };
-  } catch (error: any) {
-    return {
-      valid: false,
-      error: `Token validation error: ${error.message}`,
-    };
-  }
-}
-
-/**
- * Check if Firebase token is expired
- * Enhanced with comprehensive validation
- */
-export function isTokenExpired(credentials: FirebaseCredentials): boolean {
-  // Primary check: Use expiry timestamp if available
-  if (credentials.firebaseTokenExpiry) {
-    const isExpiredByTimestamp = credentials.firebaseTokenExpiry < Date.now();
-    if (isExpiredByTimestamp) {
-      return true; // Definitely expired
-    }
-    // If timestamp says not expired, still do comprehensive validation
-    // but only if token looks like a valid JWT
-    if (!credentials.firebaseToken || typeof credentials.firebaseToken !== 'string') {
-      return true;
-    }
-    // Check if token looks like a JWT (has 3 parts separated by dots)
-    if (credentials.firebaseToken.split('.').length !== 3) {
-      // Not a JWT format, rely on timestamp only
-      return false;
-    }
-  }
-
-  // Secondary check: Validate token structure and claims
-  // This catches cases where timestamp is missing or token is malformed
-  try {
-    const validation = validateFirebaseToken(credentials.firebaseToken, {
-      checkExpiry: true,
-      expiryBuffer: 5 * 60 * 1000, // 5-minute safety buffer
-    });
-    return !validation.valid;
-  } catch {
-    // If validation throws, assume expired for safety
-    return true;
-  }
-}
 
 /**
  * Clear credentials (logout)

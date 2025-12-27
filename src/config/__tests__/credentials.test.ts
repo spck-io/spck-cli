@@ -5,29 +5,25 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import * as jwt from 'jsonwebtoken';
 import {
   loadCredentials,
   saveCredentials,
   loadConnectionSettings,
   saveConnectionSettings,
-  isTokenExpired,
   isServerTokenExpired,
   getCredentialsPath,
   getConnectionSettingsPath,
   clearCredentials,
   clearConnectionSettings,
 } from '../credentials.js';
-import { FirebaseCredentials } from '../../types.js';
+import { StoredCredentials } from '../../types.js';
 
 // Mock modules
 jest.mock('fs');
 jest.mock('os');
-jest.mock('jsonwebtoken');
 
 const mockFs = fs as jest.Mocked<typeof fs>;
 const mockOs = os as jest.Mocked<typeof os>;
-const mockJwt = jwt as jest.Mocked<typeof jwt>;
 
 describe('credentials', () => {
   const mockHomedir = '/mock/home';
@@ -37,11 +33,6 @@ describe('credentials', () => {
     jest.clearAllMocks();
     mockOs.homedir.mockReturnValue(mockHomedir);
     jest.spyOn(process, 'cwd').mockReturnValue(mockCwd);
-
-    // Mock JWT decode to return valid token by default
-    mockJwt.decode.mockReturnValue({
-      exp: Math.floor((Date.now() + 3600000) / 1000), // 1 hour from now in seconds
-    } as any);
   });
 
   afterEach(() => {
@@ -71,10 +62,9 @@ describe('credentials', () => {
       expect(result).toBeNull();
     });
 
-    it('should load and return valid credentials', () => {
-      const mockCredentials: FirebaseCredentials = {
-        firebaseToken: 'mock-token',
-        firebaseTokenExpiry: Date.now() + 3600000,
+    it('should load and return valid stored credentials', () => {
+      const mockCredentials: StoredCredentials = {
+        refreshToken: 'mock-refresh-token',
         userId: 'user-123',
       };
 
@@ -101,10 +91,9 @@ describe('credentials', () => {
       }).toThrow();
     });
 
-    it('should throw CORRUPTED error for missing firebaseToken', () => {
+    it('should throw CORRUPTED error for missing refreshToken', () => {
       const invalidCredentials = {
         userId: 'user-123',
-        firebaseTokenExpiry: Date.now(),
       };
 
       mockFs.existsSync.mockReturnValue(true);
@@ -122,8 +111,7 @@ describe('credentials', () => {
 
     it('should throw CORRUPTED error for missing userId', () => {
       const invalidCredentials = {
-        firebaseToken: 'mock-token',
-        firebaseTokenExpiry: Date.now(),
+        refreshToken: 'mock-refresh-token',
       };
 
       mockFs.existsSync.mockReturnValue(true);
@@ -138,12 +126,31 @@ describe('credentials', () => {
         }
       }).toThrow();
     });
+
+    it('should only return refreshToken and userId even if file has extra fields', () => {
+      const storedWithExtra = {
+        refreshToken: 'mock-refresh-token',
+        userId: 'user-123',
+        firebaseToken: 'old-token',
+        firebaseTokenExpiry: Date.now(),
+      };
+
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockReturnValue(JSON.stringify(storedWithExtra));
+
+      const result = loadCredentials();
+
+      // Should only return the stored credentials fields
+      expect(result).toEqual({
+        refreshToken: 'mock-refresh-token',
+        userId: 'user-123',
+      });
+    });
   });
 
   describe('saveCredentials()', () => {
-    const mockCredentials: FirebaseCredentials = {
-      firebaseToken: 'mock-token',
-      firebaseTokenExpiry: Date.now() + 3600000,
+    const mockCredentials: StoredCredentials = {
+      refreshToken: 'mock-refresh-token',
       userId: 'user-123',
     };
 
@@ -160,15 +167,21 @@ describe('credentials', () => {
       );
     });
 
-    it('should write credentials file with correct permissions', () => {
+    it('should write only refreshToken and userId with correct permissions', () => {
       mockFs.existsSync.mockReturnValue(true);
       mockFs.writeFileSync.mockReturnValue(undefined);
 
       saveCredentials(mockCredentials);
 
+      // Should only persist refreshToken + userId
+      const expectedStored: StoredCredentials = {
+        refreshToken: 'mock-refresh-token',
+        userId: 'user-123',
+      };
+
       expect(mockFs.writeFileSync).toHaveBeenCalledWith(
         `${mockHomedir}/.spck-editor/.credentials.json`,
-        JSON.stringify(mockCredentials, null, 2),
+        JSON.stringify(expectedStored, null, 2),
         { encoding: 'utf8', mode: 0o600 }
       );
     });
@@ -305,28 +318,6 @@ describe('credentials', () => {
           throw error;
         }
       }).toThrow();
-    });
-  });
-
-  describe('isTokenExpired()', () => {
-    it('should return true if token expiry has passed', () => {
-      const expiredCredentials: FirebaseCredentials = {
-        firebaseToken: 'mock-token',
-        firebaseTokenExpiry: Date.now() - 1000, // 1 second ago
-        userId: 'user-123',
-      };
-
-      expect(isTokenExpired(expiredCredentials)).toBe(true);
-    });
-
-    it('should return false if token is still valid', () => {
-      const validCredentials: FirebaseCredentials = {
-        firebaseToken: 'mock-token',
-        firebaseTokenExpiry: Date.now() + 3600000, // 1 hour from now
-        userId: 'user-123',
-      };
-
-      expect(isTokenExpired(validCredentials)).toBe(false);
     });
   });
 

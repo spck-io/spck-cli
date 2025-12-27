@@ -3,19 +3,27 @@
  * Connects to proxy server for remote filesystem, git, and terminal access
  */
 
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import yargs from 'yargs';
+import { hideBin } from 'yargs/helpers';
 import { loadConfig, ConfigNotFoundError } from './config/config.js';
 import {
   loadCredentials,
-  isTokenExpired,
   loadConnectionSettings,
   isServerTokenExpired,
+  clearCredentials,
+  clearConnectionSettings,
+  getCredentialsPath,
+  getConnectionSettingsPath,
 } from './config/credentials.js';
-import { authenticateWithFirebase, refreshFirebaseToken } from './connection/firebase-auth.js';
+import { authenticateWithFirebase, getValidFirebaseToken } from './connection/firebase-auth.js';
 import { runSetup } from './setup/wizard.js';
 import { detectTools, displayFeatureSummary } from './utils/tool-detection.js';
 import { ProxyClient } from './proxy/ProxyClient.js';
 import { RPCRouter } from './rpc/router.js';
-import { ServerConfig, FirebaseCredentials } from './types.js';
+import { ServerConfig, FirebaseCredentials, StoredCredentials } from './types.js';
 
 let proxyClient: ProxyClient | null = null;
 
@@ -50,26 +58,26 @@ export async function startProxyClient(configPath?: string): Promise<void> {
     }
 
     // Step 2: Authenticate with Firebase
-    let credentials: FirebaseCredentials | null = null;
+    let storedCredentials: StoredCredentials | null = null;
+    let credentials: FirebaseCredentials;
 
     try {
-      credentials = loadCredentials();
+      storedCredentials = loadCredentials();
     } catch (error: any) {
       if (error.code === 'CORRUPTED') {
         // Credentials file is corrupted - trigger re-authentication
-        credentials = null; // Will trigger re-auth below
+        storedCredentials = null; // Will trigger re-auth below
       } else {
         throw error;
       }
     }
 
-    if (!credentials || isTokenExpired(credentials)) {
-      if (credentials) {
-        console.log('⚠️  Firebase token expired. Re-authenticating...\n');
-      }
-
+    if (!storedCredentials) {
+      // No stored credentials - full authentication required
       credentials = await authenticateWithFirebase();
     } else {
+      // Have stored credentials - generate fresh ID token using refresh token
+      credentials = await getValidFirebaseToken(storedCredentials);
       console.log('✅ Firebase credentials loaded');
       console.log(`   User ID: ${credentials.userId}\n`);
     }
@@ -179,6 +187,41 @@ export async function startProxyClient(configPath?: string): Promise<void> {
 }
 
 /**
+ * Logout - clear credentials and connection settings
+ */
+export async function logout(): Promise<void> {
+  console.log('\n=== Logout ===\n');
+
+  let clearedSomething = false;
+
+  // Clear user credentials
+  const credentialsPath = getCredentialsPath();
+  if (fs.existsSync(credentialsPath)) {
+    clearCredentials();
+    console.log('✅ Cleared user credentials');
+    console.log(`   Removed: ${credentialsPath}`);
+    clearedSomething = true;
+  }
+
+  // Clear connection settings
+  const settingsPath = getConnectionSettingsPath();
+  if (fs.existsSync(settingsPath)) {
+    clearConnectionSettings();
+    console.log('✅ Cleared connection settings');
+    console.log(`   Removed: ${settingsPath}`);
+    clearedSomething = true;
+  }
+
+  if (!clearedSomething) {
+    console.log('ℹ️  No credentials or connection settings found');
+    console.log('   You are not currently logged in.\n');
+  } else {
+    console.log('\n✨ Successfully logged out!\n');
+    console.log('Run the CLI again to re-authenticate.\n');
+  }
+}
+
+/**
  * Setup graceful shutdown
  */
 function setupGracefulShutdown(): void {
@@ -216,12 +259,75 @@ function setupGracefulShutdown(): void {
   });
 }
 
-// Start client if run directly
-if (import.meta.url === `file://${process.argv[1]}`) {
+/**
+ * Main CLI entry point - parse arguments and run appropriate command
+ */
+export async function main(): Promise<void> {
   setupGracefulShutdown();
 
-  startProxyClient().catch((error) => {
-    console.error('Fatal error:', error);
+  const argv = yargs(hideBin(process.argv))
+    .usage('Usage: $0 [options]')
+    .example('$0', 'Start the proxy client with default settings')
+    .example('$0 --setup', 'Run the interactive setup wizard')
+    .example('$0 --logout', 'Logout and clear all credentials')
+    .example('$0 -c /path/to/config.json', 'Use a custom configuration file')
+    .option('config', {
+      alias: 'c',
+      type: 'string',
+      description: 'Path to configuration file',
+      default: '.spck-editor/spck-cli.config.json',
+    })
+    .option('setup', {
+      type: 'boolean',
+      description: 'Run interactive setup wizard',
+      default: false,
+    })
+    .option('logout', {
+      type: 'boolean',
+      description: 'Logout and clear all credentials and connection settings',
+      default: false,
+    })
+    .option('port', {
+      alias: 'p',
+      type: 'number',
+      description: 'Server port (overrides config)',
+    })
+    .option('root', {
+      alias: 'r',
+      type: 'string',
+      description: 'Root directory to serve (overrides config)',
+    })
+    .help()
+    .alias('help', 'h')
+    .version()
+    .alias('version', 'v')
+    .epilogue(
+      'For more information, visit: https://github.com/spck-io/spck-cli\n\n' +
+      'Configuration:\n' +
+      '  User credentials are stored in ~/.spck-editor/.credentials.json\n' +
+      '  Connection settings are stored in .spck-editor/connection-settings.json\n' +
+      '  Project config is stored in .spck-editor/spck-cli.config.json\n\n' +
+      'Authentication:\n' +
+      '  The CLI uses Firebase authentication to securely connect to the proxy server.\n' +
+      '  You will be prompted to authenticate on first run or when credentials expire.\n' +
+      '  Use --logout to clear credentials and connection settings.'
+    )
+    .parseSync();
+
+  // Execute the appropriate command
+  if (argv.logout) {
+    await logout();
+  } else if (argv.setup) {
+    await runSetup(argv.config as string | undefined);
+  } else {
+    await startProxyClient(argv.config as string | undefined);
+  }
+}
+
+// Auto-run if executed directly (e.g., via npm start or node dist/index.js)
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error: any) => {
+    console.error('Error:', error.message);
     process.exit(1);
   });
 }
