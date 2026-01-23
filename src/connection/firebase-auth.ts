@@ -10,7 +10,7 @@
 
 import * as http from 'http';
 import * as crypto from 'crypto';
-import * as jwt from 'jsonwebtoken';
+import jwt from 'jsonwebtoken';
 import open from 'open';
 import qrcode from 'qrcode-terminal';
 import { FirebaseCredentials, StoredCredentials } from '../types.js';

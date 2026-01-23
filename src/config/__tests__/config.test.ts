@@ -35,7 +35,6 @@ describe('config', () => {
     const validConfig: ServerConfig = {
       version: 1,
       root: '/mock/root',
-      proxyUrl: 'wss://proxy.example.com',
       terminal: {
         enabled: true,
         maxBufferedLines: 5000,
@@ -151,7 +150,6 @@ describe('config', () => {
     const validConfig: ServerConfig = {
       version: 1,
       root: mockCwd,
-      proxyUrl: 'wss://proxy.example.com',
       terminal: {
         enabled: true,
         maxBufferedLines: 5000,
@@ -234,7 +232,6 @@ describe('config', () => {
 
       expect(config.version).toBe(1);
       expect(config.root).toBe(mockCwd);
-      expect(config.proxyUrl).toBe('wss://proxy.spck.io:3002');
       expect(config.terminal.enabled).toBe(true);
       expect(config.security.userAuthenticationEnabled).toBe(false);
     });
@@ -254,7 +251,6 @@ describe('config', () => {
       expect(config.root).toBe('/custom/root');
       expect(config.terminal.enabled).toBe(false);
       expect(config.terminal.maxBufferedLines).toBe(1000);
-      expect(config.proxyUrl).toBe('wss://proxy.spck.io:3002'); // Still has default
     });
   });
 

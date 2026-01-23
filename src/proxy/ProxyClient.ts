@@ -5,8 +5,7 @@
 
 import { io, Socket } from 'socket.io-client';
 import * as crypto from 'crypto';
-import * as jwt from 'jsonwebtoken';
-import * as qrcode from 'qrcode-terminal';
+import qrcode from 'qrcode-terminal';
 import { verifyFirebaseToken } from '../connection/auth.js';
 import { ProxySocketWrapper } from './ProxySocketWrapper.js';
 import {
@@ -31,9 +30,11 @@ import {
 } from '../config/credentials.js';
 import { RPCRouter } from '../rpc/router.js';
 import { validateHandshakeTimestamp } from './handshake-validation.js';
+import { requireValidHMAC } from '../connection/hmac.js';
 
-const KILL_TIMEOUT = 3000; // 3 seconds
-const SECRET_LENGTH = 40; // 40 characters
+const KILL_TIMEOUT = 5000; // 5 seconds
+const SECRET_LENGTH = 33;
+const PROXY_URL = 'wss://proxy.spck.io';
 
 interface ProxyClientOptions {
   config: ServerConfig;
@@ -48,6 +49,8 @@ interface ProxyClientOptions {
  */
 interface ActiveConnection {
   authenticated: boolean;
+  userVerified?: boolean;
+  userVerificationRequired?: boolean;
   handshakeComplete?: boolean;
   connectedAt: number;
   socketWrapper?: ProxySocketWrapper;
@@ -72,14 +75,13 @@ export class ProxyClient {
     const { config, firebaseToken, existingConnectionSettings } = this.options;
 
     console.log('\n=== Connecting to Proxy Server ===\n');
-    console.log(`Proxy URL: ${config.proxyUrl}`);
 
     // Determine if we're renewing an existing connection
     const existingToken = existingConnectionSettings?.serverToken;
 
     // Create Socket.IO client - connect to /listen namespace
     // Note: /listen is a Socket.IO namespace, not an HTTP path
-    const namespaceUrl = config.proxyUrl + '/listen';
+    const namespaceUrl = PROXY_URL + '/listen';
     this.socket = io(namespaceUrl, {
       transports: ['websocket'],
       auth: {
@@ -87,10 +89,10 @@ export class ProxyClient {
         serverToken: existingToken,
       },
       reconnection: true,
-      reconnectionAttempts: 5,
+      reconnectionAttempts: 10,
       reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      timeout: 20000,
+      reconnectionDelayMax: 10000,
+      timeout: 25000,
     });
 
     // Setup event handlers
@@ -135,7 +137,6 @@ export class ProxyClient {
         return;
       }
 
-      const proxyUrl = this.config.proxyUrl;
       const timeout = setTimeout(() => {
         reject(new Error('Authentication timeout'));
       }, 30000); // 30 second timeout
@@ -149,7 +150,6 @@ export class ProxyClient {
         clearTimeout(timeout);
         const enhancedError = new Error(
           `Connection error: ${error.message || error.toString()}\n` +
-          `  Proxy URL: ${proxyUrl}\n` +
           `  Namespace: /listen\n` +
           `  Error type: ${error.type || 'unknown'}`
         );
@@ -160,12 +160,11 @@ export class ProxyClient {
         clearTimeout(timeout);
         const enhancedError = new Error(
           `Failed to connect to proxy server\n` +
-          `  URL: ${proxyUrl}/listen\n` +
+          `  URL: ${PROXY_URL}/listen\n` +
           `  Error: ${error.message || error.toString()}\n` +
           `  \n` +
           `  Possible causes:\n` +
-          `  - Proxy server is not running (run: node bin/proxy-server.js)\n` +
-          `  - Incorrect proxy URL in config\n` +
+          `  - Server is not reachable (check your internet connection)\n` +
           `  - Network/firewall blocking connection`
         );
         reject(enhancedError);
@@ -179,8 +178,19 @@ export class ProxyClient {
   private handleAuthenticated(data: ProxyAuthenticatedEvent): void {
     console.log('✅ Authenticated with proxy server');
 
-    // Generate shared secret for client authentication
-    const secret = crypto.randomBytes(SECRET_LENGTH / 2).toString('hex'); // 40 hex chars
+    // Reuse existing secret if clientId matches, otherwise generate new one
+    const { existingConnectionSettings } = this.options;
+    let secret: string;
+
+    if (existingConnectionSettings && existingConnectionSettings.clientId === data.clientId) {
+      // Same clientId - reuse the secret
+      secret = existingConnectionSettings.secret;
+      console.log('   Reusing existing secret for clientId');
+    } else {
+      // New clientId or no existing settings - generate new secret
+      secret = crypto.randomBytes(SECRET_LENGTH).toString('base64url');
+      console.log('   Generated new secret for clientId');
+    }
 
     // Save connection settings
     this.connectionSettings = {
@@ -207,8 +217,11 @@ export class ProxyClient {
 
     const { clientId, secret } = this.connectionSettings;
 
-    // Build connection URL
-    const url = `spck://connect?clientId=${clientId}&secret=${secret}`;
+    // Build connection URL with optional server name
+    let url = `spck://connect?clientId=${clientId}&secret=${secret}`;
+    if (this.config.name) {
+      url += `&name=${encodeURIComponent(this.config.name)}`;
+    }
 
     console.log('\n' + '='.repeat(60));
     console.log('Scan this QR code with Spck Editor mobile app:');
@@ -218,8 +231,11 @@ export class ProxyClient {
     qrcode.generate(url, { small: true });
 
     console.log('\n' + '-'.repeat(60));
-    console.log(`Client ID: ${clientId.substring(0, 16)}...`);
+    console.log(`Client ID: ${clientId}`);
     console.log(`Secret: ${secret}`);
+    if (this.config.name) {
+      console.log(`Server: ${this.config.name}`);
+    }
     console.log('-'.repeat(60) + '\n');
   }
 
@@ -232,7 +248,7 @@ export class ProxyClient {
     console.log('='.repeat(60) + '\n');
 
     console.log(`📁 Serving: ${this.config.root}`);
-    console.log(`🔒 Client ID: ${this.connectionSettings?.clientId.substring(0, 16)}...`);
+    console.log(`🔒 Client ID: ${this.connectionSettings?.clientId}`);
 
     // Display available features
     const features: string[] = ['filesystem'];
@@ -318,7 +334,7 @@ export class ProxyClient {
   private async handleHandshakeMessage(connectionId: string, data: any): Promise<void> {
     switch (data.type) {
       case 'auth':
-        await this.handleClientAuth(connectionId, data.jwt);
+        await this.handleClientAuth(connectionId, data);
         break;
 
       case 'user_verification':
@@ -335,34 +351,36 @@ export class ProxyClient {
   }
 
   /**
-   * Handle client JWT authentication
+   * Handle client HMAC authentication
    */
-  private async handleClientAuth(connectionId: string, clientJwt: string): Promise<void> {
+  private async handleClientAuth(connectionId: string, authMessage: any): Promise<void> {
     try {
       if (!this.connectionSettings) {
         throw new Error('No connection settings available');
       }
 
-      // Verify client JWT with shared secret
-      const payload = jwt.verify(clientJwt, this.connectionSettings.secret) as {
-        nonce: string;
-        timestamp: number;
-        clientId: string;
-      };
+      const { clientId, timestamp, nonce, hmac } = authMessage;
 
       // Verify clientId matches
-      if (payload.clientId !== this.connectionSettings.clientId) {
+      if (clientId !== this.connectionSettings.clientId) {
         throw new Error('Client ID mismatch');
       }
 
       // Verify timestamp - replay attack prevention (1 minute tolerance)
-      const timestampValidation = validateHandshakeTimestamp(payload.timestamp, {
+      const timestampValidation = validateHandshakeTimestamp(timestamp, {
         maxAge: 60 * 1000, // 1 minute
         clockSkewTolerance: 60 * 1000, // 1 minute
       });
 
       if (!timestampValidation.valid) {
         throw new Error(timestampValidation.error);
+      }
+
+      // Verify HMAC signature
+      const messageToVerify = { type: 'auth', clientId, timestamp, nonce };
+      const expectedHmac = this.computeHMAC(messageToVerify, this.connectionSettings.secret);
+      if (hmac !== expectedHmac) {
+        throw new Error('Invalid HMAC signature');
       }
 
       console.log(`✅ Client authenticated: ${connectionId}`);
@@ -375,8 +393,11 @@ export class ProxyClient {
       );
 
       // Store connection as authenticated
+      const userVerificationRequired = this.config.security.userAuthenticationEnabled;
       this.activeConnections.set(connectionId, {
         authenticated: true,
+        userVerified: false,
+        userVerificationRequired,
         connectedAt: Date.now(),
         socketWrapper,
       });
@@ -388,7 +409,7 @@ export class ProxyClient {
       });
 
       // Check if user authentication is required
-      if (this.config.security.userAuthenticationEnabled) {
+      if (userVerificationRequired) {
         console.log(`   Requesting user verification...`);
         this.sendToClient(connectionId, {
           type: 'request_user_verification',
@@ -411,9 +432,15 @@ export class ProxyClient {
   }
 
   /**
-   * Handle user verification (optional security layer)
+   * Handle user verification (required when userAuthenticationEnabled)
    */
   private async handleUserVerification(connectionId: string, firebaseToken: string): Promise<void> {
+    const connection = this.activeConnections.get(connectionId);
+    if (!connection || !connection.authenticated) {
+      console.warn(`Rejecting user_verification from unauthenticated connection: ${connectionId}`);
+      return;
+    }
+
     try {
       // Verify Firebase token
       const payload = await verifyFirebaseToken(
@@ -428,17 +455,40 @@ export class ProxyClient {
         console.warn(`   Expected: ${this.connectionSettings?.userId}`);
         console.warn(`   Received: ${payload.sub}`);
         console.warn(`   This may indicate a security issue.`);
+
+        // When user verification is required, reject on mismatch
+        if (connection.userVerificationRequired) {
+          this.sendToClient(connectionId, {
+            type: 'user_verification_result',
+            success: false,
+            error: 'User ID mismatch',
+          });
+          return;
+        }
       } else {
         console.log(`✅ User verified for ${connectionId}: ${payload.sub}`);
       }
 
-      // Continue to protocol negotiation regardless
+      // Mark user as verified
+      connection.userVerified = true;
+
+      // Continue to protocol negotiation
       this.sendProtocolInfo(connectionId);
 
     } catch (error: any) {
       console.error(`❌ User verification failed for ${connectionId}: ${error.message}`);
-      console.log(`   Continuing anyway (verification is optional)`);
 
+      // When user verification is required, reject on failure
+      if (connection.userVerificationRequired) {
+        this.sendToClient(connectionId, {
+          type: 'user_verification_result',
+          success: false,
+          error: error.message,
+        });
+        return;
+      }
+
+      console.log(`   Continuing anyway (verification is optional)`);
       // Continue to protocol negotiation
       this.sendProtocolInfo(connectionId);
     }
@@ -466,18 +516,43 @@ export class ProxyClient {
    * Handle protocol version selection
    */
   private async handleProtocolSelection(connectionId: string, version: number): Promise<void> {
+    // Security check: Verify connection is properly authenticated before completing handshake
+    const connection = this.activeConnections.get(connectionId);
+    if (!connection || !connection.authenticated) {
+      console.warn(`Rejecting protocol_selected from unauthenticated connection: ${connectionId}`);
+      this.sendToClient(connectionId, {
+        type: 'error',
+        code: 'not_authenticated',
+        message: 'Authentication required before protocol selection',
+      });
+      return;
+    }
+
+    // Security check: If user verification is required, ensure it was completed
+    if (connection.userVerificationRequired && !connection.userVerified) {
+      console.warn(`Rejecting protocol_selected - user verification required but not completed: ${connectionId}`);
+      this.sendToClient(connectionId, {
+        type: 'error',
+        code: 'user_verification_required',
+        message: 'User verification required before protocol selection',
+      });
+      return;
+    }
+
     if (version !== 1) {
-      console.error(`❌ Unsupported protocol version ${version} from ${connectionId}`);
+      console.error(
+        `❌ Unsupported protocol version ${version} from ${connectionId}. ` +
+        `This CLI only supports protocol v1. ` +
+        `An upgrade is required: update your client/library (and this CLI, if applicable) to the latest version so protocol versions match. ` +
+        `If you installed the CLI globally, run: npm i -g spck-cli@latest`
+      );
       return;
     }
 
     console.log(`✅ Protocol v${version} negotiated with ${connectionId}`);
 
     // Mark connection as fully established
-    const connection = this.activeConnections.get(connectionId);
-    if (connection) {
-      connection.handshakeComplete = true;
-    }
+    connection.handshakeComplete = true;
 
     // Send connection established message
     this.sendToClient(connectionId, {
@@ -524,6 +599,15 @@ export class ProxyClient {
 
     // Handle RPC request
     try {
+      // Verify HMAC signature - REQUIRED for all RPC requests
+      if (!this.connectionSettings?.secret) {
+        throw createRPCError(
+          ErrorCode.INTERNAL_ERROR,
+          'Server configuration error: signing key not available'
+        );
+      }
+      requireValidHMAC(message as JSONRPCRequest, this.connectionSettings.secret);
+
       // Route to appropriate service with socket wrapper
       const result = await RPCRouter.route(message as JSONRPCRequest, connection.socketWrapper as any);
 
@@ -564,6 +648,15 @@ export class ProxyClient {
   }
 
   /**
+   * Compute HMAC for message verification
+   */
+  private computeHMAC(message: object, secret: string): string {
+    const { timestamp, ...rest } = message as any;
+    const messageToSign = timestamp + JSON.stringify(rest);
+    return crypto.createHmac('sha256', secret).update(messageToSign).digest('hex');
+  }
+
+  /**
    * Handle client disconnected event
    */
   private handleClientDisconnected(data: ProxyClientDisconnectedEvent): void {
@@ -577,7 +670,7 @@ export class ProxyClient {
    * Handle proxy error
    */
   private handleError(error: ProxyErrorEvent): void {
-    console.error(`\n❌ Proxy error [${error.code}]: ${error.message}`);
+    console.error(`\n❌ Proxy error: ${error.message}`);
 
     switch (error.code) {
       case 'subscription_error_4020':

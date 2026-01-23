@@ -20,7 +20,7 @@ export interface SocketInterface {
 export interface ServerConfig {
   version: number;
   root: string;
-  proxyUrl: string;
+  name?: string; // Optional: Friendly name for QR code identification
 
   terminal: {
     enabled: boolean;

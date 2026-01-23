@@ -2,6 +2,16 @@
  * Tests for JSON-RPC Router
  */
 
+// Mock xterm headless modules BEFORE importing TerminalService
+jest.mock('@xterm/headless', () => ({
+  default: { Terminal: jest.fn() },
+  Terminal: jest.fn(),
+}));
+jest.mock('@xterm/addon-serialize', () => ({
+  default: { SerializeAddon: jest.fn() },
+  SerializeAddon: jest.fn(),
+}));
+
 import { RPCRouter } from '../router.js';
 import { ErrorCode, createRPCError } from '../../types.js';
 import { FilesystemService } from '../../services/FilesystemService.js';

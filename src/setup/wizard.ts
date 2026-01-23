@@ -7,7 +7,6 @@ import * as readline from 'readline';
 import { ServerConfig } from '../types.js';
 import { saveConfig, createDefaultConfig } from '../config/config.js';
 
-const DEFAULT_PROXY_URL = 'wss://proxy.spck.io:3002';
 const USER_AUTH_DOCS_URL = 'https://docs.spck.io/networking/user-auth';
 
 /**
@@ -73,14 +72,10 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
     );
     const rootPath = root.trim() || process.cwd();
 
-    // Step 2: Proxy server URL
-    const proxyUrl = await question(
-      rl,
-      `Proxy server URL [${DEFAULT_PROXY_URL}]: `
-    );
-    const proxyUrlValue = proxyUrl.trim() || DEFAULT_PROXY_URL;
+    // Step 1.5: Server name (for QR code identification)
+    const defaultConfig = createDefaultConfig();
 
-    // Step 3: Terminal service
+    // Step 2: Terminal service
     console.log('\n--- Terminal Configuration ---\n');
     console.log('Terminal service allows remote shell access to your machine.');
 
@@ -138,7 +133,7 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
     const config: ServerConfig = {
       version: 1,
       root: rootPath,
-      proxyUrl: proxyUrlValue,
+      name: defaultConfig.name,
       terminal: {
         enabled: terminalEnabled,
         maxBufferedLines,
@@ -184,8 +179,8 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
  */
 function displayConfigSummary(config: ServerConfig): void {
   console.log('Configuration summary:');
+  console.log(`  Server name: ${config.name || 'Not set'}`);
   console.log(`  Root directory: ${config.root}`);
-  console.log(`  Proxy server: ${config.proxyUrl}`);
   console.log(`  Terminal service: ${config.terminal.enabled ? 'Enabled' : 'Disabled'}`);
 
   if (config.terminal.enabled) {

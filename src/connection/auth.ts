@@ -2,7 +2,7 @@
  * Firebase JWT authentication with public key verification
  */
 
-import * as jwt from 'jsonwebtoken';
+import jwt from 'jsonwebtoken';
 import fetch from 'node-fetch';
 import { JWTPayload, ErrorCode, createRPCError } from '../types.js';
 

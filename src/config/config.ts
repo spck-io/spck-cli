@@ -105,10 +105,6 @@ function validateConfig(config: ServerConfig): void {
     throw new Error(`Root directory does not exist: ${config.root}`);
   }
 
-  if (!config.proxyUrl || typeof config.proxyUrl !== 'string') {
-    throw new Error('Invalid or missing proxy URL in configuration.');
-  }
-
   if (!config.terminal || typeof config.terminal !== 'object') {
     throw new Error('Invalid or missing terminal configuration.');
   }
@@ -127,13 +123,21 @@ function validateConfig(config: ServerConfig): void {
 }
 
 /**
+ * Get current directory name for default server name
+ */
+function getDefaultServerName(): string {
+  const cwd = process.cwd();
+  return path.basename(cwd);
+}
+
+/**
  * Create default configuration template
  */
 export function createDefaultConfig(overrides: Partial<ServerConfig> = {}): ServerConfig {
   return {
     version: 1,
     root: process.cwd(),
-    proxyUrl: 'wss://proxy.spck.io:3002',
+    name: getDefaultServerName(),
     terminal: {
       enabled: true,
       maxBufferedLines: 5000,
