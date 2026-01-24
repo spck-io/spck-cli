@@ -8,6 +8,7 @@ import * as os from 'os';
 import * as path from 'path';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
+import jwt from 'jsonwebtoken';
 import { loadConfig, ConfigNotFoundError } from './config/config.js';
 import {
   loadCredentials,
@@ -32,7 +33,7 @@ let proxyClient: ProxyClient | null = null;
  */
 export async function startProxyClient(configPath?: string): Promise<void> {
   console.log('\n' + '='.repeat(60));
-  console.log('     Spck Networking CLI - Proxy Mode');
+  console.log('     Spck CLI');
   console.log('='.repeat(60) + '\n');
 
   try {
@@ -87,7 +88,7 @@ export async function startProxyClient(configPath?: string): Promise<void> {
     if (!fs.existsSync(config.root)) {
       console.error(`\n❌ Root directory not found: ${config.root}\n`);
       console.error('Please ensure the directory exists and is accessible, or run setup wizard:');
-      console.error('  spck-cli --setup\n');
+      console.error('  spck --setup\n');
       process.exit(1);
     }
 
@@ -95,9 +96,7 @@ export async function startProxyClient(configPath?: string): Promise<void> {
     const tools = await detectTools();
 
     // Step 5: Initialize RPC Router
-    console.log('Initializing services...');
     RPCRouter.initialize(config.root, config);
-    console.log('✅ Services initialized\n');
 
     // Step 6: Check connection settings
     let connectionSettings = null;
@@ -129,6 +128,9 @@ export async function startProxyClient(configPath?: string): Promise<void> {
       console.log(`   Connected at: ${new Date(connectionSettings.connectedAt).toLocaleString()}\n`);
     }
 
+    // Step 7: Display feature summary
+    displayFeatureSummary(tools, config.terminal.enabled);
+
     // Step 7: Create and connect ProxyClient
     proxyClient = new ProxyClient({
       config,
@@ -139,9 +141,6 @@ export async function startProxyClient(configPath?: string): Promise<void> {
     });
 
     await proxyClient.connect();
-
-    // Step 7: Display feature summary
-    displayFeatureSummary(tools, config.terminal.enabled);
 
   } catch (error: any) {
     // Handle specific error cases with helpful messages
@@ -219,6 +218,110 @@ export async function logout(): Promise<void> {
     console.log('\n✨ Successfully logged out!\n');
     console.log('Run the CLI again to re-authenticate.\n');
   }
+
+  process.exit(0);
+}
+
+/**
+ * Show account information - email and subscription status
+ */
+export async function showAccountInfo(): Promise<void> {
+  console.log('\n' + '='.repeat(60));
+  console.log('     Account Information');
+  console.log('='.repeat(60) + '\n');
+
+  try {
+    // Load stored credentials
+    let storedCredentials: StoredCredentials | null = null;
+    try {
+      storedCredentials = loadCredentials();
+    } catch (error: any) {
+      if (error.code === 'CORRUPTED') {
+        console.error('❌ Credentials file is corrupted.\n');
+        console.error('   Please logout and re-authenticate:');
+        console.error('     spck --logout\n');
+        process.exit(1);
+      }
+      throw error;
+    }
+
+    if (!storedCredentials) {
+      console.log('ℹ️  Not currently logged in.\n');
+      console.log('   Run the CLI to authenticate:');
+      console.log('     spck\n');
+      process.exit(0);
+    }
+
+    // Get fresh Firebase token
+    console.log('🔄 Fetching account information...\n');
+    const credentials = await getValidFirebaseToken(storedCredentials);
+
+    // Decode JWT to extract user information
+    const decoded: any = jwt.decode(credentials.firebaseToken);
+
+    if (!decoded) {
+      console.error('❌ Failed to decode authentication token\n');
+      process.exit(1);
+    }
+
+    console.log('✅ Logged In\n');
+    console.log(`   User ID:  ${credentials.userId}`);
+
+    // Extract email from JWT claims if available
+    if (decoded.email) {
+      console.log(`   Email:    ${decoded.email}`);
+      if (decoded.email_verified !== undefined) {
+        console.log(`   Verified: ${decoded.email_verified ? 'Yes' : 'No'}`);
+      }
+    }
+
+    // Show token expiry
+    if (decoded.exp) {
+      const expiryDate = new Date(decoded.exp * 1000);
+      const now = new Date();
+      const timeLeft = expiryDate.getTime() - now.getTime();
+      const hoursLeft = Math.floor(timeLeft / (1000 * 60 * 60));
+      const minutesLeft = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+
+      console.log(`\n   Token expires: ${expiryDate.toLocaleString()}`);
+      if (timeLeft > 0) {
+        console.log(`   Time remaining: ${hoursLeft}h ${minutesLeft}m`);
+      }
+    }
+
+    // Check for subscription information in JWT claims
+    if (decoded.subscription || decoded.premium || decoded.plan) {
+      console.log('\n📋 Subscription');
+      if (decoded.subscription) {
+        console.log(`   Status: ${decoded.subscription}`);
+      }
+      if (decoded.plan) {
+        console.log(`   Plan: ${decoded.plan}`);
+      }
+      if (decoded.premium !== undefined) {
+        console.log(`   Premium: ${decoded.premium ? 'Yes' : 'No'}`);
+      }
+    }
+
+    console.log('\n' + '='.repeat(60) + '\n');
+
+    process.exit(0);
+
+  } catch (error: any) {
+    console.error('\n❌ Failed to retrieve account information\n');
+    console.error(`   Error: ${error.message}\n`);
+
+    if (error.code === 'EACCES' || error.code === 'EPERM') {
+      console.error('   Permission denied accessing credentials file');
+      console.error('   Please check file permissions:\n');
+      console.error('     chmod 600 ~/.spck-editor/.credentials.json\n');
+    } else if (error.code === 'ENOTFOUND' || error.code === 'ETIMEDOUT') {
+      console.error('   Network connection error');
+      console.error('   Please check your internet connection\n');
+    }
+
+    process.exit(1);
+  }
 }
 
 /**
@@ -269,6 +372,7 @@ export async function main(): Promise<void> {
     .usage('Usage: $0 [options]')
     .example('$0', 'Start the proxy client with default settings')
     .example('$0 --setup', 'Run the interactive setup wizard')
+    .example('$0 --account', 'Show current account email and subscription status')
     .example('$0 --logout', 'Logout and clear all credentials')
     .example('$0 -c /path/to/config.json', 'Use a custom configuration file')
     .option('config', {
@@ -280,6 +384,11 @@ export async function main(): Promise<void> {
     .option('setup', {
       type: 'boolean',
       description: 'Run interactive setup wizard',
+      default: false,
+    })
+    .option('account', {
+      type: 'boolean',
+      description: 'Show account information (email and subscription status)',
       default: false,
     })
     .option('logout', {
@@ -301,8 +410,15 @@ export async function main(): Promise<void> {
     .alias('help', 'h')
     .version()
     .alias('version', 'v')
+    .strict()
+    .fail((msg, err, yargs) => {
+      if (err) throw err; // Preserve stack trace for actual errors
+      console.error('\n❌ Error:', msg);
+      console.error('\nRun with --help to see available commands and options.\n');
+      process.exit(1);
+    })
     .epilogue(
-      'For more information, visit: https://github.com/spck-io/spck-cli\n\n' +
+      'For more information, visit: https://github.com/spck-io/spck\n\n' +
       'Configuration:\n' +
       '  User credentials are stored in ~/.spck-editor/.credentials.json\n' +
       '  Connection settings are stored in .spck-editor/connection-settings.json\n' +
@@ -315,10 +431,13 @@ export async function main(): Promise<void> {
     .parseSync();
 
   // Execute the appropriate command
-  if (argv.logout) {
+  if (argv.account) {
+    await showAccountInfo();
+  } else if (argv.logout) {
     await logout();
   } else if (argv.setup) {
     await runSetup(argv.config as string | undefined);
+    process.exit(0);
   } else {
     await startProxyClient(argv.config as string | undefined);
   }

@@ -17,7 +17,7 @@ import { FirebaseCredentials, StoredCredentials } from '../types.js';
 import { saveCredentials } from '../config/credentials.js';
 
 const AUTH_TIMEOUT = 10 * 60 * 1000; // 10 minutes
-const FIREBASE_AUTH_BASE_URL = 'http://localhost:8123/auth';
+const FIREBASE_AUTH_BASE_URL = 'https://spck.io/auth';
 const FIREBASE_API_BASE_URL = 'https://spck.io/api/auth';
 
 /**

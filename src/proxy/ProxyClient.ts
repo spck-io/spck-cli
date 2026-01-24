@@ -206,7 +206,6 @@ export class ProxyClient {
 
     // Display QR code
     this.displayQRCode();
-    this.displayConnectionInfo();
   }
 
   /**
@@ -237,38 +236,6 @@ export class ProxyClient {
       console.log(`Server: ${this.config.name}`);
     }
     console.log('-'.repeat(60) + '\n');
-  }
-
-  /**
-   * Display connection information
-   */
-  private displayConnectionInfo(): void {
-    console.log('='.repeat(60));
-    console.log('✅ Server Ready');
-    console.log('='.repeat(60) + '\n');
-
-    console.log(`📁 Serving: ${this.config.root}`);
-    console.log(`🔒 Client ID: ${this.connectionSettings?.clientId}`);
-
-    // Display available features
-    const features: string[] = ['filesystem'];
-
-    if (this.tools.git) features.push('git');
-    if (this.config.terminal.enabled) features.push('terminal');
-    if (this.tools.ripgrep) features.push('fast-search');
-
-    console.log(`🔧 Features: ${features.join(', ')}`);
-
-    // Display warnings if any tools are missing
-    if (!this.tools.git) {
-      console.log(`   ⚠️  git: disabled (not installed)`);
-    }
-    if (!this.tools.ripgrep) {
-      console.log(`   ⚠️  fast-search: disabled (ripgrep not installed)`);
-    }
-
-    console.log('\nWaiting for client connections...');
-    console.log('Press Ctrl+C to exit\n');
   }
 
   /**
@@ -544,7 +511,7 @@ export class ProxyClient {
         `❌ Unsupported protocol version ${version} from ${connectionId}. ` +
         `This CLI only supports protocol v1. ` +
         `An upgrade is required: update your client/library (and this CLI, if applicable) to the latest version so protocol versions match. ` +
-        `If you installed the CLI globally, run: npm i -g spck-cli@latest`
+        `If you installed the CLI globally, run: npm i -g spck@latest`
       );
       return;
     }
