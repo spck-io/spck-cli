@@ -36,11 +36,11 @@ export class FilesystemService {
           logFsRead(method, params, uid, true);
           return result;
         case 'readFile':
-          result = await this.readFile(safePath!, params, socket);
+          result = await this.readFile(safePath!, params);
           logFsRead(method, params, uid, true, undefined, { size: result.size, encoding: result.encoding });
           return result;
         case 'write':
-          result = await this.write(safePath!, params, socket);
+          result = await this.write(safePath!, params);
           logFsWrite(method, params, uid, true, undefined, { size: result.size });
           return result;
         case 'patchFile':
@@ -154,7 +154,7 @@ export class FilesystemService {
   /**
    * Read file contents
    */
-  private async readFile(safePath: string, params: any, socket: AuthenticatedSocket): Promise<any> {
+  private async readFile(safePath: string, params: any): Promise<any> {
     try {
       const stats = await fs.stat(safePath);
 
@@ -171,17 +171,12 @@ export class FilesystemService {
       const encoding = params.encoding || 'utf8';
 
       if (encoding === 'binary') {
-        // Binary file - send via rpc:binary
+        // Binary file - return buffer directly in response
         const buffer = await fs.readFile(safePath);
         const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
 
-        // Send binary data
-        socket.emit('rpc:binary', {
-          id: params.requestId,
-          buffer,
-        });
-
         return {
+          buffer,
           size: stats.size,
           mtime: stats.mtimeMs,
           encoding: 'binary',
@@ -212,7 +207,7 @@ export class FilesystemService {
   /**
    * Write file contents
    */
-  private async write(safePath: string, params: any, socket: AuthenticatedSocket): Promise<any> {
+  private async write(safePath: string, params: any): Promise<any> {
     // Check if expectedHash provided (conflict detection)
     if (params.expectedHash) {
       const currentHash = await this.getFileHashValue(safePath);

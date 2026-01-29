@@ -25,8 +25,6 @@ import {
 } from '../types.js';
 import {
   saveConnectionSettings,
-  loadConnectionSettings,
-  isServerTokenExpired,
 } from '../config/credentials.js';
 import { RPCRouter } from '../rpc/router.js';
 import { validateHandshakeTimestamp } from './handshake-validation.js';
@@ -34,7 +32,7 @@ import { requireValidHMAC } from '../connection/hmac.js';
 
 const KILL_TIMEOUT = 5000; // 5 seconds
 const SECRET_LENGTH = 33;
-const PROXY_URL = 'wss://proxy.spck.io';
+const PROXY_URL = 'wss://cli.spck.io';
 
 interface ProxyClientOptions {
   config: ServerConfig;
@@ -286,7 +284,7 @@ export class ProxyClient {
 
       // Send error response if it's an RPC message
       if (data.id) {
-        this.sendToClient(connectionId, {
+        this.sendToClient(connectionId, 'rpc', {
           jsonrpc: '2.0',
           error: createRPCError(ErrorCode.INTERNAL_ERROR, error.message),
           id: data.id,
@@ -370,7 +368,7 @@ export class ProxyClient {
       });
 
       // Send success response
-      this.sendToClient(connectionId, {
+      this.sendToClient(connectionId, 'handshake', {
         type: 'auth_result',
         success: true,
       });
@@ -378,7 +376,7 @@ export class ProxyClient {
       // Check if user authentication is required
       if (userVerificationRequired) {
         console.log(`   Requesting user verification...`);
-        this.sendToClient(connectionId, {
+        this.sendToClient(connectionId, 'handshake', {
           type: 'request_user_verification',
           message: 'Please provide Firebase authentication',
         });
@@ -390,7 +388,7 @@ export class ProxyClient {
     } catch (error: any) {
       console.error(`❌ Client auth failed for ${connectionId}: ${error.message}`);
 
-      this.sendToClient(connectionId, {
+      this.sendToClient(connectionId, 'handshake', {
         type: 'auth_result',
         success: false,
         error: error.message,
@@ -425,7 +423,7 @@ export class ProxyClient {
 
         // When user verification is required, reject on mismatch
         if (connection.userVerificationRequired) {
-          this.sendToClient(connectionId, {
+          this.sendToClient(connectionId, 'handshake', {
             type: 'user_verification_result',
             success: false,
             error: 'User ID mismatch',
@@ -447,7 +445,7 @@ export class ProxyClient {
 
       // When user verification is required, reject on failure
       if (connection.userVerificationRequired) {
-        this.sendToClient(connectionId, {
+        this.sendToClient(connectionId, 'handshake', {
           type: 'user_verification_result',
           success: false,
           error: error.message,
@@ -471,7 +469,7 @@ export class ProxyClient {
       fastSearch: this.tools.ripgrep,
     };
 
-    this.sendToClient(connectionId, {
+    this.sendToClient(connectionId, 'handshake', {
       type: 'protocol_info',
       minVersion: 1,
       maxVersion: 1,
@@ -487,7 +485,7 @@ export class ProxyClient {
     const connection = this.activeConnections.get(connectionId);
     if (!connection || !connection.authenticated) {
       console.warn(`Rejecting protocol_selected from unauthenticated connection: ${connectionId}`);
-      this.sendToClient(connectionId, {
+      this.sendToClient(connectionId, 'handshake', {
         type: 'error',
         code: 'not_authenticated',
         message: 'Authentication required before protocol selection',
@@ -498,7 +496,7 @@ export class ProxyClient {
     // Security check: If user verification is required, ensure it was completed
     if (connection.userVerificationRequired && !connection.userVerified) {
       console.warn(`Rejecting protocol_selected - user verification required but not completed: ${connectionId}`);
-      this.sendToClient(connectionId, {
+      this.sendToClient(connectionId, 'handshake', {
         type: 'error',
         code: 'user_verification_required',
         message: 'User verification required before protocol selection',
@@ -522,7 +520,7 @@ export class ProxyClient {
     connection.handshakeComplete = true;
 
     // Send connection established message
-    this.sendToClient(connectionId, {
+    this.sendToClient(connectionId, 'handshake', {
       type: 'connected',
       message: 'Connection established',
     });
@@ -585,7 +583,7 @@ export class ProxyClient {
         id: message.id || null,
       };
 
-      this.sendToClient(connectionId, response);
+      this.sendToClient(connectionId, 'rpc', response);
 
     } catch (error: any) {
       // Send error response
@@ -598,17 +596,17 @@ export class ProxyClient {
         id: message.id || null,
       };
 
-      this.sendToClient(connectionId, response);
+      this.sendToClient(connectionId, 'rpc', response);
     }
   }
 
   /**
    * Send message to client via proxy
    */
-  private sendToClient(connectionId: string, data: any): void {
+  private sendToClient(connectionId: string, event: string, data: any): void {
     if (!this.socket) return;
 
-    this.socket.emit('cli_message', {
+    this.socket.emit(event, {
       connectionId,
       data,
     });

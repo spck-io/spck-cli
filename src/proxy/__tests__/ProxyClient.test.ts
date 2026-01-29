@@ -188,7 +188,7 @@ describe('ProxyClient Security', () => {
 
       // Should receive error
       expect(mockSocket.emit).toHaveBeenCalledWith(
-        'cli_message',
+        'handshake',
         expect.objectContaining({
           connectionId: 'attacker-1',
           data: expect.objectContaining({
@@ -278,7 +278,7 @@ describe('ProxyClient Security', () => {
 
       // Should request user verification
       expect(mockSocket.emit).toHaveBeenCalledWith(
-        'cli_message',
+        'handshake',
         expect.objectContaining({
           connectionId: 'user-auth-1',
           data: expect.objectContaining({
@@ -316,7 +316,7 @@ describe('ProxyClient Security', () => {
 
       // Should receive error
       expect(mockSocket.emit).toHaveBeenCalledWith(
-        'cli_message',
+        'handshake',
         expect.objectContaining({
           connectionId: 'skip-verify-1',
           data: expect.objectContaining({
@@ -401,7 +401,7 @@ describe('ProxyClient Security', () => {
 
       // Should return HMAC error
       expect(mockSocket.emit).toHaveBeenCalledWith(
-        'cli_message',
+        'rpc',
         expect.objectContaining({
           connectionId: 'bad-hmac-1',
           data: expect.objectContaining({
@@ -435,7 +435,7 @@ describe('ProxyClient Security', () => {
 
       // Should reject
       expect(mockSocket.emit).toHaveBeenCalledWith(
-        'cli_message',
+        'handshake',
         expect.objectContaining({
           connectionId: 'bad-hmac-auth-1',
           data: expect.objectContaining({
@@ -465,7 +465,7 @@ describe('ProxyClient Security', () => {
 
       // Should reject
       expect(mockSocket.emit).toHaveBeenCalledWith(
-        'cli_message',
+        'handshake',
         expect.objectContaining({
           connectionId: 'old-ts-1',
           data: expect.objectContaining({

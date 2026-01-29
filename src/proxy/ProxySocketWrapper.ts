@@ -15,7 +15,7 @@ export class ProxySocketWrapper {
   constructor(
     private connectionId: string,
     private userId: string,
-    private sendFn: (connectionId: string, data: any) => void
+    private sendFn: (connectionId: string, event: string, data: any) => void
   ) {
     // Set up data property to match AuthenticatedSocket
     this.data = { uid: userId };
@@ -34,10 +34,7 @@ export class ProxySocketWrapper {
    */
   emit(event: string, data?: any): boolean {
     // Send through proxy client
-    this.sendFn(this.connectionId, {
-      event,
-      data: data || {}
-    });
+    this.sendFn(this.connectionId, event, data || {});
 
     return true; // Return true to match socket.io API
   }

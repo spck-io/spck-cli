@@ -171,10 +171,8 @@ describe('FilesystemService', () => {
 
       expect(result.encoding).toBe('binary');
       expect(result.sha256).toBeTruthy();
-      expect(mockSocket.emit).toHaveBeenCalledWith('rpc:binary', {
-        id: 123,
-        buffer: expect.any(Buffer),
-      });
+      expect(result.buffer).toBeInstanceOf(Buffer);
+      expect(result.buffer).toEqual(buffer);
     });
 
     it('should throw error for non-existing file', async () => {

@@ -34,10 +34,7 @@ describe('ProxySocketWrapper', () => {
 
       wrapper.emit(event, data);
 
-      expect(mockSendFn).toHaveBeenCalledWith(connectionId, {
-        event,
-        data,
-      });
+      expect(mockSendFn).toHaveBeenCalledWith(connectionId, event, data);
     });
 
     it('should handle emit without data', () => {
@@ -45,10 +42,7 @@ describe('ProxySocketWrapper', () => {
 
       wrapper.emit(event);
 
-      expect(mockSendFn).toHaveBeenCalledWith(connectionId, {
-        event,
-        data: {},
-      });
+      expect(mockSendFn).toHaveBeenCalledWith(connectionId, event, {});
     });
 
     it('should return true', () => {
@@ -64,10 +58,7 @@ describe('ProxySocketWrapper', () => {
 
       wrapper.broadcast.emit(event, data);
 
-      expect(mockSendFn).toHaveBeenCalledWith(connectionId, {
-        event,
-        data,
-      });
+      expect(mockSendFn).toHaveBeenCalledWith(connectionId, event, data);
     });
 
     it('should return true', () => {
