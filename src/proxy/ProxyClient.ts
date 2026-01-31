@@ -231,7 +231,7 @@ export class ProxyClient {
     console.log(`Client ID: ${clientId}`);
     console.log(`Secret: ${secret}`);
     if (this.config.name) {
-      console.log(`Server: ${this.config.name}`);
+      console.log(`Name: ${this.config.name}`);
     }
     console.log('-'.repeat(60) + '\n');
   }

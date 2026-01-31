@@ -118,7 +118,7 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
     console.log('\n--- Security Configuration ---\n');
     console.log('Additional user authentication adds an extra security layer');
     console.log('by requiring the client to verify their Firebase identity.');
-    console.log('This increases connection time by ~1-2 seconds.');
+    console.log('This increases initial connection time by ~3-15 seconds.');
     console.log(`Learn more: ${USER_AUTH_DOCS_URL}\n`);
 
     const userAuthEnabled = await questionYesNo(
