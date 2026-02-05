@@ -7,6 +7,8 @@ import { io, Socket } from 'socket.io-client';
 import * as crypto from 'crypto';
 import qrcode from 'qrcode-terminal';
 import { verifyFirebaseToken } from '../connection/auth.js';
+import { refreshFirebaseToken } from '../connection/firebase-auth.js';
+import { loadCredentials } from '../config/credentials.js';
 import { ProxySocketWrapper } from './ProxySocketWrapper.js';
 import {
   ServerConfig,
@@ -60,17 +62,22 @@ export class ProxyClient {
   private connectionSettings: ConnectionSettings | null = null;
   private tools: ToolDetectionResult;
   private activeConnections: Map<string, ActiveConnection> = new Map();
+  private firebaseToken: string;
+  private userId: string;
+  private tokenRefreshAttempted: boolean = false;
 
   constructor(private options: ProxyClientOptions) {
     this.config = options.config;
     this.tools = options.tools;
+    this.firebaseToken = options.firebaseToken;
+    this.userId = options.userId;
   }
 
   /**
    * Connect to proxy server
    */
   async connect(): Promise<void> {
-    const { config, firebaseToken, existingConnectionSettings } = this.options;
+    const { config, existingConnectionSettings } = this.options;
 
     console.log('\n=== Connecting to Proxy Server ===\n');
 
@@ -83,7 +90,7 @@ export class ProxyClient {
     this.socket = io(namespaceUrl, {
       transports: ['websocket'],
       auth: {
-        firebaseToken,
+        firebaseToken: this.firebaseToken,
         serverToken: existingToken,
       },
       reconnection: true,
@@ -101,6 +108,48 @@ export class ProxyClient {
   }
 
   /**
+   * Refresh firebase token and reconnect
+   */
+  private async refreshTokenAndReconnect(): Promise<void> {
+    try {
+      console.log('\n🔄 Refreshing Firebase token...');
+
+      // Load stored credentials to get refresh token
+      const storedCredentials = loadCredentials();
+      if (!storedCredentials) {
+        throw new Error('No stored credentials available for token refresh');
+      }
+
+      // Refresh the Firebase token
+      const newCredentials = await refreshFirebaseToken(storedCredentials);
+
+      // Update internal state
+      this.firebaseToken = newCredentials.firebaseToken;
+      this.userId = newCredentials.userId;
+
+      console.log('✅ Firebase token refreshed successfully');
+
+      // Disconnect current socket
+      if (this.socket) {
+        this.socket.removeAllListeners();
+        this.socket.disconnect();
+        this.socket = null;
+      }
+
+      // Clear connection settings since we're reconnecting
+      this.connectionSettings = null;
+      this.activeConnections.clear();
+
+      // Reconnect with new token
+      console.log('🔄 Reconnecting with refreshed token...\n');
+      await this.connect();
+
+    } catch (error: any) {
+      throw new Error(`Failed to refresh token: ${error.message}`);
+    }
+  }
+
+  /**
    * Setup all event handlers
    */
   private setupEventHandlers(): void {
@@ -115,8 +164,13 @@ export class ProxyClient {
     this.socket.on('client_message', this.handleClientMessage.bind(this));
     this.socket.on('client_disconnected', this.handleClientDisconnected.bind(this));
 
-    // Error handling
-    this.socket.on('error', this.handleError.bind(this));
+    // Error handling (async wrapper for handleError)
+    this.socket.on('error', (error: ProxyErrorEvent) => {
+      this.handleError(error).catch((err) => {
+        console.error('\n❌ Unhandled error in handleError:', err.message);
+        process.exit(1);
+      });
+    });
 
     // Connection state
     this.socket.on('disconnect', this.handleDisconnect.bind(this));
@@ -634,7 +688,23 @@ export class ProxyClient {
   /**
    * Handle proxy error
    */
-  private handleError(error: ProxyErrorEvent): void {
+  private async handleError(error: ProxyErrorEvent): Promise<void> {
+    // Special handling for expired_firebase_token - attempt refresh before giving up
+    if (error.code === 'expired_firebase_token' && !this.tokenRefreshAttempted) {
+      console.warn('\n⚠️  Firebase token expired. Attempting to refresh...');
+      this.tokenRefreshAttempted = true;
+
+      try {
+        await this.refreshTokenAndReconnect();
+        // If successful, the connection will be re-established
+        return;
+      } catch (refreshError: any) {
+        console.error(`\n❌ Token refresh failed: ${refreshError.message}`);
+        // Fall through to regular error handling
+      }
+    }
+
+    // Regular error handling
     console.error(`\n❌ Proxy error: ${error.message}`);
 
     switch (error.code) {
@@ -682,8 +752,19 @@ export class ProxyClient {
         break;
       }
 
+      case 'expired_firebase_token':
+        if (this.tokenRefreshAttempted) {
+          console.error('\n⚠️  Firebase token expired and refresh failed.');
+          console.error('Please re-authenticate: spck auth login\n');
+        } else {
+          console.error('\n⚠️  Firebase token expired.');
+          console.error('Please re-authenticate: spck auth login\n');
+        }
+        break;
+
       case 'invalid_firebase_token':
-        console.error('\n⚠️  Firebase authentication failed.');
+        console.error('\n⚠️  Firebase token is invalid (not expired).');
+        console.error('The token may be corrupted or from a different account.');
         console.error('Please re-authenticate: spck auth login\n');
         break;
 

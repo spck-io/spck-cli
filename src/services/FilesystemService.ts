@@ -6,7 +6,7 @@ import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import * as fossilDelta from 'fossil-delta';
+import fossilDelta from 'fossil-delta';
 import writeFileAtomic from 'write-file-atomic';
 import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types.js';
 import { parseFileSize } from '../config/config.js';

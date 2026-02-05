@@ -5,6 +5,7 @@
 import * as pty from 'node-pty';
 import XtermHeadlessModule from '@xterm/headless';
 import SerializeAddonModule from '@xterm/addon-serialize';
+import defaultShell from 'default-shell';
 import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types.js';
 import { logTerminalRead, logTerminalWrite } from '../utils/logger.js';
 
@@ -117,18 +118,30 @@ export class TerminalService {
 
     const terminalId = this.generateId();
 
-    // Auto-detect shell
-    const shell =
-      process.env.SHELL || (process.platform === 'win32' ? 'powershell.exe' : '/bin/bash');
+    // Get default shell for the platform
+    const shell = defaultShell;
 
     // Spawn PTY process
-    const ptyProcess = pty.spawn(shell, [], {
-      name: 'xterm-256color',
-      cols: params.cols || 80,
-      rows: params.rows || 24,
-      cwd: this.rootPath,
-      env: process.env,
-    });
+    let ptyProcess: pty.IPty;
+    try {
+      ptyProcess = pty.spawn(shell, [], {
+        name: 'xterm-256color',
+        cols: params.cols || 80,
+        rows: params.rows || 24,
+        cwd: this.rootPath,
+        env: process.env,
+      });
+    } catch (error: any) {
+      // Provide more helpful error message for common PTY spawn failures
+      if (error.message && error.message.includes('posix_spawnp')) {
+        throw createRPCError(
+          ErrorCode.INTERNAL_ERROR,
+          `Failed to spawn terminal: ${error.message}. Shell: ${shell}, CWD: ${this.rootPath}. ` +
+          `Please check that the shell executable exists and the working directory is accessible.`
+        );
+      }
+      throw error;
+    }
 
     // Create headless xterm for buffer management
     const xterm = new XtermHeadless({

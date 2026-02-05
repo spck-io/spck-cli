@@ -14,11 +14,13 @@ export class RPCRouter {
   private static searchService: SearchService;
   private static terminalServices: Map<string, TerminalService> = new Map();
   private static currentSockets: Map<string, AuthenticatedSocket> = new Map();
+  private static rootPath: string;
 
   /**
    * Initialize services
    */
   static initialize(rootPath: string, config: any) {
+    this.rootPath = rootPath;
     this.filesystemService = new FilesystemService(rootPath, config.filesystem);
     this.gitService = new GitService(rootPath);
     this.searchService = new SearchService(rootPath);
@@ -42,7 +44,7 @@ export class RPCRouter {
         }
         return currentSocket;
       };
-      this.terminalServices.set(uid, new TerminalService(getSocket));
+      this.terminalServices.set(uid, new TerminalService(getSocket, 10, 10000, this.rootPath));
     }
 
     return this.terminalServices.get(uid)!;
