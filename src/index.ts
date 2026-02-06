@@ -22,6 +22,7 @@ import {
 import { authenticateWithFirebase, getValidFirebaseToken } from './connection/firebase-auth.js';
 import { runSetup } from './setup/wizard.js';
 import { detectTools, displayFeatureSummary } from './utils/tool-detection.js';
+import { ensureProjectDir } from './utils/project-dir.js';
 import { ProxyClient } from './proxy/ProxyClient.js';
 import { RPCRouter } from './rpc/router.js';
 import { ServerConfig, FirebaseCredentials, StoredCredentials } from './types.js';
@@ -37,6 +38,9 @@ export async function startProxyClient(configPath?: string): Promise<void> {
   console.log('='.repeat(60) + '\n');
 
   try {
+    // Step 0: Ensure project directory is set up (creates symlink)
+    ensureProjectDir(process.cwd());
+
     // Step 1: Load or create configuration
     let config: ServerConfig;
 
@@ -421,8 +425,9 @@ export async function main(): Promise<void> {
       'For more information, visit: https://github.com/spck-io/spck\n\n' +
       'Configuration:\n' +
       '  User credentials are stored in ~/.spck-editor/.credentials.json\n' +
-      '  Connection settings are stored in .spck-editor/connection-settings.json\n' +
-      '  Project config is stored in .spck-editor/spck-cli.config.json\n\n' +
+      '  Project data is stored in ~/.spck-editor/projects/{project_id}/\n' +
+      '  .spck-editor in your project is a symlink to the project data directory\n' +
+      '  This prevents accidentally committing secrets to git\n\n' +
       'Authentication:\n' +
       '  The CLI uses Firebase authentication to securely connect to the proxy server.\n' +
       '  You will be prompted to authenticate on first run or when credentials expire.\n' +

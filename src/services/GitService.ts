@@ -957,9 +957,17 @@ export class GitService {
     return new Promise((resolve, reject) => {
       const requestId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
 
+      // Timeout after 30 seconds
+      // Use .unref() so this timer doesn't prevent Node.js from exiting
+      const timeoutId = setTimeout(() => {
+        socket.off('rpc', responseHandler);
+        reject(new Error('Authentication request timed out'));
+      }, 30000).unref();
+
       // Set up one-time response listener
       const responseHandler = (response: any) => {
         if (response.id === requestId) {
+          clearTimeout(timeoutId); // Clear timeout when response received
           socket.off('rpc', responseHandler);
           if (response.error) {
             reject(new Error(response.error.message));
@@ -981,12 +989,6 @@ export class GitService {
         },
         id: requestId,
       });
-
-      // Timeout after 30 seconds
-      setTimeout(() => {
-        socket.off('rpc', responseHandler);
-        reject(new Error('Authentication request timed out'));
-      }, 30000);
     });
   }
 }

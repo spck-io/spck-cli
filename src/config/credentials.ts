@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { StoredCredentials } from '../types.js';
+import { getProjectFilePath } from '../utils/project-dir.js';
 
 /**
  * Get the user-level credentials directory
@@ -24,9 +25,10 @@ export function getCredentialsPath(): string {
 
 /**
  * Get the connection settings file path (project-level)
+ * This uses the symlinked project directory
  */
 export function getConnectionSettingsPath(): string {
-  return path.join(process.cwd(), '.spck-editor', 'connection-settings.json');
+  return getProjectFilePath(process.cwd(), 'connection-settings.json');
 }
 
 /**

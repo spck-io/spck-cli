@@ -49,7 +49,7 @@ function cleanOldLogs(): void {
 
 // Run cleanup on startup and schedule daily
 cleanOldLogs();
-setInterval(cleanOldLogs, 24 * 60 * 60 * 1000);
+setInterval(cleanOldLogs, 24 * 60 * 60 * 1000).unref();
 
 /**
  * Format timestamp for display (compact format for files)

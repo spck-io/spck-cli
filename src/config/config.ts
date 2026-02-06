@@ -5,8 +5,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { ServerConfig } from '../types.js';
+import { getProjectFilePath } from '../utils/project-dir.js';
 
-const DEFAULT_CONFIG_PATH = '.spck-editor/spck-cli.config.json';
+const DEFAULT_CONFIG_FILENAME = 'spck-cli.config.json';
 
 /**
  * Load server configuration from file
@@ -15,8 +16,11 @@ const DEFAULT_CONFIG_PATH = '.spck-editor/spck-cli.config.json';
  * @throws {Error} with code 'CORRUPTED' if file is corrupted
  */
 export function loadConfig(configPath?: string): ServerConfig {
-  const resolvedPath = configPath || DEFAULT_CONFIG_PATH;
-  const fullPath = path.resolve(process.cwd(), resolvedPath);
+  // If a custom config path is provided, use it as-is
+  // Otherwise use the default location in the project directory
+  const fullPath = configPath
+    ? path.resolve(process.cwd(), configPath)
+    : getProjectFilePath(process.cwd(), DEFAULT_CONFIG_FILENAME);
 
   if (!fs.existsSync(fullPath)) {
     console.log(`\nConfiguration file not found: ${fullPath}`);
@@ -66,8 +70,11 @@ export class ConfigNotFoundError extends Error {
  * @throws {Error} with code 'ENOSPC' for disk full errors
  */
 export function saveConfig(config: ServerConfig, configPath?: string): void {
-  const resolvedPath = configPath || DEFAULT_CONFIG_PATH;
-  const fullPath = path.resolve(process.cwd(), resolvedPath);
+  // If a custom config path is provided, use it as-is
+  // Otherwise use the default location in the project directory
+  const fullPath = configPath
+    ? path.resolve(process.cwd(), configPath)
+    : getProjectFilePath(process.cwd(), DEFAULT_CONFIG_FILENAME);
 
   try {
     // Ensure directory exists

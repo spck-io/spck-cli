@@ -6,6 +6,8 @@
 import * as readline from 'readline';
 import { ServerConfig } from '../types.js';
 import { saveConfig, createDefaultConfig } from '../config/config.js';
+import { ensureProjectDir } from '../utils/project-dir.js';
+import { gitignoreExists, isSpckEditorIgnored, addSpckEditorToGitignore } from '../utils/gitignore.js';
 
 const USER_AUTH_DOCS_URL = 'https://docs.spck.io/networking/user-auth';
 
@@ -127,6 +129,24 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
       false
     );
 
+    // Step 6: .gitignore configuration (advanced)
+    let shouldAddToGitignore = false;
+
+    if (gitignoreExists(rootPath)) {
+      if (!isSpckEditorIgnored(rootPath)) {
+        console.log('\n--- Git Configuration ---\n');
+        console.log('A .gitignore file was detected in your project directory.');
+        console.log('It is recommended to add .spck-editor/ to .gitignore to prevent');
+        console.log('accidentally committing the symlink to version control.\n');
+
+        shouldAddToGitignore = await questionYesNo(
+          rl,
+          'Add .spck-editor/ to .gitignore? [Y/n]: ',
+          true
+        );
+      }
+    }
+
     rl.close();
 
     // Create configuration
@@ -143,7 +163,7 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
         userAuthenticationEnabled: userAuthEnabled
       },
       filesystem: {
-        maxFileSize: '100MB',
+        maxFileSize: '10MB',
         watchIgnorePatterns: [
           '**/.git/**',
           '**/.spck-editor/**',
@@ -156,8 +176,22 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
       }
     };
 
+    // Ensure project directory exists (creates symlink)
+    ensureProjectDir(config.root);
+
     // Save configuration
     saveConfig(config, configPath);
+
+    // Add to .gitignore if requested
+    if (shouldAddToGitignore) {
+      try {
+        addSpckEditorToGitignore(config.root);
+        console.log('\n✅ Added .spck-editor/ to .gitignore');
+      } catch (error: any) {
+        console.warn(`\n⚠️  Failed to update .gitignore: ${error.message}`);
+        console.warn('   You can manually add .spck-editor/ to your .gitignore file.');
+      }
+    }
 
     console.log('\n' + '='.repeat(60));
     console.log('✅ Configuration saved successfully!');
