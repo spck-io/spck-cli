@@ -12,11 +12,42 @@ jest.mock('@xterm/addon-serialize', () => ({
   SerializeAddon: jest.fn(),
 }));
 
+import * as crypto from 'crypto';
 import { RPCRouter } from '../router.js';
-import { ErrorCode, createRPCError } from '../../types.js';
+import { ErrorCode, createRPCError, JSONRPCRequest } from '../../types.js';
 import { FilesystemService } from '../../services/FilesystemService.js';
 import { GitService } from '../../services/GitService.js';
 import { TerminalService } from '../../services/TerminalService.js';
+
+/**
+ * Helper function to create a valid JSONRPCRequest with HMAC and nonce
+ */
+function createRequest(method: string, params?: any, id?: number | string): JSONRPCRequest {
+  const timestamp = Date.now();
+  const nonce = crypto.randomBytes(16).toString('hex');
+  const signingKey = 'test-key';
+
+  const payload = {
+    jsonrpc: '2.0' as const,
+    method,
+    params,
+    id,
+    nonce,
+  };
+
+  const messageToSign = timestamp + JSON.stringify(payload);
+  const hmac = crypto
+    .createHmac('sha256', signingKey)
+    .update(messageToSign)
+    .digest('hex');
+
+  return {
+    ...payload,
+    timestamp,
+    hmac,
+    nonce,
+  };
+}
 
 // Mock services
 jest.mock('../../services/FilesystemService');
@@ -80,12 +111,7 @@ describe('RPCRouter', () => {
   describe('Route Method Parsing', () => {
     it('should parse method correctly for fs service', async () => {
       await RPCRouter.route(
-        {
-          jsonrpc: '2.0',
-          method: 'fs.readFile',
-          params: { path: '/test.txt' },
-          id: 1,
-        },
+        createRequest('fs.readFile', { path: '/test.txt' }, 1),
         mockSocket
       );
 
@@ -94,12 +120,7 @@ describe('RPCRouter', () => {
 
     it('should parse method correctly for git service', async () => {
       await RPCRouter.route(
-        {
-          jsonrpc: '2.0',
-          method: 'git.log',
-          params: { dir: '/project' },
-          id: 2,
-        },
+        createRequest('git.log', { dir: '/project' }, 2),
         mockSocket
       );
 
@@ -108,12 +129,7 @@ describe('RPCRouter', () => {
 
     it('should parse method correctly for terminal service', async () => {
       await RPCRouter.route(
-        {
-          jsonrpc: '2.0',
-          method: 'terminal.create',
-          params: { cols: 80, rows: 24 },
-          id: 3,
-        },
+        createRequest('terminal.create', { cols: 80, rows: 24 }, 3),
         mockSocket
       );
 
@@ -123,12 +139,7 @@ describe('RPCRouter', () => {
     it('should throw error for invalid method format', async () => {
       await expect(
         RPCRouter.route(
-          {
-            jsonrpc: '2.0',
-            method: 'invalidmethod',
-            params: {},
-            id: 4,
-          },
+          createRequest('invalidmethod', {}, 4),
           mockSocket
         )
       ).rejects.toMatchObject({
@@ -140,12 +151,7 @@ describe('RPCRouter', () => {
     it('should throw error for unknown service', async () => {
       await expect(
         RPCRouter.route(
-          {
-            jsonrpc: '2.0',
-            method: 'unknown.method',
-            params: {},
-            id: 5,
-          },
+          createRequest('unknown.method', {}, 5),
           mockSocket
         )
       ).rejects.toMatchObject({
@@ -161,12 +167,7 @@ describe('RPCRouter', () => {
       mockFsHandle.mockResolvedValueOnce(mockResult);
 
       const result = await RPCRouter.route(
-        {
-          jsonrpc: '2.0',
-          method: 'fs.readFile',
-          params: { path: '/test.txt', encoding: 'utf8' },
-          id: 10,
-        },
+        createRequest('fs.readFile', { path: '/test.txt', encoding: 'utf8' }, 10),
         mockSocket
       );
 
@@ -179,12 +180,7 @@ describe('RPCRouter', () => {
       mockGitHandle.mockResolvedValueOnce(mockResult);
 
       const result = await RPCRouter.route(
-        {
-          jsonrpc: '2.0',
-          method: 'git.readCommit',
-          params: { dir: '/project', oid: 'abc123' },
-          id: 11,
-        },
+        createRequest('git.readCommit', { dir: '/project', oid: 'abc123' }, 11),
         mockSocket
       );
 
@@ -194,12 +190,7 @@ describe('RPCRouter', () => {
 
     it('should route to TerminalService', async () => {
       const result = await RPCRouter.route(
-        {
-          jsonrpc: '2.0',
-          method: 'terminal.create',
-          params: { cols: 120, rows: 30 },
-          id: 12,
-        },
+        createRequest('terminal.create', { cols: 120, rows: 30 }, 12),
         mockSocket
       );
 
@@ -213,12 +204,12 @@ describe('RPCRouter', () => {
       const socket2 = { ...mockSocket, id: 'socket-2', data: { uid: 'user-2' } };
 
       const result1 = await RPCRouter.route(
-        { jsonrpc: '2.0', method: 'terminal.create', params: {}, id: 1 },
+        createRequest('terminal.create', {}, 1),
         socket1
       );
 
       const result2 = await RPCRouter.route(
-        { jsonrpc: '2.0', method: 'terminal.create', params: {}, id: 2 },
+        createRequest('terminal.create', {}, 2),
         socket2
       );
 
@@ -233,12 +224,12 @@ describe('RPCRouter', () => {
       const socket2 = { ...mockSocket, id: 'socket-2', data: { uid: 'user-same' } };
 
       const result1 = await RPCRouter.route(
-        { jsonrpc: '2.0', method: 'terminal.create', params: {}, id: 1 },
+        createRequest('terminal.create', {}, 1),
         socket1
       );
 
       const result2 = await RPCRouter.route(
-        { jsonrpc: '2.0', method: 'terminal.create', params: {}, id: 2 },
+        createRequest('terminal.create', {}, 2),
         socket2
       );
 
@@ -256,12 +247,7 @@ describe('RPCRouter', () => {
 
       await expect(
         RPCRouter.route(
-          {
-            jsonrpc: '2.0',
-            method: 'fs.readFile',
-            params: { path: '/missing.txt' },
-            id: 20,
-          },
+          createRequest('fs.readFile', { path: '/missing.txt' }, 20),
           mockSocket
         )
       ).rejects.toMatchObject({
@@ -276,12 +262,7 @@ describe('RPCRouter', () => {
 
       await expect(
         RPCRouter.route(
-          {
-            jsonrpc: '2.0',
-            method: 'fs.readFile',
-            params: { path: '/test.txt' },
-            id: 21,
-          },
+          createRequest('fs.readFile', { path: '/test.txt' }, 21),
           mockSocket
         )
       ).rejects.toMatchObject({
@@ -296,12 +277,7 @@ describe('RPCRouter', () => {
 
       await expect(
         RPCRouter.route(
-          {
-            jsonrpc: '2.0',
-            method: 'git.commit',
-            params: { dir: '/project', message: 'test' },
-            id: 22,
-          },
+          createRequest('git.commit', { dir: '/project', message: 'test' }, 22),
           mockSocket
         )
       ).rejects.toMatchObject({
@@ -330,7 +306,7 @@ describe('RPCRouter', () => {
 
       // Create a terminal service - this will instantiate the mock
       await RPCRouter.route(
-        { jsonrpc: '2.0', method: 'terminal.create', params: {}, id: 1 },
+        createRequest('terminal.create', {}, 1),
         mockSocket
       );
 
@@ -354,12 +330,7 @@ describe('RPCRouter', () => {
       // Method "fs.some.deep.method" splits into service="fs", method="some"
       // Additional parts after the second dot are ignored
       const result = await RPCRouter.route(
-        {
-          jsonrpc: '2.0',
-          method: 'fs.some.deep.method',
-          params: {},
-          id: 30,
-        },
+        createRequest('fs.some.deep.method', {}, 30),
         mockSocket
       );
 
@@ -371,12 +342,7 @@ describe('RPCRouter', () => {
     it('should handle empty method name', async () => {
       await expect(
         RPCRouter.route(
-          {
-            jsonrpc: '2.0',
-            method: '',
-            params: {},
-            id: 31,
-          },
+          createRequest('', {}, 31),
           mockSocket
         )
       ).rejects.toMatchObject({
@@ -387,12 +353,7 @@ describe('RPCRouter', () => {
     it('should handle method with only service name', async () => {
       await expect(
         RPCRouter.route(
-          {
-            jsonrpc: '2.0',
-            method: 'fs.',
-            params: {},
-            id: 32,
-          },
+          createRequest('fs.', {}, 32),
           mockSocket
         )
       ).rejects.toMatchObject({
@@ -402,11 +363,7 @@ describe('RPCRouter', () => {
 
     it('should handle undefined params', async () => {
       const result = await RPCRouter.route(
-        {
-          jsonrpc: '2.0',
-          method: 'fs.stat',
-          id: 33,
-        },
+        createRequest('fs.stat', undefined, 33),
         mockSocket
       );
 
@@ -416,11 +373,7 @@ describe('RPCRouter', () => {
 
     it('should handle requests with no id', async () => {
       const result = await RPCRouter.route(
-        {
-          jsonrpc: '2.0',
-          method: 'fs.stat',
-          params: { path: '/test.txt' },
-        },
+        createRequest('fs.stat', { path: '/test.txt' }),
         mockSocket
       );
 

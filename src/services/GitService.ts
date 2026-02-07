@@ -188,6 +188,38 @@ export class GitService {
   }
 
   /**
+   * Sanitize filename to prevent command injection
+   * Rejects filenames that could be interpreted as git flags or contain control characters
+   */
+  private sanitizeFilename(filename: string): string {
+    // Reject filenames starting with dash (potential git flag injection)
+    if (filename.startsWith('-')) {
+      throw createRPCError(
+        ErrorCode.INVALID_PATH,
+        'Invalid filename: cannot start with dash (potential command injection)'
+      );
+    }
+
+    // Reject newlines (could break git command parsing) - check before general control chars
+    if (filename.includes('\n') || filename.includes('\r')) {
+      throw createRPCError(
+        ErrorCode.INVALID_PATH,
+        'Invalid filename: contains newline characters'
+      );
+    }
+
+    // Reject other control characters (including null bytes)
+    if (/[\x00-\x1F\x7F]/.test(filename)) {
+      throw createRPCError(
+        ErrorCode.INVALID_PATH,
+        'Invalid filename: contains control characters'
+      );
+    }
+
+    return filename;
+  }
+
+  /**
    * Execute git command
    */
   private async execGit(args: string[], options: ExecGitOptions = {}): Promise<ExecGitResult> {
@@ -670,7 +702,11 @@ export class GitService {
       return { success: true };
     }
 
-    await this.execGit(['add', ...params.filepaths], { cwd: dir });
+    // Sanitize filenames to prevent command injection
+    const sanitizedPaths = params.filepaths.map((p: string) => this.sanitizeFilename(p));
+
+    // Use -- separator to prevent filenames being interpreted as flags (command injection prevention)
+    await this.execGit(['add', '--', ...sanitizedPaths], { cwd: dir });
 
     // Send change notification
     socket.broadcast.emit('rpc', {
@@ -691,7 +727,11 @@ export class GitService {
       return { success: true };
     }
 
-    await this.execGit(['rm', '--cached', ...params.filepaths], { cwd: dir });
+    // Sanitize filenames to prevent command injection
+    const sanitizedPaths = params.filepaths.map((p: string) => this.sanitizeFilename(p));
+
+    // Use -- separator to prevent filenames being interpreted as flags (command injection prevention)
+    await this.execGit(['rm', '--cached', '--', ...sanitizedPaths], { cwd: dir });
 
     // Send change notification
     socket.broadcast.emit('rpc', {
@@ -716,10 +756,14 @@ export class GitService {
         return { success: true };
       }
 
-      await this.execGit(['reset', ref, '--', ...params.filepaths], { cwd: dir });
+      // Sanitize filenames to prevent command injection
+      const sanitizedPaths = params.filepaths.map((p: string) => this.sanitizeFilename(p));
+
+      await this.execGit(['reset', ref, '--', ...sanitizedPaths], { cwd: dir });
     } else if (params.filepath) {
       // Reset single file (backward compatibility)
-      await this.execGit(['reset', ref, '--', params.filepath], { cwd: dir });
+      const sanitizedPath = this.sanitizeFilename(params.filepath);
+      await this.execGit(['reset', ref, '--', sanitizedPath], { cwd: dir });
     } else {
       return { success: true };
     }

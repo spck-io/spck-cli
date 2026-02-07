@@ -9,6 +9,7 @@ dist/
 *.d.ts.map
 
 # Configuration
+.spck-editor
 .spck-editor/
 *.config.json
 

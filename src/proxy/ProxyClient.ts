@@ -752,6 +752,17 @@ export class ProxyClient {
         break;
       }
 
+      case 'duplicate_client_id':
+        console.error('\n⚠️  A CLI with this client ID is already connected.');
+        console.error('This can happen if:');
+        console.error('  - Another CLI instance is still running with the same connection');
+        console.error('  - A previous connection did not properly disconnect');
+        console.error('\nPlease:');
+        console.error('  1. Close any other running CLI instances');
+        console.error('  2. Wait a few seconds for the previous connection to timeout');
+        console.error('  3. Try connecting again\n');
+        break;
+
       case 'expired_firebase_token':
         if (this.tokenRefreshAttempted) {
           console.error('\n⚠️  Firebase token expired and refresh failed.');

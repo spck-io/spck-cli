@@ -111,27 +111,9 @@ export function setupProjectDir(projectRoot: string): void {
 
       // Points to wrong location - remove and recreate
       fs.unlinkSync(symlinkPath);
-    } else if (stats.isDirectory()) {
-      // Regular directory exists - migrate data
-      console.log(`\nℹ️  Migrating existing .spck-editor directory to ${dataPath}`);
-
-      // Copy contents to new location
-      const files = fs.readdirSync(symlinkPath);
-      for (const file of files) {
-        const srcPath = path.join(symlinkPath, file);
-        const destPath = path.join(dataPath, file);
-
-        // Only migrate if doesn't already exist in target
-        if (!fs.existsSync(destPath)) {
-          fs.copyFileSync(srcPath, destPath);
-        }
-      }
-
-      // Remove old directory
-      fs.rmSync(symlinkPath, { recursive: true, force: true });
     } else {
-      // Regular file - remove it
-      fs.unlinkSync(symlinkPath);
+      console.error('\n❌ Fatal Error: Cannot create symlink .spck-editor - path already exists');
+      process.exit(1);
     }
   }
 

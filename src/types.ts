@@ -70,7 +70,8 @@ export interface JSONRPCRequest {
   params?: any;
   id?: number | string;
   timestamp?: number;
-  hmac?: string;
+  hmac: string;
+  nonce: string;
 }
 
 export interface JSONRPCResponse {

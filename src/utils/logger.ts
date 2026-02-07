@@ -6,12 +6,56 @@ import chalk from 'chalk';
 import * as path from 'path';
 import * as fs from 'fs';
 
-const LOG_DIR = path.join(process.cwd(), '.spck-editor', 'logs');
 const LOG_RETENTION_DAYS = 30;
+let logDirInitialized = false;
+let cleanupScheduled = false;
 
-// Ensure log directory exists
-if (!fs.existsSync(LOG_DIR)) {
-  fs.mkdirSync(LOG_DIR, { recursive: true });
+/**
+ * Get log directory path (lazy - doesn't create it)
+ */
+function getLogDir(): string {
+  return path.join(process.cwd(), '.spck-editor', 'logs');
+}
+
+/**
+ * Ensure log directory exists (lazy initialization)
+ * Called only when actually writing logs
+ */
+function ensureLogDirectory(): void {
+  if (logDirInitialized) {
+    return;
+  }
+
+  try {
+    const logDir = getLogDir();
+
+    // Check if .spck-editor exists and is accessible
+    const spckEditorDir = path.join(process.cwd(), '.spck-editor');
+    if (!fs.existsSync(spckEditorDir)) {
+      // .spck-editor symlink not set up yet - skip logging to file
+      return;
+    }
+
+    // Create logs subdirectory if needed
+    if (!fs.existsSync(logDir)) {
+      fs.mkdirSync(logDir, { recursive: true });
+    }
+
+    logDirInitialized = true;
+
+    // Schedule cleanup only once, after first successful initialization
+    if (!cleanupScheduled) {
+      cleanupScheduled = true;
+      // Run cleanup after a short delay (not immediately on import)
+      setTimeout(() => {
+        cleanOldLogs();
+        setInterval(cleanOldLogs, 24 * 60 * 60 * 1000).unref();
+      }, 1000).unref();
+    }
+  } catch (error) {
+    // Silently fail if we can't create log directory
+    // Logging will just go to console only
+  }
 }
 
 /**
@@ -19,7 +63,7 @@ if (!fs.existsSync(LOG_DIR)) {
  */
 function getCurrentLogFile(): string {
   const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-  return path.join(LOG_DIR, `spck-cli-${date}.log`);
+  return path.join(getLogDir(), `spck-cli-${date}.log`);
 }
 
 /**
@@ -27,13 +71,18 @@ function getCurrentLogFile(): string {
  */
 function cleanOldLogs(): void {
   try {
-    const files = fs.readdirSync(LOG_DIR);
+    const logDir = getLogDir();
+    if (!fs.existsSync(logDir)) {
+      return;
+    }
+
+    const files = fs.readdirSync(logDir);
     const now = Date.now();
     const retentionMs = LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
     for (const file of files) {
       if (file.startsWith('spck-cli-') && file.endsWith('.log')) {
-        const filePath = path.join(LOG_DIR, file);
+        const filePath = path.join(logDir, file);
         const stats = fs.statSync(filePath);
 
         if (now - stats.mtimeMs > retentionMs) {
@@ -43,13 +92,9 @@ function cleanOldLogs(): void {
       }
     }
   } catch (error) {
-    console.error(chalk.red('[Logger] Error cleaning old logs:'), error);
+    // Silently fail cleanup errors
   }
 }
-
-// Run cleanup on startup and schedule daily
-cleanOldLogs();
-setInterval(cleanOldLogs, 24 * 60 * 60 * 1000).unref();
 
 /**
  * Format timestamp for display (compact format for files)
@@ -87,6 +132,14 @@ function formatUid(uid: string, maxLen: number = 12): string {
  */
 function writeToFile(message: string): void {
   try {
+    // Lazy initialization - only create log directory when actually writing
+    ensureLogDirectory();
+
+    if (!logDirInitialized) {
+      // Log directory couldn't be initialized, skip file logging
+      return;
+    }
+
     const logFile = getCurrentLogFile();
     const timestamp = formatTime();
     fs.appendFileSync(logFile, `[${timestamp}] ${message}\n`);

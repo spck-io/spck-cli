@@ -1076,4 +1076,244 @@ describe('GitService', () => {
       expect(result.oid).toBe(expected);
     });
   });
+
+  describe('Command Injection Prevention', () => {
+    beforeEach(async () => {
+      await execGit(['init'], repoPath);
+      await execGit(['config', 'user.email', 'test@example.com'], repoPath);
+      await execGit(['config', 'user.name', 'Test User'], repoPath);
+    });
+
+    describe('add command', () => {
+      it('should reject filenames starting with dash', async () => {
+        await fs.writeFile(path.join(repoPath, '-evil.txt'), 'content');
+
+        await expect(
+          service.handle(
+            'add',
+            { dir: '/repo', filepaths: ['-evil.txt'] },
+            mockSocket
+          )
+        ).rejects.toMatchObject({
+          code: ErrorCode.INVALID_PATH,
+          message: expect.stringContaining('cannot start with dash'),
+        });
+      });
+
+      it('should reject filenames with control characters', async () => {
+        await expect(
+          service.handle(
+            'add',
+            { dir: '/repo', filepaths: ['file\x00.txt'] },
+            mockSocket
+          )
+        ).rejects.toMatchObject({
+          code: ErrorCode.INVALID_PATH,
+          message: expect.stringContaining('control characters'),
+        });
+      });
+
+      it('should reject filenames with newlines', async () => {
+        await expect(
+          service.handle(
+            'add',
+            { dir: '/repo', filepaths: ['file\n.txt'] },
+            mockSocket
+          )
+        ).rejects.toMatchObject({
+          code: ErrorCode.INVALID_PATH,
+          message: expect.stringContaining('newline'),
+        });
+      });
+
+      it('should accept valid filenames with special characters', async () => {
+        await fs.writeFile(path.join(repoPath, 'file@#$%.txt'), 'content');
+
+        const result = await service.handle(
+          'add',
+          { dir: '/repo', filepaths: ['file@#$%.txt'] },
+          mockSocket
+        );
+
+        expect(result.success).toBe(true);
+      });
+
+      it('should reject when any filename in array is malicious', async () => {
+        await fs.writeFile(path.join(repoPath, 'good.txt'), 'content');
+        await fs.writeFile(path.join(repoPath, '-evil.txt'), 'content');
+
+        await expect(
+          service.handle(
+            'add',
+            { dir: '/repo', filepaths: ['good.txt', '-evil.txt'] },
+            mockSocket
+          )
+        ).rejects.toMatchObject({
+          code: ErrorCode.INVALID_PATH,
+          message: expect.stringContaining('cannot start with dash'),
+        });
+      });
+    });
+
+    describe('remove command', () => {
+      beforeEach(async () => {
+        await fs.writeFile(path.join(repoPath, 'file.txt'), 'content');
+        await execGit(['add', '.'], repoPath);
+        await execGit(['commit', '-m', 'Initial'], repoPath);
+      });
+
+      it('should reject filenames starting with dash', async () => {
+        await expect(
+          service.handle(
+            'remove',
+            { dir: '/repo', filepaths: ['-evil.txt'] },
+            mockSocket
+          )
+        ).rejects.toMatchObject({
+          code: ErrorCode.INVALID_PATH,
+          message: expect.stringContaining('cannot start with dash'),
+        });
+      });
+
+      it('should reject filenames with control characters', async () => {
+        await expect(
+          service.handle(
+            'remove',
+            { dir: '/repo', filepaths: ['file\x1F.txt'] },
+            mockSocket
+          )
+        ).rejects.toMatchObject({
+          code: ErrorCode.INVALID_PATH,
+          message: expect.stringContaining('control characters'),
+        });
+      });
+
+      it('should reject filenames with carriage returns', async () => {
+        await expect(
+          service.handle(
+            'remove',
+            { dir: '/repo', filepaths: ['file\r.txt'] },
+            mockSocket
+          )
+        ).rejects.toMatchObject({
+          code: ErrorCode.INVALID_PATH,
+          message: expect.stringContaining('newline'),
+        });
+      });
+    });
+
+    describe('resetIndex command', () => {
+      beforeEach(async () => {
+        await fs.writeFile(path.join(repoPath, 'file.txt'), 'content');
+        await execGit(['add', '.'], repoPath);
+        await execGit(['commit', '-m', 'Initial'], repoPath);
+      });
+
+      it('should reject single filepath starting with dash', async () => {
+        await expect(
+          service.handle(
+            'resetIndex',
+            { dir: '/repo', filepath: '-evil.txt' },
+            mockSocket
+          )
+        ).rejects.toMatchObject({
+          code: ErrorCode.INVALID_PATH,
+          message: expect.stringContaining('cannot start with dash'),
+        });
+      });
+
+      it('should reject filepaths array with dash-prefixed filename', async () => {
+        await expect(
+          service.handle(
+            'resetIndex',
+            { dir: '/repo', filepaths: ['-evil.txt'] },
+            mockSocket
+          )
+        ).rejects.toMatchObject({
+          code: ErrorCode.INVALID_PATH,
+          message: expect.stringContaining('cannot start with dash'),
+        });
+      });
+
+      it('should reject filepath with DEL character', async () => {
+        await expect(
+          service.handle(
+            'resetIndex',
+            { dir: '/repo', filepath: 'file\x7F.txt' },
+            mockSocket
+          )
+        ).rejects.toMatchObject({
+          code: ErrorCode.INVALID_PATH,
+          message: expect.stringContaining('control characters'),
+        });
+      });
+
+      it('should accept valid filepath in single mode', async () => {
+        await fs.writeFile(path.join(repoPath, 'valid.txt'), 'content');
+        await execGit(['add', 'valid.txt'], repoPath);
+
+        const result = await service.handle(
+          'resetIndex',
+          { dir: '/repo', filepath: 'valid.txt' },
+          mockSocket
+        );
+
+        expect(result.success).toBe(true);
+      });
+
+      it('should accept valid filepaths in array mode', async () => {
+        await fs.writeFile(path.join(repoPath, 'valid1.txt'), 'content1');
+        await fs.writeFile(path.join(repoPath, 'valid2.txt'), 'content2');
+        await execGit(['add', '.'], repoPath);
+
+        const result = await service.handle(
+          'resetIndex',
+          { dir: '/repo', filepaths: ['valid1.txt', 'valid2.txt'] },
+          mockSocket
+        );
+
+        expect(result.success).toBe(true);
+      });
+    });
+
+    describe('flag injection via -- separator', () => {
+      it('should safely handle files that look like git flags in add', async () => {
+        // This test verifies that the -- separator prevents flag injection
+        // Even though the filename starts with -, it's sanitized before reaching git
+        await expect(
+          service.handle(
+            'add',
+            { dir: '/repo', filepaths: ['--version'] },
+            mockSocket
+          )
+        ).rejects.toMatchObject({
+          code: ErrorCode.INVALID_PATH,
+        });
+      });
+
+      it('should safely handle files that look like git flags in remove', async () => {
+        await expect(
+          service.handle(
+            'remove',
+            { dir: '/repo', filepaths: ['--help'] },
+            mockSocket
+          )
+        ).rejects.toMatchObject({
+          code: ErrorCode.INVALID_PATH,
+        });
+      });
+
+      it('should safely handle files that look like git flags in resetIndex', async () => {
+        await expect(
+          service.handle(
+            'resetIndex',
+            { dir: '/repo', filepath: '--cached' },
+            mockSocket
+          )
+        ).rejects.toMatchObject({
+          code: ErrorCode.INVALID_PATH,
+        });
+      });
+    });
+  });
 });

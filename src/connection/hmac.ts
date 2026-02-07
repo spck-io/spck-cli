@@ -1,9 +1,48 @@
 /**
- * HMAC message signing validation
+ * HMAC message signing validation with replay attack prevention
  */
 
 import * as crypto from 'crypto';
 import { JSONRPCRequest, ErrorCode, createRPCError } from '../types.js';
+
+/**
+ * Nonce tracking to prevent replay attacks
+ * Stores nonces with their expiry timestamps
+ */
+const seenNonces = new Map<string, number>();
+
+/**
+ * Clean up expired nonces from the tracking map
+ */
+function cleanExpiredNonces(): void {
+  const now = Date.now();
+  for (const [nonce, expiry] of seenNonces.entries()) {
+    if (expiry < now) {
+      seenNonces.delete(nonce);
+    }
+  }
+}
+
+/**
+ * Get statistics about nonce tracking (for testing/monitoring)
+ */
+export function getNonceStats(): { total: number; active: number } {
+  const now = Date.now();
+  let active = 0;
+  for (const expiry of seenNonces.values()) {
+    if (expiry >= now) {
+      active++;
+    }
+  }
+  return { total: seenNonces.size, active };
+}
+
+/**
+ * Clear all tracked nonces (for testing)
+ */
+export function clearNonces(): void {
+  seenNonces.clear();
+}
 
 /**
  * Validate HMAC signature on JSON-RPC request
@@ -19,8 +58,10 @@ export function validateHMAC(message: JSONRPCRequest, signingKey: string): boole
     method: message.method,
     params: message.params,
     id: message.id,
+    nonce: message.nonce
   };
 
+  // Include nonce in signature if present (for replay attack prevention)
   const messageToSign = message.timestamp + JSON.stringify(payload);
 
   // Compute HMAC
@@ -56,11 +97,11 @@ export function requireValidHMAC(message: JSONRPCRequest, signingKey: string): v
     );
   }
 
-  // Check timestamp is recent (within 5 minutes)
+  // Check timestamp is recent (within 2 minutes)
   if (message.timestamp) {
     const now = Date.now();
     const age = now - message.timestamp;
-    const maxAge = 5 * 60 * 1000; // 5 minutes
+    const maxAge = 2 * 60 * 1000; // 2 minutes (reduced from 5 to mitigate replay attacks)
 
     if (age > maxAge || age < -60000) {
       // Allow 1 minute clock skew
@@ -70,5 +111,23 @@ export function requireValidHMAC(message: JSONRPCRequest, signingKey: string): v
         { timestamp: message.timestamp, serverTime: now }
       );
     }
+  }
+
+  // Check nonce to prevent replay attacks
+  if (seenNonces.has(message.nonce)) {
+    throw createRPCError(
+      ErrorCode.HMAC_VALIDATION_FAILED,
+      'Duplicate nonce detected - possible replay attack',
+      { nonce: message.nonce }
+    );
+  }
+
+  // Store nonce with expiry (2 minutes from now)
+  const maxAge = 2 * 60 * 1000;
+  seenNonces.set(message.nonce, Date.now() + maxAge);
+
+  // Clean up expired nonces periodically
+  if (seenNonces.size > 1000) {
+    cleanExpiredNonces();
   }
 }

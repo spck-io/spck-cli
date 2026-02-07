@@ -6,7 +6,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-const SPCK_EDITOR_PATTERN = '.spck-editor/';
+const DIR_PATTERN = '.spck-editor/';
+const SYMLINK_FILENAME = '.spck-editor'
 
 /**
  * Check if .gitignore exists in a directory
@@ -39,7 +40,7 @@ export function isSpckEditorIgnored(directory: string): boolean {
         continue;
       }
       // Check if line contains .spck-editor/ pattern
-      if (trimmed === SPCK_EDITOR_PATTERN || trimmed === '.spck-editor') {
+      if (trimmed === DIR_PATTERN || trimmed === SYMLINK_FILENAME) {
         return true;
       }
     }
@@ -77,7 +78,7 @@ export function addSpckEditorToGitignore(directory: string): void {
   }
 
   // Add comment and pattern
-  const addition = `\n# Spck CLI project data (symlink to ~/.spck-editor/projects/)\n${SPCK_EDITOR_PATTERN}\n`;
+  const addition = `\n# Spck CLI project data\n${DIR_PATTERN}\n${SYMLINK_FILENAME}\n`;
 
   // Write back to file
   fs.writeFileSync(gitignorePath, content + addition, 'utf8');

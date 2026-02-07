@@ -124,7 +124,7 @@ describe('gitignore utilities', () => {
       addSpckEditorToGitignore(tempDir);
 
       const content = fs.readFileSync(gitignorePath, 'utf8');
-      expect(content).toBe('node_modules/\n\n# Spck CLI project data (symlink to ~/.spck-editor/projects/)\n.spck-editor/\n');
+      expect(content).toBe('node_modules/\n\n# Spck CLI project data\n.spck-editor/\n.spck-editor\n');
     });
 
     it('should not add .spck-editor/ if already present', () => {
