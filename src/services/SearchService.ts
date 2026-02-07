@@ -624,7 +624,13 @@ export class SearchService {
       if (error.message?.includes('invalid') || error.message?.includes('encoding')) {
         return null;
       }
-      throw createRPCError(ErrorCode.INTERNAL_ERROR, `Failed to read file: ${error.message}`);
+      // Log full error server-side
+      console.error('Failed to read file for search:', {
+        path: absolutePath,
+        error: error.message,
+      });
+      // Send sanitized error to client
+      throw createRPCError(ErrorCode.INTERNAL_ERROR, 'Failed to read file');
     }
 
     const results: SearchResult[] = [];
@@ -727,7 +733,13 @@ export class SearchService {
       if (error.message?.includes('invalid') || error.message?.includes('encoding')) {
         return null;
       }
-      throw createRPCError(ErrorCode.INTERNAL_ERROR, `Failed to search file: ${error.message}`);
+      // Log full error server-side
+      console.error('Failed to search file:', {
+        path: absolutePath,
+        error: error.message,
+      });
+      // Send sanitized error to client
+      throw createRPCError(ErrorCode.INTERNAL_ERROR, 'Failed to search file');
     }
 
     return results.length > 0 ? results : null;

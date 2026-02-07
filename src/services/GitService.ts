@@ -246,12 +246,27 @@ export class GitService {
       }
 
       git.on('error', (error) => {
-        reject(new Error(`Failed to execute git: ${error.message}`));
+        // Log full error server-side
+        console.error('Failed to execute git:', {
+          args,
+          error: error.message,
+          cwd: options.cwd,
+        });
+        // Send sanitized error to client
+        reject(new Error('Failed to execute git command'));
       });
 
       git.on('close', (code) => {
         if (code !== 0) {
-          reject(new Error(`Git command failed with code ${code}: ${stderr || stdout}`));
+          // Log full output server-side for debugging
+          console.error('Git command failed:', {
+            args,
+            code,
+            stderr: stderr.substring(0, 500), // Truncate for logs
+            stdout: stdout.substring(0, 500),
+          });
+          // Send sanitized error to client (no file paths from stderr/stdout)
+          reject(new Error(`Git command failed with exit code ${code}`));
         } else {
           resolve({ stdout, stderr, code: code || 0 });
         }
@@ -316,7 +331,10 @@ export class GitService {
   private parseIdentity(identityString: string): any {
     const match = identityString.match(/^(.+) <(.+)> (\d+) ([+-]\d{4})$/);
     if (!match) {
-      throw new Error(`Invalid identity format: ${identityString}`);
+      // Log full identity string server-side for debugging
+      console.error('Invalid git identity format:', identityString);
+      // Send sanitized error to client
+      throw new Error('Invalid git identity format');
     }
 
     return {

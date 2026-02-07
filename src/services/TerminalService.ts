@@ -144,15 +144,19 @@ export class TerminalService {
         env: process.env,
       });
     } catch (error: any) {
-      // Provide more helpful error message for common PTY spawn failures
-      if (error.message && error.message.includes('posix_spawnp')) {
-        throw createRPCError(
-          ErrorCode.INTERNAL_ERROR,
-          `Failed to spawn terminal: ${error.message}. Shell: ${shell}, CWD: ${this.rootPath}. ` +
-          `Please check that the shell executable exists and the working directory is accessible.`
-        );
-      }
-      throw error;
+      // Log full error details server-side for debugging
+      console.error('Failed to spawn terminal:', {
+        error: error.message,
+        shell,
+        cwd: this.rootPath,
+        stack: error.stack,
+      });
+
+      // Send sanitized error to client (no system paths or stack traces)
+      throw createRPCError(
+        ErrorCode.INTERNAL_ERROR,
+        'Failed to spawn terminal. Please check that the shell is available and the working directory is accessible.'
+      );
     }
 
     // Create headless xterm for buffer management

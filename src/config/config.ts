@@ -154,7 +154,7 @@ export function createDefaultConfig(overrides: Partial<ServerConfig> = {}): Serv
       userAuthenticationEnabled: false,
     },
     filesystem: {
-      maxFileSize: '100MB',
+      maxFileSize: '10MB',
       watchIgnorePatterns: [
         '**/.git/**',
         '**/.spck-editor/**',
