@@ -32,7 +32,13 @@ let proxyClient: ProxyClient | null = null;
 /**
  * Start the proxy client
  */
-export async function startProxyClient(configPath?: string): Promise<void> {
+export async function startProxyClient(
+  configPath?: string,
+  options?: {
+    disableGit?: boolean;
+    disableRipgrep?: boolean;
+  }
+): Promise<void> {
   console.log('\n' + '='.repeat(60));
   console.log('     Spck CLI');
   console.log('='.repeat(60) + '\n');
@@ -97,7 +103,10 @@ export async function startProxyClient(configPath?: string): Promise<void> {
     }
 
     // Step 4: Detect tools
-    const tools = await detectTools();
+    const tools = await detectTools({
+      disableGit: options?.disableGit,
+      disableRipgrep: options?.disableRipgrep,
+    });
 
     // Step 5: Initialize RPC Router
     RPCRouter.initialize(config.root, config);
@@ -133,7 +142,7 @@ export async function startProxyClient(configPath?: string): Promise<void> {
     }
 
     // Step 7: Display feature summary
-    displayFeatureSummary(tools, config.terminal.enabled);
+    displayFeatureSummary(tools, config.terminal.enabled, config.security.userAuthenticationEnabled);
 
     // Step 7: Create and connect ProxyClient
     proxyClient = new ProxyClient({
@@ -409,6 +418,17 @@ export async function main(): Promise<void> {
       type: 'string',
       description: 'Root directory to serve (overrides config)',
     })
+    // Hidden development flags (not documented)
+    .option('__internal_disable_ripgrep', {
+      type: 'boolean',
+      hidden: true,
+      default: false,
+    })
+    .option('__internal_disable_git', {
+      type: 'boolean',
+      hidden: true,
+      default: false,
+    })
     .help()
     .alias('help', 'h')
     .version()
@@ -443,7 +463,10 @@ export async function main(): Promise<void> {
     await runSetup(argv.config as string | undefined);
     process.exit(0);
   } else {
-    await startProxyClient(argv.config as string | undefined);
+    await startProxyClient(argv.config as string | undefined, {
+      disableGit: argv.__internal_disable_git as boolean | undefined,
+      disableRipgrep: argv.__internal_disable_ripgrep as boolean | undefined,
+    });
   }
 }
 

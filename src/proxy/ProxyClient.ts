@@ -462,10 +462,15 @@ export class ProxyClient {
 
     try {
       // Verify Firebase token
+      // If userAuthenticationEnabled, restrict to the userId from connection settings
+      const allowedUids = this.config.security.userAuthenticationEnabled && this.connectionSettings?.userId
+        ? [this.connectionSettings.userId]
+        : [];
+
       const payload = await verifyFirebaseToken(
         firebaseToken,
         'spck-editor',
-        [] // No UID restriction for client
+        allowedUids
       );
 
       // Check if userId matches
