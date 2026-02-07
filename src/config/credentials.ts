@@ -174,16 +174,16 @@ export function saveConnectionSettings(settings: any): void {
   const settingsPath = getConnectionSettingsPath();
 
   try {
-    // Ensure directory exists
+    // Ensure directory exists with restricted permissions
     if (!fs.existsSync(settingsDir)) {
-      fs.mkdirSync(settingsDir, { recursive: true });
+      fs.mkdirSync(settingsDir, { recursive: true, mode: 0o700 });
     }
 
-    // Write settings file
+    // Write settings file with restricted permissions (owner read/write only)
     fs.writeFileSync(
       settingsPath,
       JSON.stringify(settings, null, 2),
-      'utf8'
+      { encoding: 'utf8', mode: 0o600 }
     );
   } catch (error: any) {
     // Add context to error

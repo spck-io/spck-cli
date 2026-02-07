@@ -3,7 +3,6 @@
  */
 
 import * as fs from 'fs';
-import * as path from 'path';
 import * as os from 'os';
 import {
   loadCredentials,
@@ -285,11 +284,11 @@ describe('credentials', () => {
 
       expect(mockFs.mkdirSync).toHaveBeenCalledWith(
         `${mockCwd}/.spck-editor`,
-        { recursive: true }
+        { recursive: true, mode: 0o700 }
       );
     });
 
-    it('should write settings file', () => {
+    it('should write settings file with restricted permissions', () => {
       mockFs.existsSync.mockReturnValue(true);
       mockFs.writeFileSync.mockReturnValue(undefined);
 
@@ -298,7 +297,7 @@ describe('credentials', () => {
       expect(mockFs.writeFileSync).toHaveBeenCalledWith(
         `${mockCwd}/.spck-editor/connection-settings.json`,
         JSON.stringify(mockSettings, null, 2),
-        'utf8'
+        { encoding: 'utf8', mode: 0o600 }
       );
     });
 
