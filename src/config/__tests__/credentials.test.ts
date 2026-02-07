@@ -46,9 +46,9 @@ describe('credentials', () => {
   });
 
   describe('getConnectionSettingsPath()', () => {
-    it('should return path in current working directory', () => {
+    it('should return path in .spck-editor/config subdirectory', () => {
       const path = getConnectionSettingsPath();
-      expect(path).toBe(`${mockCwd}/.spck-editor/connection-settings.json`);
+      expect(path).toBe(`${mockCwd}/.spck-editor/config/connection-settings.json`);
     });
   });
 
@@ -283,7 +283,7 @@ describe('credentials', () => {
       saveConnectionSettings(mockSettings);
 
       expect(mockFs.mkdirSync).toHaveBeenCalledWith(
-        `${mockCwd}/.spck-editor`,
+        `${mockCwd}/.spck-editor/config`,
         { recursive: true, mode: 0o700 }
       );
     });
@@ -295,7 +295,7 @@ describe('credentials', () => {
       saveConnectionSettings(mockSettings);
 
       expect(mockFs.writeFileSync).toHaveBeenCalledWith(
-        `${mockCwd}/.spck-editor/connection-settings.json`,
+        `${mockCwd}/.spck-editor/config/connection-settings.json`,
         JSON.stringify(mockSettings, null, 2),
         { encoding: 'utf8', mode: 0o600 }
       );
@@ -377,7 +377,7 @@ describe('credentials', () => {
       clearConnectionSettings();
 
       expect(mockFs.unlinkSync).toHaveBeenCalledWith(
-        `${mockCwd}/.spck-editor/connection-settings.json`
+        `${mockCwd}/.spck-editor/config/connection-settings.json`
       );
     });
 

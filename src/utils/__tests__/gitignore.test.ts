@@ -59,11 +59,11 @@ describe('gitignore utilities', () => {
       expect(isSpckEditorIgnored(tempDir)).toBe(true);
     });
 
-    it('should return true when .spck-editor (without slash) is in .gitignore', () => {
+    it('should return false when only .spck-editor (without slash) is in .gitignore', () => {
       const gitignorePath = path.join(tempDir, '.gitignore');
       fs.writeFileSync(gitignorePath, 'node_modules/\n.spck-editor\ndist/\n', 'utf8');
 
-      expect(isSpckEditorIgnored(tempDir)).toBe(true);
+      expect(isSpckEditorIgnored(tempDir)).toBe(false);
     });
 
     it('should ignore comments in .gitignore', () => {
@@ -124,7 +124,7 @@ describe('gitignore utilities', () => {
       addSpckEditorToGitignore(tempDir);
 
       const content = fs.readFileSync(gitignorePath, 'utf8');
-      expect(content).toBe('node_modules/\n\n# Spck CLI project data\n.spck-editor/\n.spck-editor\n');
+      expect(content).toBe('node_modules/\n\n# Spck CLI project data\n.spck-editor/\n');
     });
 
     it('should not add .spck-editor/ if already present', () => {
@@ -139,7 +139,7 @@ describe('gitignore utilities', () => {
       expect(content).toBe(initialContent);
     });
 
-    it('should not add if .spck-editor (without slash) is present', () => {
+    it('should add .spck-editor/ even if .spck-editor (without slash) is present', () => {
       const gitignorePath = path.join(tempDir, '.gitignore');
       const initialContent = 'node_modules/\n.spck-editor\ndist/\n';
       fs.writeFileSync(gitignorePath, initialContent, 'utf8');
@@ -147,8 +147,9 @@ describe('gitignore utilities', () => {
       addSpckEditorToGitignore(tempDir);
 
       const content = fs.readFileSync(gitignorePath, 'utf8');
-      // Content should be unchanged
-      expect(content).toBe(initialContent);
+      // Should add the pattern since .spck-editor (without slash) is different from .spck-editor/
+      expect(content).toContain('.spck-editor/');
+      expect(content).toContain('# Spck CLI project data');
     });
 
     it('should handle empty .gitignore file', () => {

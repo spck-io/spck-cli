@@ -1,7 +1,7 @@
 /**
  * Project directory management with symlink support
- * Stores .spck-editor as a symlink to ~/.spck-editor/project/{project_id}
- * This prevents accidental git commits of secrets
+ * .spck-editor/ is a regular directory with .spck-editor/config symlinked to ~/.spck-editor/projects/{id}
+ * This prevents accidental git commits of secrets while avoiding cross-device link errors
  */
 
 import * as fs from 'fs';
@@ -10,6 +10,7 @@ import * as os from 'os';
 import * as crypto from 'crypto';
 
 const PROJECT_DIR_NAME = '.spck-editor';
+const CONFIG_SUBDIR_NAME = 'config';
 
 /**
  * Get the home base directory for projects
@@ -42,27 +43,62 @@ export function getProjectDataPath(projectRoot: string): string {
 }
 
 /**
- * Get the symlink path in the project directory
+ * Get the .spck-editor directory path in the project
+ */
+export function getProjectDirPath(projectRoot: string): string {
+  return path.join(projectRoot, PROJECT_DIR_NAME);
+}
+
+/**
+ * Get the config symlink path (.spck-editor/config)
+ */
+export function getConfigSymlinkPath(projectRoot: string): string {
+  return path.join(projectRoot, PROJECT_DIR_NAME, CONFIG_SUBDIR_NAME);
+}
+
+/**
+ * @deprecated Use getConfigSymlinkPath() instead
+ * Legacy compatibility - returns config symlink path
  */
 export function getProjectSymlinkPath(projectRoot: string): string {
-  return path.join(projectRoot, PROJECT_DIR_NAME);
+  return getConfigSymlinkPath(projectRoot);
 }
 
 /**
  * Check if the project directory exists and is properly set up
  */
 export function isProjectDirSetup(projectRoot: string): boolean {
-  const symlinkPath = getProjectSymlinkPath(projectRoot);
+  const projectDir = getProjectDirPath(projectRoot);
+  const configSymlink = getConfigSymlinkPath(projectRoot);
   const dataPath = getProjectDataPath(projectRoot);
 
-  // Check if symlink exists
-  if (!fs.existsSync(symlinkPath)) {
+  // Check if .spck-editor directory exists
+  if (!fs.existsSync(projectDir)) {
     return false;
   }
 
-  // Check if it's a symlink
+  // Check if .spck-editor is a directory (not old-style symlink)
   try {
-    const stats = fs.lstatSync(symlinkPath);
+    const stats = fs.lstatSync(projectDir);
+    if (stats.isSymbolicLink()) {
+      // Old structure - needs migration
+      return false;
+    }
+    if (!stats.isDirectory()) {
+      return false;
+    }
+  } catch (error) {
+    return false;
+  }
+
+  // Check if config symlink exists
+  if (!fs.existsSync(configSymlink)) {
+    return false;
+  }
+
+  // Check if config is a symlink
+  try {
+    const stats = fs.lstatSync(configSymlink);
     if (!stats.isSymbolicLink()) {
       return false;
     }
@@ -79,11 +115,12 @@ export function isProjectDirSetup(projectRoot: string): boolean {
 }
 
 /**
- * Setup the project directory with symlink
- * Creates ~/.spck-editor/projects/{project_id}/ and symlinks to it
+ * Setup the project directory with config symlink
+ * Creates ~/.spck-editor/projects/{project_id}/ and symlinks .spck-editor/config to it
  */
 export function setupProjectDir(projectRoot: string): void {
-  const symlinkPath = getProjectSymlinkPath(projectRoot);
+  const projectDir = getProjectDirPath(projectRoot);
+  const configSymlink = getConfigSymlinkPath(projectRoot);
   const dataPath = getProjectDataPath(projectRoot);
   const homeBaseDir = getHomeBaseDir();
 
@@ -97,32 +134,39 @@ export function setupProjectDir(projectRoot: string): void {
     fs.mkdirSync(dataPath, { recursive: true, mode: 0o700 });
   }
 
-  // Handle existing .spck-editor in project directory
-  if (fs.existsSync(symlinkPath)) {
-    const stats = fs.lstatSync(symlinkPath);
+  // Create .spck-editor directory if it doesn't exist
+  if (!fs.existsSync(projectDir)) {
+    fs.mkdirSync(projectDir, { mode: 0o700 });
+  }
 
-    if (stats.isSymbolicLink()) {
-      // Already a symlink - check if it points to the right place
-      const target = fs.readlinkSync(symlinkPath);
-      if (target === dataPath) {
-        // Already correctly set up
-        return;
-      }
-
-      // Points to wrong location - remove and recreate
-      fs.unlinkSync(symlinkPath);
-    } else {
-      console.error('\n❌ Fatal Error: Cannot create symlink .spck-editor - path already exists');
-      process.exit(1);
+  // Create subdirectories (.tmp, .trash, logs)
+  const subdirs = ['.tmp', '.trash', 'logs'];
+  for (const subdir of subdirs) {
+    const subdirPath = path.join(projectDir, subdir);
+    if (!fs.existsSync(subdirPath)) {
+      fs.mkdirSync(subdirPath, { mode: 0o700 });
     }
   }
 
-  // Create symlink
-  fs.symlinkSync(dataPath, symlinkPath, 'dir');
+  // Create config symlink if it doesn't exist
+  if (!fs.existsSync(configSymlink)) {
+    fs.symlinkSync(dataPath, configSymlink, 'dir');
+  } else {
+    // Verify existing symlink points to correct location
+    const stats = fs.lstatSync(configSymlink);
+    if (stats.isSymbolicLink()) {
+      const target = fs.readlinkSync(configSymlink);
+      if (target !== dataPath) {
+        // Points to wrong location - remove and recreate
+        fs.unlinkSync(configSymlink);
+        fs.symlinkSync(dataPath, configSymlink, 'dir');
+      }
+    }
+  }
 
   console.log(`✅ Project directory configured`);
-  console.log(`   Symlink: ${symlinkPath}`);
-  console.log(`   Data:    ${dataPath}\n`);
+  console.log(`   Directory: ${projectDir}`);
+  console.log(`   Config:    ${configSymlink} -> ${dataPath}\n`);
 }
 
 /**
@@ -136,33 +180,37 @@ export function ensureProjectDir(projectRoot: string): void {
 
 /**
  * Get the absolute path to a file within the project directory
- * Always resolves through the symlink to the actual data directory
+ * Files go in .spck-editor/{filename} (local) or .spck-editor/config/{filename} (symlinked)
+ * Config files (like connection-settings.json) go in the config subdirectory
  */
 export function getProjectFilePath(projectRoot: string, filename: string): string {
-  const symlinkPath = getProjectSymlinkPath(projectRoot);
-  return path.join(symlinkPath, filename);
+  const projectDir = getProjectDirPath(projectRoot);
+
+  // Config files go in the symlinked config directory
+  const configFiles = ['connection-settings.json', '.credentials.json'];
+  if (configFiles.includes(filename)) {
+    const configSymlink = getConfigSymlinkPath(projectRoot);
+    return path.join(configSymlink, filename);
+  }
+
+  // All other files go in the local .spck-editor directory
+  return path.join(projectDir, filename);
 }
 
 /**
  * Remove project directory and all associated data
- * WARNING: This deletes the data directory in home, not just the symlink
+ * WARNING: This deletes the data directory in home and the local .spck-editor directory
  */
 export function removeProjectDir(projectRoot: string): void {
-  const symlinkPath = getProjectSymlinkPath(projectRoot);
+  const projectDir = getProjectDirPath(projectRoot);
   const dataPath = getProjectDataPath(projectRoot);
 
-  // Remove symlink if exists
-  if (fs.existsSync(symlinkPath)) {
-    const stats = fs.lstatSync(symlinkPath);
-    if (stats.isSymbolicLink()) {
-      fs.unlinkSync(symlinkPath);
-    } else {
-      // Regular directory - remove recursively
-      fs.rmSync(symlinkPath, { recursive: true, force: true });
-    }
+  // Remove .spck-editor directory if exists (includes config symlink and local files)
+  if (fs.existsSync(projectDir)) {
+    fs.rmSync(projectDir, { recursive: true, force: true });
   }
 
-  // Remove data directory if exists
+  // Remove data directory in home if exists
   if (fs.existsSync(dataPath)) {
     fs.rmSync(dataPath, { recursive: true, force: true });
   }

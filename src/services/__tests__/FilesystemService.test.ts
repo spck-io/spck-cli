@@ -74,15 +74,6 @@ describe('FilesystemService', () => {
       expect(result.exists).toBe(false);
     });
 
-    it('should block access to .spck-editor directory', async () => {
-      await expect(
-        service.handle('exists', { path: '/.spck-editor/config.json' }, mockSocket)
-      ).rejects.toMatchObject({
-        code: ErrorCode.INVALID_PATH,
-        message: expect.stringContaining('hidden directory'),
-      });
-    });
-
     it('should normalize paths correctly', async () => {
       await fs.writeFile(path.join(testRoot, 'test.txt'), 'content');
 

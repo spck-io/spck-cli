@@ -123,7 +123,6 @@ export class FilesystemService {
   /**
    * Validate and sandbox path with symlink resolution
    * Prevents directory traversal and symlink escape attacks
-   * Special handling for .spck-editor symlink which intentionally points outside root
    */
   private async validatePath(userPath: string): Promise<string> {
     // Normalize path
@@ -142,26 +141,7 @@ export class FilesystemService {
       throw createRPCError(ErrorCode.INVALID_PATH, 'Access denied: path outside root directory');
     }
 
-    // Check .spck-editor allowlist BEFORE symlink resolution
-    // .spck-editor is a symlink pointing outside root (to ~/.spck-editor/projects/{id}/)
-    // We must allow .tmp and .trash subdirectories to work correctly
-    if (normalized.includes('.spck-editor')) {
-      const allowedPaths = ['.spck-editor/.tmp', '.spck-editor/.trash'];
-      const isAllowed = allowedPaths.some(allowed => normalized.includes(allowed));
-
-      if (!isAllowed) {
-        throw createRPCError(
-          ErrorCode.INVALID_PATH,
-          `Access denied: hidden directory (path: ${normalized})`
-        );
-      }
-
-      // Path is in allowlist - return without symlink validation
-      // This allows .spck-editor to point outside root as intended
-      return absolute;
-    }
-
-    // For all other paths, resolve symlinks and verify they stay within root
+    // Resolve symlinks and verify they stay within root
     try {
       // Try to resolve the path (follows all symlinks including in rootPath)
       const realPath = await fs.realpath(absolute);
