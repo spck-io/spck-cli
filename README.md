@@ -312,7 +312,7 @@ Each CLI connection has unique security credentials:
 - **Secret**: Cryptographically secure random secret (generated per connection, never transmitted through the internet)
 - **Server Token**: Time-limited token that expires after 24 hours
 
-The Client ID and Secret are stored in `.spck-editor/connection-settings.json` and should never be shared publicly. Anyone with access to these credentials can connect to your CLI instance if `userAuthenticationEnabled` is also disabled.
+The Client ID and Secret are stored in `.spck-editor/config/connection-settings.json` and should never be shared publicly. Anyone with access to these credentials can connect to your CLI instance if `userAuthenticationEnabled` is also disabled.
 
 ### Terminal Access Control
 

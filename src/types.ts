@@ -38,7 +38,7 @@ export interface ServerConfig {
   };
 }
 
-// Connection Settings (stored in .spck-editor/connection-settings.json)
+// Connection Settings (stored in .spck-editor/config/connection-settings.json)
 export interface ConnectionSettings {
   serverToken: string;
   serverTokenExpiry: number;

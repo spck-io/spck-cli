@@ -20,7 +20,7 @@ const mockFs = fs as jest.Mocked<typeof fs>;
 
 describe('config', () => {
   const mockCwd = '/mock/project';
-  const defaultConfigPath = `${mockCwd}/.spck-editor/spck-cli.config.json`;
+  const defaultConfigPath = `${mockCwd}/.spck-editor/config/spck-cli.config.json`;
 
   beforeEach(() => {
     jest.clearAllMocks();

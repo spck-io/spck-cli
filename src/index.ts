@@ -382,8 +382,7 @@ export async function main(): Promise<void> {
     .option('config', {
       alias: 'c',
       type: 'string',
-      description: 'Path to configuration file',
-      default: '.spck-editor/spck-cli.config.json',
+      description: 'Path to configuration file (default: .spck-editor/config/spck-cli.config.json)',
     })
     .option('setup', {
       type: 'boolean',

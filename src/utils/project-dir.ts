@@ -187,7 +187,7 @@ export function getProjectFilePath(projectRoot: string, filename: string): strin
   const projectDir = getProjectDirPath(projectRoot);
 
   // Config files go in the symlinked config directory
-  const configFiles = ['connection-settings.json', '.credentials.json'];
+  const configFiles = ['connection-settings.json', '.credentials.json', 'spck-cli.config.json'];
   if (configFiles.includes(filename)) {
     const configSymlink = getConfigSymlinkPath(projectRoot);
     return path.join(configSymlink, filename);
