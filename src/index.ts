@@ -424,10 +424,10 @@ export async function main(): Promise<void> {
     .epilogue(
       'For more information, visit: https://github.com/spck-io/spck\n\n' +
       'Configuration:\n' +
-      '  User credentials are stored in ~/.spck-editor/.credentials.json\n' +
-      '  Project data is stored in ~/.spck-editor/projects/{project_id}/\n' +
-      '  .spck-editor in your project is a symlink to the project data directory\n' +
-      '  This prevents accidentally committing secrets to git\n\n' +
+      '  User credentials: ~/.spck-editor/.credentials.json\n' +
+      '  Project data: ~/.spck-editor/projects/{project_id}/\n' +
+      '  Project directory: .spck-editor/ (contains local files and config symlink)\n' +
+      '  Config symlink: .spck-editor/config -> ~/.spck-editor/projects/{project_id}/\n\n' +
       'Authentication:\n' +
       '  The CLI uses Firebase authentication to securely connect to the proxy server.\n' +
       '  You will be prompted to authenticate on first run or when credentials expire.\n' +

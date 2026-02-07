@@ -32,7 +32,7 @@ function ensureLogDirectory(): void {
     // Check if .spck-editor exists and is accessible
     const spckEditorDir = path.join(process.cwd(), '.spck-editor');
     if (!fs.existsSync(spckEditorDir)) {
-      // .spck-editor symlink not set up yet - skip logging to file
+      // .spck-editor directory not set up yet - skip logging to file
       return;
     }
 
