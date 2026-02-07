@@ -12,6 +12,9 @@ import { logTerminalRead, logTerminalWrite } from '../utils/logger.js';
 const { Terminal: XtermHeadless } = XtermHeadlessModule as any;
 const { SerializeAddon } = SerializeAddonModule as any;
 
+// Hard limit on terminal buffer size to prevent memory exhaustion (DoS)
+const MAX_BUFFER_LINES_HARD_LIMIT = 50000;
+
 interface TerminalSession {
   id: string;
   pty: pty.IPty;
@@ -34,7 +37,16 @@ export class TerminalService {
     private maxTerminals: number = 10,
     private maxBufferedLines: number = 10000,
     private rootPath: string = process.cwd()
-  ) {}
+  ) {
+    // Enforce hard limit on buffer size to prevent memory exhaustion
+    if (this.maxBufferedLines > MAX_BUFFER_LINES_HARD_LIMIT) {
+      console.warn(
+        `Terminal buffer size ${this.maxBufferedLines} exceeds hard limit ${MAX_BUFFER_LINES_HARD_LIMIT}. ` +
+        `Capping at ${MAX_BUFFER_LINES_HARD_LIMIT} lines.`
+      );
+      this.maxBufferedLines = MAX_BUFFER_LINES_HARD_LIMIT;
+    }
+  }
 
   /**
    * Get UID from socket with fallback
@@ -147,7 +159,8 @@ export class TerminalService {
     const xterm = new XtermHeadless({
       cols: params.cols || 80,
       rows: params.rows || 24,
-      scrollback: this.maxBufferedLines,
+      // Enforce hard limit as defense in depth (should already be capped in constructor)
+      scrollback: Math.min(this.maxBufferedLines, MAX_BUFFER_LINES_HARD_LIMIT),
       allowProposedApi: true
     });
 

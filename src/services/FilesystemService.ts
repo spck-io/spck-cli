@@ -13,10 +13,27 @@ import { parseFileSize } from '../config/config.js';
 import { logFsRead, logFsWrite } from '../utils/logger.js';
 
 export class FilesystemService {
+  private resolvedRootPath: string;
+  private realRootPath: string | null = null;
+
   constructor(
     private rootPath: string,
     private config: any
-  ) {}
+  ) {
+    // Resolve rootPath symlinks once during construction
+    // This ensures consistent path comparisons in validatePath
+    this.resolvedRootPath = path.resolve(rootPath);
+  }
+
+  /**
+   * Get the real root path (following symlinks), cached after first call
+   */
+  private async getRealRootPath(): Promise<string> {
+    if (!this.realRootPath) {
+      this.realRootPath = await fs.realpath(this.rootPath);
+    }
+    return this.realRootPath;
+  }
 
   /**
    * Handle filesystem RPC methods
@@ -28,7 +45,7 @@ export class FilesystemService {
 
     try {
       // Validate and sandbox path
-      const safePath = params.path ? this.validatePath(params.path) : undefined;
+      const safePath = params.path ? await this.validatePath(params.path) : undefined;
 
       switch (method) {
         case 'exists':
@@ -76,11 +93,11 @@ export class FilesystemService {
           logFsRead(method, params, uid, true, undefined, { isFile: result.isFile, isDirectory: result.isDirectory });
           return result;
         case 'mv':
-          result = await this.mv(this.validatePath(params.src), this.validatePath(params.target), params.opts);
+          result = await this.mv(await this.validatePath(params.src), await this.validatePath(params.target), params.opts);
           logFsWrite(method, params, uid, true, undefined, { type: result });
           return result;
         case 'copy':
-          result = await this.copy(this.validatePath(params.oldpath), safePath!, params.opts);
+          result = await this.copy(await this.validatePath(params.oldpath), safePath!, params.opts);
           logFsWrite(method, params, uid, true, undefined, { type: result });
           return result;
         case 'rmdir':
@@ -104,9 +121,11 @@ export class FilesystemService {
   }
 
   /**
-   * Validate and sandbox path
+   * Validate and sandbox path with symlink resolution
+   * Prevents directory traversal and symlink escape attacks
+   * Special handling for .spck-editor symlink which intentionally points outside root
    */
-  private validatePath(userPath: string): string {
+  private async validatePath(userPath: string): Promise<string> {
     // Normalize path
     const normalized = path.normalize(userPath);
 
@@ -118,12 +137,14 @@ export class FilesystemService {
     // Resolve to absolute path
     const absolute = path.resolve(this.rootPath, normalized.startsWith('/') ? normalized.slice(1) : normalized);
 
-    // Check if within root
-    if (!absolute.startsWith(path.resolve(this.rootPath))) {
+    // Check if within root (before symlink resolution)
+    if (!absolute.startsWith(this.resolvedRootPath)) {
       throw createRPCError(ErrorCode.INVALID_PATH, 'Access denied: path outside root directory');
     }
 
-    // Allow .spck-editor/.tmp and .spck-editor/.trash, but block other .spck-editor paths
+    // Check .spck-editor allowlist BEFORE symlink resolution
+    // .spck-editor is a symlink pointing outside root (to ~/.spck-editor/projects/{id}/)
+    // We must allow .tmp and .trash subdirectories to work correctly
     if (normalized.includes('.spck-editor')) {
       const allowedPaths = ['.spck-editor/.tmp', '.spck-editor/.trash'];
       const isAllowed = allowedPaths.some(allowed => normalized.includes(allowed));
@@ -134,9 +155,63 @@ export class FilesystemService {
           `Access denied: hidden directory (path: ${normalized})`
         );
       }
+
+      // Path is in allowlist - return without symlink validation
+      // This allows .spck-editor to point outside root as intended
+      return absolute;
     }
 
-    return absolute;
+    // For all other paths, resolve symlinks and verify they stay within root
+    try {
+      // Try to resolve the path (follows all symlinks including in rootPath)
+      const realPath = await fs.realpath(absolute);
+
+      // Get real root path (cached, in case rootPath itself contains symlinks like /tmp -> /private/tmp)
+      const realRoot = await this.getRealRootPath();
+
+      // Check resolved path is still within resolved root
+      if (!realPath.startsWith(realRoot)) {
+        throw createRPCError(
+          ErrorCode.INVALID_PATH,
+          'Access denied: symlink points outside root directory'
+        );
+      }
+
+      return realPath;
+    } catch (error: any) {
+      // Path doesn't exist - validate parent directory instead
+      if (error.code === 'ENOENT') {
+        const parentDir = path.dirname(absolute);
+
+        try {
+          const parentReal = await fs.realpath(parentDir);
+          const realRoot = await this.getRealRootPath();
+
+          // Check parent directory is within root
+          if (!parentReal.startsWith(realRoot)) {
+            throw createRPCError(
+              ErrorCode.INVALID_PATH,
+              'Access denied: parent directory symlink points outside root'
+            );
+          }
+
+          // Return original absolute path (not parent)
+          return absolute;
+        } catch (parentError: any) {
+          // Parent doesn't exist either - allow for mkdirp operations
+          // Just validate the normalized path structure
+          return absolute;
+        }
+      }
+
+      // Re-throw validation errors
+      if (error.code === ErrorCode.INVALID_PATH) {
+        throw error;
+      }
+
+      // For other errors, continue with original path
+      return absolute;
+    }
   }
 
   /**
@@ -250,6 +325,24 @@ export class FilesystemService {
 
     // Return metadata
     const stats = await fs.stat(safePath);
+
+    // Check total file size after write to prevent bypass via multiple writes
+    const maxSize = parseFileSize(this.config.maxFileSize);
+    if (stats.size > maxSize) {
+      // Rollback: delete the oversized file
+      try {
+        await fs.unlink(safePath);
+      } catch (unlinkError) {
+        // Ignore unlink errors (file might be locked)
+      }
+
+      throw createRPCError(
+        ErrorCode.FILE_TOO_LARGE,
+        `File exceeds maximum size after write: ${stats.size} bytes (max: ${this.config.maxFileSize})`,
+        { size: stats.size, maxSize }
+      );
+    }
+
     const contents = await fs.readFile(safePath);
     const sha256 = crypto.createHash('sha256').update(contents).digest('hex');
 
@@ -448,6 +541,10 @@ export class FilesystemService {
       const files: string[] = [];
       const folders: string[] = [];
 
+      // Get real root path for relative path calculations
+      // (safePath might be resolved real path if it was a symlink)
+      const realRoot = await this.getRealRootPath();
+
       // Recursive helper function
       const walk = async (currentPath: string) => {
         const entries = await fs.readdir(currentPath);
@@ -463,15 +560,15 @@ export class FilesystemService {
 
           if (stats.isDirectory()) {
             if (includeFolders) {
-              // Convert path based on relative parameter
-              const outputPath = path.relative(this.rootPath, entryPath);
+              // Convert to relative path using real root
+              const outputPath = path.relative(realRoot, entryPath);
               folders.push(outputPath);
             }
             // Recurse into subdirectory
             await walk(entryPath);
           } else if (stats.isFile() && includeFiles) {
-            // Convert path based on relative parameter
-            const outputPath = path.relative(this.rootPath, entryPath);
+            // Convert to relative path using real root
+            const outputPath = path.relative(realRoot, entryPath);
             files.push(outputPath);
           }
         }

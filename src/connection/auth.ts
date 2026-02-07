@@ -93,7 +93,6 @@ export async function verifyFirebaseToken(
     }) as JWTPayload;
 
     // Validate UID is in allowed list
-    console.log(allowedUids, payload.sub)
     if (!allowedUids.includes(payload.sub)) {
       throw createRPCError(
         ErrorCode.UID_NOT_AUTHORIZED,
