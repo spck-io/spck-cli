@@ -2,7 +2,7 @@
  * JSON-RPC 2.0 request router
  */
 
-import { AuthenticatedSocket, JSONRPCRequest, ErrorCode, createRPCError } from '../types.js';
+import { AuthenticatedSocket, JSONRPCRequest, ErrorCode, createRPCError, ToolDetectionResult } from '../types.js';
 import { FilesystemService } from '../services/FilesystemService.js';
 import { GitService } from '../services/GitService.js';
 import { TerminalService } from '../services/TerminalService.js';
@@ -15,15 +15,42 @@ export class RPCRouter {
   private static terminalServices: Map<string, TerminalService> = new Map();
   private static currentSockets: Map<string, AuthenticatedSocket> = new Map();
   private static rootPath: string;
+  private static tools: ToolDetectionResult;
 
   /**
    * Initialize services
    */
-  static initialize(rootPath: string, config: any) {
+  static initialize(rootPath: string, config: any, tools: ToolDetectionResult) {
     this.rootPath = rootPath;
+    this.tools = tools;
     this.filesystemService = new FilesystemService(rootPath, config.filesystem);
     this.gitService = new GitService(rootPath);
-    this.searchService = new SearchService(rootPath);
+
+    // Parse maxFileSize from config
+    const maxFileSizeBytes = this.parseFileSize(config.filesystem.maxFileSize);
+    this.searchService = new SearchService(rootPath, maxFileSizeBytes, 64 * 1024, tools.ripgrep);
+  }
+
+  /**
+   * Parse file size string to bytes
+   */
+  private static parseFileSize(sizeStr: string): number {
+    const match = sizeStr.match(/^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)?$/i);
+    if (!match) {
+      return 10 * 1024 * 1024; // Default 10MB
+    }
+
+    const value = parseFloat(match[1]);
+    const unit = (match[2] || 'B').toUpperCase();
+
+    const multipliers: { [key: string]: number } = {
+      B: 1,
+      KB: 1024,
+      MB: 1024 * 1024,
+      GB: 1024 * 1024 * 1024,
+    };
+
+    return value * multipliers[unit];
   }
 
   /**
@@ -75,9 +102,16 @@ export class RPCRouter {
           return await this.filesystemService.handle(methodName, params, socket);
 
         case 'git':
+          if (!this.tools.git) {
+            throw createRPCError(
+              ErrorCode.FEATURE_DISABLED,
+              'Git is not available. Install Git 2.20.0+ to use version control features.'
+            );
+          }
           return await this.gitService.handle(methodName, params, socket);
 
         case 'search':
+          // Search is always available, but fast search (ripgrep) may be disabled
           return await this.searchService.handle(methodName, params, socket);
 
         case 'terminal':

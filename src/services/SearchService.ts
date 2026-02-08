@@ -40,17 +40,24 @@ export class SearchService {
   private maxFileSize: number;
   private chunkSize: number;
   private ripgrepAvailable: boolean | null = null;
+  private ripgrepForceDisabled: boolean = false;
 
   constructor(
     private rootPath: string = process.cwd(),
     maxFileSize: number = 10 * 1024 * 1024, // 10MB default
-    chunkSize: number = 64 * 1024 // 64KB chunks
+    chunkSize: number = 64 * 1024, // 64KB chunks
+    ripgrepEnabled: boolean = true // Allow force disabling ripgrep
   ) {
     this.maxFileSize = maxFileSize;
     this.chunkSize = chunkSize;
+    this.ripgrepForceDisabled = !ripgrepEnabled;
 
-    // Check ripgrep availability on initialization
-    this.checkRipgrepAvailability();
+    // Check ripgrep availability on initialization (unless force disabled)
+    if (ripgrepEnabled) {
+      this.checkRipgrepAvailability();
+    } else {
+      this.ripgrepAvailable = false;
+    }
   }
 
   /**

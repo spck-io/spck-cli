@@ -109,7 +109,7 @@ export async function startProxyClient(
     });
 
     // Step 5: Initialize RPC Router
-    RPCRouter.initialize(config.root, config);
+    RPCRouter.initialize(config.root, config, tools);
 
     // Step 6: Check connection settings
     let connectionSettings = null;

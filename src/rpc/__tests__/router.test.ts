@@ -105,6 +105,9 @@ describe('RPCRouter', () => {
     // Initialize router
     RPCRouter.initialize('/test/root', {
       filesystem: { maxFileSize: '100MB', watchIgnorePatterns: [] },
+    }, {
+      git: true,
+      ripgrep: true,
     });
   });
 

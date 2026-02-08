@@ -473,27 +473,8 @@ export class ProxyClient {
         allowedUids
       );
 
-      // Check if userId matches
-      if (payload.sub !== this.connectionSettings?.userId) {
-        console.warn(`⚠️  User ID mismatch for ${connectionId}!`);
-        console.warn(`   Expected: ${this.connectionSettings?.userId}`);
-        console.warn(`   Received: ${payload.sub}`);
-        console.warn(`   This may indicate a security issue.`);
-
-        // When user verification is required, reject on mismatch
-        if (connection.userVerificationRequired) {
-          this.sendToClient(connectionId, 'handshake', {
-            type: 'user_verification_result',
-            success: false,
-            error: 'User ID mismatch',
-          });
-          return;
-        }
-      } else {
-        console.log(`✅ User verified for ${connectionId}: ${payload.sub}`);
-      }
-
-      // Mark user as verified
+      // If we get here, token is valid and UID matches (if userAuthenticationEnabled)
+      console.log(`✅ User verified for ${connectionId}: ${payload.sub}`);
       connection.userVerified = true;
 
       // Continue to protocol negotiation

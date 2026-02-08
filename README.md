@@ -7,16 +7,36 @@ Connect your local development environment to Spck Editor mobile app and access 
 ## Features
 
 - 🗂️ **Remote Filesystem** - Access local files from Spck Editor mobile app
-- 🔄 **Git Integration** - Full git operations over the network connection
+- 🔄 **Git Integration** - Full git operations over the network connection (requires Git 2.20.0+)
 - 💻 **Terminal Access** - Interactive terminal sessions with xterm.js
+- 🔍 **Fast Search** - Optimized file search with automatic ripgrep detection (100x faster when installed)
 - 🔒 **Secure** - Cryptographically signed requests with optional Firebase authentication
 
 ## Requirements
+
+### Required
 
 - **Node.js**: 18.0.0 or higher
 - **Operating System**: Linux, macOS, or Windows
 - **Spck Editor Account**: Premium subscription required
 - **Spck Editor Mobile App**: Required for QR code connection (Android/iOS)
+
+### Optional (Recommended)
+
+- **Git**: 2.20.0 or higher - Required for git integration features (commit, push, pull, branch management)
+  - Check version: `git --version`
+  - Install:
+    - **macOS**: `brew install git` (via Homebrew)
+    - **Ubuntu/Debian**: `sudo apt-get install git`
+    - **Windows**: Download from [git-scm.com](https://git-scm.com)
+
+- **ripgrep**: 15.0.0 or higher - Dramatically improves search performance (100x faster than default search)
+  - Check version: `rg --version`
+  - Install:
+    - **macOS**: `brew install ripgrep`
+    - **Ubuntu/Debian**: `sudo apt-get install ripgrep`
+    - **Windows**: `choco install ripgrep` (via Chocolatey) or download from [GitHub releases](https://github.com/BurntSushi/ripgrep/releases)
+  - **Note**: The CLI will automatically detect and use ripgrep if available, falling back to Node.js search if not installed
 
 ## Installation
 
@@ -423,6 +443,46 @@ If the CLI cannot connect to the proxy server:
    spck
    ```
 3. **Check firewall settings** - ensure WebSocket connections are allowed
+
+### Git Operations Not Working
+
+If git operations (commit, push, pull, etc.) are not working:
+
+1. **Verify Git is installed**:
+   ```bash
+   git --version
+   ```
+   - Required: Git 2.20.0 or higher
+   - If not installed, see installation instructions in the [Requirements](#optional-recommended) section
+
+2. **Check repository initialization**:
+   ```bash
+   cd /path/to/project
+   git status
+   ```
+   - If not a git repository, initialize it: `git init`
+
+### Slow Search Performance
+
+If file search is slow:
+
+1. **Install ripgrep for 100x faster search**:
+   ```bash
+   # macOS
+   brew install ripgrep
+
+   # Ubuntu/Debian
+   sudo apt-get install ripgrep
+
+   # Windows (Chocolatey)
+   choco install ripgrep
+   ```
+
+2. **Verify installation**:
+   ```bash
+   rg --version
+   ```
+   - The CLI will automatically detect and use ripgrep if available
 
 ### Git Ignore Issues
 

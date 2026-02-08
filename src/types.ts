@@ -142,6 +142,7 @@ export enum ErrorCode {
   // General
   OPERATION_TIMEOUT = -32030,
   UID_NOT_AUTHORIZED = -32040,
+  FEATURE_DISABLED = -32041,
 }
 
 // Helper to create JSON-RPC error

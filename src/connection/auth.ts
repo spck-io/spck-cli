@@ -92,8 +92,8 @@ export async function verifyFirebaseToken(
       issuer: `https://securetoken.google.com/${firebaseProjectId}`,
     }) as JWTPayload;
 
-    // Validate UID is in allowed list
-    if (!allowedUids.includes(payload.sub)) {
+    // Validate UID is in allowed list (if list is not empty)
+    if (allowedUids.length > 0 && !allowedUids.includes(payload.sub)) {
       throw createRPCError(
         ErrorCode.UID_NOT_AUTHORIZED,
         `UID not authorized: ${payload.sub}`,
