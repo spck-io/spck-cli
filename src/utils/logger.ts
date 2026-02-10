@@ -407,6 +407,98 @@ export function logSearchRead(
   }
 }
 
+/**
+ * Log an authentication event
+ */
+export function logAuth(
+  event: string,
+  details: Record<string, any>,
+  level: 'info' | 'warn' | 'error' = 'info'
+): void {
+  const timestamp = chalk.gray(formatTimeCompact());
+  const deviceId = details.deviceId ? chalk.gray(formatUid(details.deviceId)) : '';
+  const userId = details.userId ? chalk.gray(`user=${details.userId}`) : '';
+  const metaStr = Object.entries(details)
+    .filter(([key]) => key !== 'deviceId' && key !== 'userId')
+    .map(([key, val]) => `${key}=${val}`)
+    .join(' ');
+
+  let symbol: string;
+  let color: (str: string) => string;
+  let logLevel: string;
+
+  if (level === 'error') {
+    symbol = chalk.red('✗');
+    color = chalk.red;
+    logLevel = 'ERROR';
+  } else if (level === 'warn') {
+    symbol = chalk.yellow('⚠');
+    color = chalk.yellow;
+    logLevel = 'WARN';
+  } else {
+    symbol = chalk.green('✓');
+    color = chalk.green;
+    logLevel = 'INFO';
+  }
+
+  const msg = `${timestamp} ${deviceId} ${userId} ${symbol} ${color('AUTH')} ${chalk.white(event.padEnd(20))} ${chalk.gray(metaStr)}`;
+  console.log(msg);
+  writeToFile(`[${logLevel}] AUTH ${event} ${metaStr}`);
+}
+
+/**
+ * Log connection events (client connecting, authenticated, disconnected)
+ */
+export function logConnection(
+  event: 'connecting' | 'authenticated' | 'auth_failed' | 'disconnected' | 'ready',
+  deviceId?: string,
+  metadata?: Record<string, any>
+): void {
+  const timestamp = chalk.gray(formatTimeCompact());
+  const deviceStr = deviceId ? chalk.gray(formatUid(deviceId)) : chalk.gray('...');
+  const metaStr = metadata ? ` ${chalk.gray(JSON.stringify(metadata))}` : '';
+
+  let symbol: string;
+  let color: (str: string) => string;
+  let logLevel: string;
+
+  switch (event) {
+    case 'connecting':
+      symbol = '🔌';
+      color = chalk.blue;
+      logLevel = 'INFO';
+      break;
+    case 'authenticated':
+      symbol = chalk.green('✓');
+      color = chalk.green;
+      logLevel = 'INFO';
+      break;
+    case 'auth_failed':
+      symbol = chalk.red('✗');
+      color = chalk.red;
+      logLevel = 'ERROR';
+      break;
+    case 'disconnected':
+      symbol = '🔌';
+      color = chalk.gray;
+      logLevel = 'INFO';
+      break;
+    case 'ready':
+      symbol = '🎉';
+      color = chalk.green;
+      logLevel = 'INFO';
+      break;
+    default:
+      symbol = 'ℹ';
+      color = chalk.gray;
+      logLevel = 'INFO';
+  }
+
+  const msg = `${timestamp} ${deviceStr} ${symbol} ${color('CONN')} ${chalk.white(event.padEnd(15))}${metaStr}`;
+  console.log(msg);
+  writeToFile(`[${logLevel}] CONN ${event} deviceId=${deviceId || 'unknown'}${metaStr}`);
+}
+
 export default {
   logFsRead,
   logFsWrite,
@@ -415,4 +507,6 @@ export default {
   logTerminalRead,
   logTerminalWrite,
   logSearchRead,
+  logAuth,
+  logConnection,
 };

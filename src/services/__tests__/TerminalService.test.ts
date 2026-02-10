@@ -63,7 +63,7 @@ describe('TerminalService', () => {
     // Set up mock socket (with all SocketInterface properties)
     mockSocket = {
       id: 'test-socket',
-      data: { uid: 'test-user-123' },
+      data: { uid: 'test-user-123', deviceId: 'test-device-123' },
       emit: jest.fn(),
       on: jest.fn(),
       off: jest.fn(),
@@ -287,7 +287,7 @@ describe('TerminalService', () => {
       // Create new service for different user
       const otherSocket = {
         ...mockSocket,
-        data: { uid: 'different-user' },
+        data: { uid: 'different-user', deviceId: 'different-device' },
       };
       const otherService = new TerminalService(() => otherSocket, 10, 10000, '/test/root');
 
@@ -338,7 +338,7 @@ describe('TerminalService', () => {
     it('should prevent sending to other user terminals', async () => {
       const otherSocket = {
         ...mockSocket,
-        data: { uid: 'different-user' },
+        data: { uid: 'different-user', deviceId: 'different-device' },
       };
       const otherService = new TerminalService(() => otherSocket, 10, 10000, '/test/root');
 
@@ -375,7 +375,7 @@ describe('TerminalService', () => {
     it('should prevent resizing other user terminals', async () => {
       const otherSocket = {
         ...mockSocket,
-        data: { uid: 'different-user' },
+        data: { uid: 'different-user', deviceId: 'different-device' },
       };
       const otherService = new TerminalService(() => otherSocket, 10, 10000, '/test/root');
 
@@ -442,7 +442,7 @@ describe('TerminalService', () => {
     it('should prevent destroying other user terminals', async () => {
       const otherSocket = {
         ...mockSocket,
-        data: { uid: 'different-user' },
+        data: { uid: 'different-user', deviceId: 'different-device' },
       };
       const otherService = new TerminalService(() => otherSocket, 10, 10000, '/test/root');
 
@@ -488,7 +488,7 @@ describe('TerminalService', () => {
     it('should prevent refreshing other user terminals', async () => {
       const otherSocket = {
         ...mockSocket,
-        data: { uid: 'different-user' },
+        data: { uid: 'different-user', deviceId: 'different-device' },
       };
       const otherService = new TerminalService(() => otherSocket, 10, 10000, '/test/root');
 
@@ -523,7 +523,7 @@ describe('TerminalService', () => {
       // Create service for different user
       const otherSocket = {
         ...mockSocket,
-        data: { uid: 'different-user' },
+        data: { uid: 'different-user', deviceId: 'different-device' },
       };
       const otherService = new TerminalService(() => otherSocket, 10, 10000, '/test/root');
 

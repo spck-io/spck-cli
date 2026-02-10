@@ -15,6 +15,7 @@ import open from 'open';
 import qrcode from 'qrcode-terminal';
 import { FirebaseCredentials, StoredCredentials } from '../types.js';
 import { saveCredentials } from '../config/credentials.js';
+import { logAuth } from '../utils/logger.js';
 
 const AUTH_TIMEOUT = 10 * 60 * 1000; // 10 minutes
 const FIREBASE_AUTH_BASE_URL = 'https://spck.io/auth';
@@ -356,6 +357,11 @@ export async function authenticateWithFirebase(): Promise<FirebaseCredentials> {
   // 7. Save credentials
   saveCredentials(result);
 
+  logAuth('firebase_auth_success', {
+    userId: result.userId,
+    method: 'firebase'
+  });
+
   console.log('✅ Authentication successful!');
   console.log(`   User ID: ${result.userId}\n`);
 
@@ -417,6 +423,10 @@ export async function refreshFirebaseToken(storedCredentials: StoredCredentials)
 
       // Handle specific Firebase errors
       if (errorMessage === 'TOKEN_EXPIRED' || errorMessage === 'INVALID_REFRESH_TOKEN') {
+        logAuth('token_refresh_failed', {
+          userId: storedCredentials.userId,
+          reason: errorMessage
+        }, 'warn');
         console.log('⚠️  Refresh token expired or invalid. Re-authentication required.');
         return authenticateWithFirebase();
       }
@@ -452,6 +462,10 @@ export async function refreshFirebaseToken(storedCredentials: StoredCredentials)
 
     return fullCredentials;
   } catch (error: any) {
+    logAuth('token_refresh_error', {
+      userId: storedCredentials.userId,
+      error: error.message
+    }, 'error');
     console.error('Token refresh error:', error.message);
     console.log('⚠️  Token refresh failed. Re-authentication required.');
     return authenticateWithFirebase();

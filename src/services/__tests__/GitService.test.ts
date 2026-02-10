@@ -45,7 +45,7 @@ describe('GitService', () => {
 
     mockSocket = {
       id: 'test-socket',
-      data: { uid: 'test-user' },
+      data: { uid: 'test-user', deviceId: 'test-device' },
       emit: jest.fn(),
       on: jest.fn(),
       off: jest.fn(),

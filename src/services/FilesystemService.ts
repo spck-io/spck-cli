@@ -39,7 +39,7 @@ export class FilesystemService {
    * Handle filesystem RPC methods
    */
   async handle(method: string, params: any, socket: AuthenticatedSocket): Promise<any> {
-    const uid = socket.data.uid;
+    const deviceId = socket.data.deviceId;
     let result: any;
     let error: any;
 
@@ -50,59 +50,59 @@ export class FilesystemService {
       switch (method) {
         case 'exists':
           result = await this.exists(safePath!);
-          logFsRead(method, params, uid, true);
+          logFsRead(method, params, deviceId, true);
           return result;
         case 'readFile':
           result = await this.readFile(safePath!, params);
-          logFsRead(method, params, uid, true, undefined, { size: result.size, encoding: result.encoding });
+          logFsRead(method, params, deviceId, true, undefined, { size: result.size, encoding: result.encoding });
           return result;
         case 'write':
           result = await this.write(safePath!, params);
-          logFsWrite(method, params, uid, true, undefined, { size: result.size });
+          logFsWrite(method, params, deviceId, true, undefined, { size: result.size });
           return result;
         case 'patchFile':
           result = await this.patchFile(safePath!, params);
-          logFsWrite(method, params, uid, true, undefined, { size: result.size });
+          logFsWrite(method, params, deviceId, true, undefined, { size: result.size });
           return result;
         case 'getFileHash':
           result = await this.getFileHash(safePath!);
-          logFsRead(method, params, uid, true, undefined, { hash: result.hash });
+          logFsRead(method, params, deviceId, true, undefined, { hash: result.hash });
           return result;
         case 'remove':
           result = await this.remove(safePath!);
-          logFsWrite(method, params, uid, true);
+          logFsWrite(method, params, deviceId, true);
           return result;
         case 'mkdir':
           result = await this.mkdir(safePath!, false);
-          logFsWrite(method, params, uid, true);
+          logFsWrite(method, params, deviceId, true);
           return result;
         case 'mkdirp':
           result = await this.mkdir(safePath!, true);
-          logFsWrite(method, params, uid, true);
+          logFsWrite(method, params, deviceId, true);
           return result;
         case 'readdir':
           result = await this.readdir(safePath!, params);
-          logFsRead(method, params, uid, true, undefined, { count: result.entries.length });
+          logFsRead(method, params, deviceId, true, undefined, { count: result.entries.length });
           return result;
         case 'readdirDeep':
           result = await this.readdirDeep(safePath!, params);
-          logFsRead(method, params, uid, true, undefined, { files: result.files.length, folders: result.folders.length });
+          logFsRead(method, params, deviceId, true, undefined, { files: result.files.length, folders: result.folders.length });
           return result;
         case 'lstat':
           result = await this.lstat(safePath!);
-          logFsRead(method, params, uid, true, undefined, { isFile: result.isFile, isDirectory: result.isDirectory });
+          logFsRead(method, params, deviceId, true, undefined, { isFile: result.isFile, isDirectory: result.isDirectory });
           return result;
         case 'mv':
           result = await this.mv(await this.validatePath(params.src), await this.validatePath(params.target), params.opts);
-          logFsWrite(method, params, uid, true, undefined, { type: result });
+          logFsWrite(method, params, deviceId, true, undefined, { type: result });
           return result;
         case 'copy':
           result = await this.copy(await this.validatePath(params.oldpath), safePath!, params.opts);
-          logFsWrite(method, params, uid, true, undefined, { type: result });
+          logFsWrite(method, params, deviceId, true, undefined, { type: result });
           return result;
         case 'rmdir':
           result = await this.rmdir(safePath!);
-          logFsWrite(method, params, uid, true);
+          logFsWrite(method, params, deviceId, true);
           return result;
         default:
           throw createRPCError(ErrorCode.METHOD_NOT_FOUND, `Method not found: fs.${method}`);
@@ -112,9 +112,9 @@ export class FilesystemService {
       // Determine if this was a read or write operation for logging
       const readOps = ['exists', 'readFile', 'getFileHash', 'readdir', 'readdirDeep', 'lstat'];
       if (readOps.includes(method)) {
-        logFsRead(method, params, uid, false, error);
+        logFsRead(method, params, deviceId, false, error);
       } else {
-        logFsWrite(method, params, uid, false, error);
+        logFsWrite(method, params, deviceId, false, error);
       }
       throw error;
     }

@@ -28,9 +28,11 @@ import {
 import {
   saveConnectionSettings,
 } from '../config/credentials.js';
+import { logAuth, logConnection } from '../utils/logger.js';
 import { RPCRouter } from '../rpc/router.js';
 import { validateHandshakeTimestamp } from './handshake-validation.js';
 import { requireValidHMAC } from '../connection/hmac.js';
+import { needsChunking, chunkMessage } from './chunking.js';
 
 const KILL_TIMEOUT = 5000; // 5 seconds
 const SECRET_LENGTH = 33;
@@ -54,6 +56,7 @@ interface ActiveConnection {
   handshakeComplete?: boolean;
   connectedAt: number;
   socketWrapper?: ProxySocketWrapper;
+  deviceId?: string;
 }
 
 export class ProxyClient {
@@ -62,6 +65,7 @@ export class ProxyClient {
   private connectionSettings: ConnectionSettings | null = null;
   private tools: ToolDetectionResult;
   private activeConnections: Map<string, ActiveConnection> = new Map();
+  private knownDeviceIds: Set<string> = new Set(); // Track known device IDs
   private firebaseToken: string;
   private userId: string;
   private tokenRefreshAttempted: boolean = false;
@@ -98,7 +102,7 @@ export class ProxyClient {
       reconnectionDelay: 1000,
       reconnectionDelayMax: 10000,
       timeout: 25000,
-    });
+    } as any);
 
     // Setup event handlers
     this.setupEventHandlers();
@@ -112,7 +116,7 @@ export class ProxyClient {
    */
   private async refreshTokenAndReconnect(): Promise<void> {
     try {
-      console.log('\n🔄 Refreshing Firebase token...');
+      logAuth('token_refresh_start', { userId: this.userId });
 
       // Load stored credentials to get refresh token
       const storedCredentials = loadCredentials();
@@ -127,7 +131,7 @@ export class ProxyClient {
       this.firebaseToken = newCredentials.firebaseToken;
       this.userId = newCredentials.userId;
 
-      console.log('✅ Firebase token refreshed successfully');
+      logAuth('token_refresh_success', { userId: this.userId });
 
       // Disconnect current socket
       if (this.socket) {
@@ -141,7 +145,7 @@ export class ProxyClient {
       this.activeConnections.clear();
 
       // Reconnect with new token
-      console.log('🔄 Reconnecting with refreshed token...\n');
+      logAuth('reconnect_with_new_token', { userId: this.userId });
       await this.connect();
 
     } catch (error: any) {
@@ -228,15 +232,19 @@ export class ProxyClient {
    * Handle authenticated event from proxy
    */
   private handleAuthenticated(data: ProxyAuthenticatedEvent): void {
-    console.log('✅ Authenticated with proxy server');
+    logAuth('proxy_authenticated', { userId: data.userId, clientId: data.clientId });
+
+    // Track if this is a new CLI session (vs automatic reconnection in same session)
+    const isNewSession = this.connectionSettings === null;
 
     // Reuse existing secret if clientId matches, otherwise generate new one
-    const { existingConnectionSettings } = this.options;
+    // Check current connectionSettings first (for reconnections), then initial options
+    const existingSettings = this.connectionSettings || this.options.existingConnectionSettings;
     let secret: string;
 
-    if (existingConnectionSettings && existingConnectionSettings.clientId === data.clientId) {
+    if (existingSettings && existingSettings.clientId === data.clientId) {
       // Same clientId - reuse the secret
-      secret = existingConnectionSettings.secret;
+      secret = existingSettings.secret;
       console.log('   Reusing existing secret for clientId');
     } else {
       // New clientId or no existing settings - generate new secret
@@ -256,8 +264,10 @@ export class ProxyClient {
 
     saveConnectionSettings(this.connectionSettings);
 
-    // Display QR code
-    this.displayQRCode();
+    // Display QR code on new CLI session or if clientId changed (not on automatic reconnections)
+    if (isNewSession || this.connectionSettings.clientId !== existingSettings?.clientId) {
+      this.displayQRCode();
+    }
   }
 
   /**
@@ -294,13 +304,20 @@ export class ProxyClient {
    * Handle client connecting event
    */
   private handleClientConnecting(data: ProxyClientConnectingEvent): void {
-    console.log(`\n🔌 Client connecting: ${data.connectionId}`);
+    // Connection not yet authenticated, so we don't have deviceId yet
+    logConnection('connecting', undefined, { connectionId: data.connectionId });
   }
 
   /**
    * Handle multiple connection attempt
    */
   private handleMultipleConnection(data: ProxyMultipleConnectionEvent): void {
+    logAuth('multiple_connection_attempt', {
+      existingConnections: data.existingConnections.length,
+      newConnectionId: data.newConnectionId,
+      userId: this.userId
+    }, 'warn');
+
     console.warn('\n' + '⚠'.repeat(30));
     console.warn('⚠️  MULTIPLE CONNECTION ATTEMPT DETECTED!');
     console.warn('⚠'.repeat(30));
@@ -331,10 +348,14 @@ export class ProxyClient {
         return;
       }
 
-      console.warn(`Unknown message type from ${connectionId}:`, data);
+      const connection = this.activeConnections.get(connectionId);
+      const displayId = connection?.deviceId || connectionId;
+      console.warn(`Unknown message type from ${displayId}:`, data);
 
     } catch (error: any) {
-      console.error(`Error handling message from ${connectionId}:`, error.message);
+      const connection = this.activeConnections.get(connectionId);
+      const displayId = connection?.deviceId || connectionId;
+      console.error(`Error handling message from ${displayId}:`, error.message);
 
       // Send error response if it's an RPC message
       if (data.id) {
@@ -378,7 +399,12 @@ export class ProxyClient {
         throw new Error('No connection settings available');
       }
 
-      const { clientId, timestamp, nonce, hmac } = authMessage;
+      const { clientId, timestamp, nonce, hmac, deviceId } = authMessage;
+
+      // Verify deviceId is provided (required)
+      if (!deviceId) {
+        throw new Error('Device ID is required for authentication');
+      }
 
       // Verify clientId matches
       if (clientId !== this.connectionSettings.clientId) {
@@ -395,20 +421,38 @@ export class ProxyClient {
         throw new Error(timestampValidation.error);
       }
 
-      // Verify HMAC signature
-      const messageToVerify = { type: 'auth', clientId, timestamp, nonce };
+      // Verify HMAC signature (always includes deviceId)
+      const messageToVerify = { type: 'auth', clientId, timestamp, nonce, deviceId };
       const expectedHmac = this.computeHMAC(messageToVerify, this.connectionSettings.secret);
       if (hmac !== expectedHmac) {
         throw new Error('Invalid HMAC signature');
       }
 
-      console.log(`✅ Client authenticated: ${connectionId}`);
+      // Check if this is a new device
+      const isNewDevice = !this.knownDeviceIds.has(deviceId);
+      if (isNewDevice) {
+        logAuth('new_device_connecting', {
+          deviceId,
+          userId: this.connectionSettings.userId,
+          firstConnection: true
+        }, 'warn');
+        console.log(`\n🆕 New device connecting: ${deviceId}`);
+        console.log(`   This is the first time this device has connected.`);
+        console.log(`   If you did not initiate this connection, your credentials may be compromised.\n`);
+        this.knownDeviceIds.add(deviceId);
+      }
+
+      logConnection('authenticated', deviceId, {
+        connectionId,
+        userId: this.connectionSettings.userId
+      });
 
       // Create socket wrapper for this connection
       const socketWrapper = new ProxySocketWrapper(
         connectionId,
         this.connectionSettings.userId,
-        this.sendToClient.bind(this)
+        this.sendToClient.bind(this),
+        deviceId
       );
 
       // Store connection as authenticated
@@ -419,6 +463,7 @@ export class ProxyClient {
         userVerificationRequired,
         connectedAt: Date.now(),
         socketWrapper,
+        deviceId,
       });
 
       // Send success response
@@ -440,7 +485,13 @@ export class ProxyClient {
       }
 
     } catch (error: any) {
-      console.error(`❌ Client auth failed for ${connectionId}: ${error.message}`);
+      const { deviceId } = authMessage;
+      const displayId = deviceId || connectionId;
+      logConnection('auth_failed', deviceId, {
+        connectionId,
+        error: error.message,
+        userId: this.connectionSettings?.userId
+      });
 
       this.sendToClient(connectionId, 'handshake', {
         type: 'auth_result',
@@ -456,9 +507,12 @@ export class ProxyClient {
   private async handleUserVerification(connectionId: string, firebaseToken: string): Promise<void> {
     const connection = this.activeConnections.get(connectionId);
     if (!connection || !connection.authenticated) {
-      console.warn(`Rejecting user_verification from unauthenticated connection: ${connectionId}`);
+      const displayId = connection?.deviceId || connectionId;
+      console.warn(`Rejecting user_verification from unauthenticated connection: ${displayId}`);
       return;
     }
+
+    const displayId = connection.deviceId;
 
     try {
       // Verify Firebase token
@@ -474,14 +528,14 @@ export class ProxyClient {
       );
 
       // If we get here, token is valid and UID matches (if userAuthenticationEnabled)
-      console.log(`✅ User verified for ${connectionId}: ${payload.sub}`);
+      console.log(`✅ User verified for ${displayId}: ${payload.sub}`);
       connection.userVerified = true;
 
       // Continue to protocol negotiation
       this.sendProtocolInfo(connectionId);
 
     } catch (error: any) {
-      console.error(`❌ User verification failed for ${connectionId}: ${error.message}`);
+      console.error(`❌ User verification failed for ${displayId}: ${error.message}`);
 
       // When user verification is required, reject on failure
       if (connection.userVerificationRequired) {
@@ -524,7 +578,8 @@ export class ProxyClient {
     // Security check: Verify connection is properly authenticated before completing handshake
     const connection = this.activeConnections.get(connectionId);
     if (!connection || !connection.authenticated) {
-      console.warn(`Rejecting protocol_selected from unauthenticated connection: ${connectionId}`);
+      const displayId = connection?.deviceId || connectionId;
+      console.warn(`Rejecting protocol_selected from unauthenticated connection: ${displayId}`);
       this.sendToClient(connectionId, 'handshake', {
         type: 'error',
         code: 'not_authenticated',
@@ -533,9 +588,11 @@ export class ProxyClient {
       return;
     }
 
+    const displayId = connection.deviceId;
+
     // Security check: If user verification is required, ensure it was completed
     if (connection.userVerificationRequired && !connection.userVerified) {
-      console.warn(`Rejecting protocol_selected - user verification required but not completed: ${connectionId}`);
+      console.warn(`Rejecting protocol_selected - user verification required but not completed: ${displayId}`);
       this.sendToClient(connectionId, 'handshake', {
         type: 'error',
         code: 'user_verification_required',
@@ -546,7 +603,7 @@ export class ProxyClient {
 
     if (version !== 1) {
       console.error(
-        `❌ Unsupported protocol version ${version} from ${connectionId}. ` +
+        `❌ Unsupported protocol version ${version} from ${displayId}. ` +
         `This CLI only supports protocol v1. ` +
         `An upgrade is required: update your client/library (and this CLI, if applicable) to the latest version so protocol versions match. ` +
         `If you installed the CLI globally, run: npm i -g spck@latest`
@@ -554,7 +611,7 @@ export class ProxyClient {
       return;
     }
 
-    console.log(`✅ Protocol v${version} negotiated with ${connectionId}`);
+    console.log(`✅ Protocol v${version} negotiated with ${displayId}`);
 
     // Mark connection as fully established
     connection.handshakeComplete = true;
@@ -570,7 +627,10 @@ export class ProxyClient {
       this.socket.emit('handshake_complete', { connectionId });
     }
 
-    console.log(`🎉 Client ready: ${connectionId}\n`);
+    logConnection('ready', connection.deviceId, {
+      connectionId,
+      protocolVersion: version
+    });
   }
 
   /**
@@ -580,9 +640,12 @@ export class ProxyClient {
     // Check if connection is authenticated and handshake complete
     const connection = this.activeConnections.get(connectionId);
     if (!connection || !connection.handshakeComplete) {
-      console.warn(`Rejecting RPC from unauthenticated connection: ${connectionId}`);
+      const displayId = connection?.deviceId || connectionId;
+      console.warn(`Rejecting RPC from unauthenticated connection: ${displayId}`);
       return;
     }
+
+    const displayId = connection.deviceId;
 
     // Distinguish between RPC request (has method) and RPC response (has result/error)
     const isRequest = 'method' in message;
@@ -598,7 +661,7 @@ export class ProxyClient {
     }
 
     if (!isRequest) {
-      console.warn(`Invalid RPC message from ${connectionId}:`, message);
+      console.warn(`Invalid RPC message from ${displayId}:`, message);
       return;
     }
 
@@ -642,14 +705,38 @@ export class ProxyClient {
 
   /**
    * Send message to client via proxy
+   * Automatically chunks large payloads (>800kB)
    */
   private sendToClient(connectionId: string, event: string, data: any): void {
     if (!this.socket) return;
 
-    this.socket.emit(event, {
-      connectionId,
-      data,
-    });
+    // Check if message needs chunking
+    if (needsChunking(data)) {
+      // Chunk the message
+      const chunks = chunkMessage(event, data);
+      const connection = this.activeConnections.get(connectionId);
+      const displayId = connection?.deviceId || connectionId;
+
+      console.log(`📦 Chunking large ${event} message: ${chunks.length} chunks (~${Math.round(chunks.length * 800 / 1024)}MB) for ${displayId}`);
+
+      // Send each chunk as an 'rpc' event with special __chunk marker
+      // This ensures chunks are routed correctly through the proxy-server
+      for (const chunk of chunks) {
+        this.socket.emit('rpc', {
+          connectionId,
+          data: {
+            __chunk: true,
+            ...chunk,
+          },
+        });
+      }
+    } else {
+      // Send normally for small messages
+      this.socket.emit(event, {
+        connectionId,
+        data,
+      });
+    }
   }
 
   /**
@@ -665,7 +752,11 @@ export class ProxyClient {
    * Handle client disconnected event
    */
   private handleClientDisconnected(data: ProxyClientDisconnectedEvent): void {
-    console.log(`\n🔌 Client disconnected: ${data.connectionId}`);
+    const connection = this.activeConnections.get(data.connectionId);
+    const displayId = connection?.deviceId || data.connectionId;
+    logConnection('disconnected', connection?.deviceId, {
+      connectionId: data.connectionId
+    });
 
     // Clean up connection tracking
     this.activeConnections.delete(data.connectionId);

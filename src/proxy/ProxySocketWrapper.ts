@@ -8,17 +8,19 @@
  * Provides the minimal interface needed by services (duck typing)
  */
 export class ProxySocketWrapper {
-  public data: { uid: string };
+  public data: { uid: string; deviceId: string };
   public broadcast: { emit: (event: string, data?: any) => boolean };
   private eventListeners: Map<string, Set<(...args: any[]) => void>> = new Map();
 
   constructor(
     private connectionId: string,
-    private userId: string,
-    private sendFn: (connectionId: string, event: string, data: any) => void
+    userId: string,
+    private sendFn: (connectionId: string, event: string, data: any) => void,
+    deviceId: string
   ) {
     // Set up data property to match AuthenticatedSocket
-    this.data = { uid: userId };
+    // uid = CLI user ID (from Firebase), deviceId = mobile device ID
+    this.data = { uid: userId, deviceId };
 
     // Set up broadcast - in proxy mode, just send to the single connected client
     this.broadcast = {

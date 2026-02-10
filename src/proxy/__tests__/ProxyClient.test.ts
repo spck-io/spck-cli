@@ -77,11 +77,11 @@ async function triggerEvent(event: string, data: any): Promise<void> {
 /**
  * Create HMAC-signed auth message
  */
-function createAuthMessage(secret: string, clientId: string): any {
+function createAuthMessage(secret: string, clientId: string, deviceId: string = 'test-device-123'): any {
   const timestamp = Date.now();
   const nonce = Math.random().toString(36).substring(2);
-  const message = { type: 'auth', clientId, timestamp, nonce };
-  const messageToSign = timestamp + JSON.stringify({ type: 'auth', clientId, nonce });
+  const message = { type: 'auth', clientId, timestamp, nonce, deviceId };
+  const messageToSign = timestamp + JSON.stringify({ type: 'auth', clientId, nonce, deviceId });
   const hmac = crypto.createHmac('sha256', secret).update(messageToSign).digest('hex');
   return { ...message, hmac };
 }

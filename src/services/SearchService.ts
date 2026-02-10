@@ -257,7 +257,7 @@ export class SearchService {
    */
   private async findWithStream(params: StreamSearchParams, socket: AuthenticatedSocket): Promise<void> {
     const { glob, maxLength, maxResults, searchTerm, matchCase, useRegEx, onlyWholeWords } = params;
-    const uid = socket.data.uid;
+    const deviceId = socket.data.deviceId;
 
     // Check ripgrep availability
     await this.checkRipgrepAvailability();
@@ -409,13 +409,13 @@ export class SearchService {
         }
       });
 
-      logSearchRead('findWithStream', params, uid, true, undefined, {
+      logSearchRead('findWithStream', params, deviceId, true, undefined, {
         matches: totalResults,
         method: 'ripgrep-stream',
         glob
       });
     } catch (error: any) {
-      logSearchRead('findWithStream', params, uid, false, error, {
+      logSearchRead('findWithStream', params, deviceId, false, error, {
         method: 'ripgrep-stream',
         glob
       });
@@ -439,7 +439,7 @@ export class SearchService {
    */
   private async findWithStreamNode(params: StreamSearchParams, socket: AuthenticatedSocket): Promise<void> {
     const { glob, rootDir, maxResults, searchTerm, matchCase, useRegEx, onlyWholeWords } = params;
-    const uid = socket.data.uid;
+    const deviceId = socket.data.deviceId;
 
     try {
       // Get all files in the directory
@@ -512,13 +512,13 @@ export class SearchService {
         params: { results: [], done: true, total: totalResults }
       });
 
-      logSearchRead('findWithStream', params, uid, true, null, {
+      logSearchRead('findWithStream', params, deviceId, true, null, {
         matches: totalResults,
         method: 'node-stream',
         glob
       });
     } catch (error: any) {
-      logSearchRead('findWithStream', params, uid, false, error, {
+      logSearchRead('findWithStream', params, deviceId, false, error, {
         method: 'node-stream',
         glob
       });

@@ -57,24 +57,24 @@ export class RPCRouter {
    * Get or create terminal service for socket
    */
   private static getTerminalService(socket: AuthenticatedSocket): TerminalService {
-    const uid = socket.data.uid;
+    const deviceId = socket.data.deviceId;
 
-    // Update current socket for this UID (handles reconnections)
-    this.currentSockets.set(uid, socket);
+    // Update current socket for this deviceId (handles reconnections)
+    this.currentSockets.set(deviceId, socket);
 
-    if (!this.terminalServices.has(uid)) {
+    if (!this.terminalServices.has(deviceId)) {
       // Create new service with getter function that returns current socket
       const getSocket = () => {
-        const currentSocket = this.currentSockets.get(uid);
+        const currentSocket = this.currentSockets.get(deviceId);
         if (!currentSocket) {
-          throw new Error(`No active socket for UID: ${uid}`);
+          throw new Error(`No active socket for device: ${deviceId}`);
         }
         return currentSocket;
       };
-      this.terminalServices.set(uid, new TerminalService(getSocket, 10, 10000, this.rootPath));
+      this.terminalServices.set(deviceId, new TerminalService(getSocket, 10, 10000, this.rootPath));
     }
 
-    return this.terminalServices.get(uid)!;
+    return this.terminalServices.get(deviceId)!;
   }
 
   /**
@@ -144,12 +144,12 @@ export class RPCRouter {
    * Cleanup terminal service for socket
    */
   static cleanupTerminalService(socket: AuthenticatedSocket) {
-    const uid = socket.data.uid;
-    const service = this.terminalServices.get(uid);
+    const deviceId = socket.data.deviceId;
+    const service = this.terminalServices.get(deviceId);
     if (service) {
       service.cleanup();
-      this.terminalServices.delete(uid);
-      this.currentSockets.delete(uid);
+      this.terminalServices.delete(deviceId);
+      this.currentSockets.delete(deviceId);
     }
   }
 }

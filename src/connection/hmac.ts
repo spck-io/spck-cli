@@ -52,8 +52,10 @@ export function validateHMAC(message: JSONRPCRequest, signingKey: string): boole
     return false;
   }
 
-  // Reconstruct the message that was signed
-  const payload = {
+  // Reconstruct the message that was signed (must match client's _computeHMAC)
+  // Client uses: const { timestamp, hmac, ...rest } = request
+  // So we need to include all fields except timestamp and hmac
+  const payload: any = {
     jsonrpc: message.jsonrpc,
     method: message.method,
     params: message.params,
@@ -61,7 +63,11 @@ export function validateHMAC(message: JSONRPCRequest, signingKey: string): boole
     nonce: message.nonce
   };
 
-  // Include nonce in signature if present (for replay attack prevention)
+  // Include deviceId if present (client includes it)
+  if ('deviceId' in message) {
+    payload.deviceId = (message as any).deviceId;
+  }
+
   const messageToSign = message.timestamp + JSON.stringify(payload);
 
   // Compute HMAC

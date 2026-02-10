@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { StoredCredentials } from '../types.js';
 import { getProjectFilePath } from '../utils/project-dir.js';
+import { logAuth } from '../utils/logger.js';
 
 /**
  * Get the user-level credentials directory
@@ -63,6 +64,10 @@ export function loadCredentials(): StoredCredentials | null {
   } catch (error: any) {
     // JSON parse error or validation error
     if (error instanceof SyntaxError || error.code === 'CORRUPTED') {
+      logAuth('credentials_corrupted', {
+        path: credentialsPath,
+        error: error.message
+      }, 'error');
       console.warn('⚠️  Credentials file is corrupted:', credentialsPath);
       console.warn('   Will trigger re-authentication...\n');
       const corruptedError: any = new Error('Credentials file is corrupted');
@@ -151,6 +156,10 @@ export function loadConnectionSettings(): any | null {
   } catch (error: any) {
     // JSON parse error or validation error
     if (error instanceof SyntaxError || error.code === 'CORRUPTED') {
+      logAuth('connection_settings_corrupted', {
+        path: settingsPath,
+        error: error.message
+      }, 'error');
       console.warn('⚠️  Connection settings file is corrupted:', settingsPath);
       console.warn('   Will reconnect to proxy...\n');
       const corruptedError: any = new Error('Connection settings file is corrupted');

@@ -202,9 +202,9 @@ describe('RPCRouter', () => {
       expect(mockTerminalHandle).toHaveBeenCalledTimes(1);
     });
 
-    it('should create separate terminal services per user', async () => {
-      const socket1 = { ...mockSocket, id: 'socket-1', data: { uid: 'user-1' } };
-      const socket2 = { ...mockSocket, id: 'socket-2', data: { uid: 'user-2' } };
+    it('should create separate terminal services per device', async () => {
+      const socket1 = { ...mockSocket, id: 'socket-1', data: { uid: 'user-1', deviceId: 'device-1' } };
+      const socket2 = { ...mockSocket, id: 'socket-2', data: { uid: 'user-2', deviceId: 'device-2' } };
 
       const result1 = await RPCRouter.route(
         createRequest('terminal.create', {}, 1),
@@ -222,9 +222,9 @@ describe('RPCRouter', () => {
       expect(mockTerminalHandle).toHaveBeenCalledTimes(2);
     });
 
-    it('should reuse terminal service for same user', async () => {
-      const socket1 = { ...mockSocket, id: 'socket-1', data: { uid: 'user-same' } };
-      const socket2 = { ...mockSocket, id: 'socket-2', data: { uid: 'user-same' } };
+    it('should reuse terminal service for same device', async () => {
+      const socket1 = { ...mockSocket, id: 'socket-1', data: { uid: 'user-same', deviceId: 'device-same' } };
+      const socket2 = { ...mockSocket, id: 'socket-2', data: { uid: 'user-same', deviceId: 'device-same' } };
 
       const result1 = await RPCRouter.route(
         createRequest('terminal.create', {}, 1),
@@ -320,7 +320,7 @@ describe('RPCRouter', () => {
     });
 
     it('should handle cleanup when no terminal service exists', () => {
-      const otherSocket = { ...mockSocket, data: { uid: 'different-user' } };
+      const otherSocket = { ...mockSocket, data: { uid: 'different-user', deviceId: 'different-device' } };
 
       expect(() => {
         RPCRouter.cleanupTerminalService(otherSocket);

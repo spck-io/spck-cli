@@ -12,7 +12,8 @@ export interface SocketInterface {
     emit(event: string, data?: any): boolean;
   };
   data: {
-    uid: string;
+    uid: string;       // CLI user ID (from Firebase auth)
+    deviceId: string;  // Mobile device ID (identifies the specific device)
   };
 }
 

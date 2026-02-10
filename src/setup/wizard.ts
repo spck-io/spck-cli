@@ -137,7 +137,7 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
         console.log('\n--- Git Configuration ---\n');
         console.log('A .gitignore file was detected in your project directory.');
         console.log('It is recommended to add .spck-editor/ to .gitignore to prevent');
-        console.log('accidentally committing the symlink to version control.\n');
+        console.log('accidentally committing the directory to version control.\n');
 
         shouldAddToGitignore = await questionYesNo(
           rl,

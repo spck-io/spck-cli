@@ -26,7 +26,7 @@ export class GitService {
    * Handle git RPC methods
    */
   async handle(method: string, params: any, socket: AuthenticatedSocket): Promise<any> {
-    const uid = socket.data.uid;
+    const deviceId = socket.data.deviceId;
     let result: any;
     let error: any;
 
@@ -44,108 +44,108 @@ export class GitService {
       switch (method) {
         case 'readCommit':
           result = await this.readCommit(dir, params);
-          logGitRead(method, params, uid, true, undefined, { oid: params.oid });
+          logGitRead(method, params, deviceId, true, undefined, { oid: params.oid });
           return result;
         case 'readObject':
           result = await this.readObject(dir, params);
-          logGitRead(method, params, uid, true, undefined, { oid: params.oid });
+          logGitRead(method, params, deviceId, true, undefined, { oid: params.oid });
           return result;
         case 'getHeadTree':
           result = await this.getHeadTree(dir, params);
-          logGitRead(method, params, uid, true, undefined, { oid: result.oid });
+          logGitRead(method, params, deviceId, true, undefined, { oid: result.oid });
           return result;
         case 'getOidAtPath':
           result = await this.getOidAtPath(dir, params);
-          logGitRead(method, params, uid, true, undefined, { path: params.path, oid: result.oid });
+          logGitRead(method, params, deviceId, true, undefined, { path: params.path, oid: result.oid });
           return result;
         case 'listFiles':
           result = await this.listFiles(dir, params);
-          logGitRead(method, params, uid, true, undefined, { count: result.files.length });
+          logGitRead(method, params, deviceId, true, undefined, { count: result.files.length });
           return result;
         case 'resolveRef':
           result = await this.resolveRef(dir, params);
-          logGitRead(method, params, uid, true, undefined, { ref: params.ref, oid: result.oid });
+          logGitRead(method, params, deviceId, true, undefined, { ref: params.ref, oid: result.oid });
           return result;
         case 'currentBranch':
           result = await this.currentBranch(dir, params);
-          logGitRead(method, params, uid, true, undefined, { branch: result.branch });
+          logGitRead(method, params, deviceId, true, undefined, { branch: result.branch });
           return result;
         case 'log':
           result = await this.log(dir, params);
-          logGitRead(method, params, uid, true, undefined, { commits: result.commits.length });
+          logGitRead(method, params, deviceId, true, undefined, { commits: result.commits.length });
           return result;
         case 'status':
           result = await this.status(dir, params);
-          logGitRead(method, params, uid, true, undefined, { files: result.length });
+          logGitRead(method, params, deviceId, true, undefined, { files: result.length });
           return result;
         case 'statusCounts':
           result = await this.statusCounts(dir, params);
-          logGitRead(method, params, uid, true, undefined, result);
+          logGitRead(method, params, deviceId, true, undefined, result);
           return result;
         case 'add':
           result = await this.add(dir, params, socket);
-          logGitWrite(method, params, uid, true, undefined, { count: params.filepaths?.length || 0 });
+          logGitWrite(method, params, deviceId, true, undefined, { count: params.filepaths?.length || 0 });
           return result;
         case 'remove':
           result = await this.remove(dir, params, socket);
-          logGitWrite(method, params, uid, true, undefined, { count: params.filepaths?.length || 0 });
+          logGitWrite(method, params, deviceId, true, undefined, { count: params.filepaths?.length || 0 });
           return result;
         case 'resetIndex':
           result = await this.resetIndex(dir, params, socket);
-          logGitWrite(method, params, uid, true);
+          logGitWrite(method, params, deviceId, true);
           return result;
         case 'commit':
           result = await this.commit(dir, params, socket);
-          logGitWrite(method, params, uid, true, undefined, { oid: result.oid });
+          logGitWrite(method, params, deviceId, true, undefined, { oid: result.oid });
           return result;
         case 'getConfig':
           result = await this.getConfig(dir, params);
-          logGitRead(method, params, uid, true, undefined, { path: params.path });
+          logGitRead(method, params, deviceId, true, undefined, { path: params.path });
           return result;
         case 'setConfig':
           result = await this.setConfig(dir, params);
-          logGitWrite(method, params, uid, true, undefined, { path: params.path });
+          logGitWrite(method, params, deviceId, true, undefined, { path: params.path });
           return result;
         case 'listBranches':
           result = await this.listBranches(dir, params);
-          logGitRead(method, params, uid, true, undefined, { count: result.branches.length });
+          logGitRead(method, params, deviceId, true, undefined, { count: result.branches.length });
           return result;
         case 'checkout':
           result = await this.checkout(dir, params);
-          logGitWrite(method, params, uid, true);
+          logGitWrite(method, params, deviceId, true);
           return result;
         case 'init':
           result = await this.init(dir, params);
-          logGitWrite(method, params, uid, true);
+          logGitWrite(method, params, deviceId, true);
           return result;
         case 'listRemotes':
           result = await this.listRemotes(dir, params);
-          logGitRead(method, params, uid, true, undefined, { count: result.remotes.length });
+          logGitRead(method, params, deviceId, true, undefined, { count: result.remotes.length });
           return result;
         case 'addRemote':
           result = await this.addRemote(dir, params);
-          logGitWrite(method, params, uid, true, undefined, { remote: params.remote, url: params.url });
+          logGitWrite(method, params, deviceId, true, undefined, { remote: params.remote, url: params.url });
           return result;
         case 'deleteRemote':
           result = await this.deleteRemote(dir, params);
-          logGitWrite(method, params, uid, true, undefined, { remote: params.remote });
+          logGitWrite(method, params, deviceId, true, undefined, { remote: params.remote });
           return result;
         case 'clearIndex':
           result = await this.clearIndex(dir, params);
-          logGitWrite(method, params, uid, true);
+          logGitWrite(method, params, deviceId, true);
           return result;
         case 'isIgnored':
           result = await this.isIgnored(dir, params);
-          logGitRead(method, params, uid, true, undefined, { filepath: params.filepath, ignored: result });
+          logGitRead(method, params, deviceId, true, undefined, { filepath: params.filepath, ignored: result });
           return result;
         case 'isInitialized':
           result = await this.isInitialized(dir, params);
-          logGitRead(method, params, uid, true, undefined, { initialized: result });
+          logGitRead(method, params, deviceId, true, undefined, { initialized: result });
           return result;
         case 'requestAuth':
           // This is called by server to request credentials from client
           result = await this.requestAuth(socket, params);
-          logGitRead(method, params, uid, true);
+          logGitRead(method, params, deviceId, true);
           return result;
         default:
           throw createRPCError(ErrorCode.METHOD_NOT_FOUND, `Method not found: git.${method}`);
@@ -154,9 +154,9 @@ export class GitService {
       error = err;
       // Log error based on operation type
       if (readOps.includes(method)) {
-        logGitRead(method, params, uid, false, error);
+        logGitRead(method, params, deviceId, false, error);
       } else if (writeOps.includes(method)) {
-        logGitWrite(method, params, uid, false, error);
+        logGitWrite(method, params, deviceId, false, error);
       }
 
       if (error.code && error.message) {

@@ -19,18 +19,24 @@ describe('HMAC Validation', () => {
     params: any,
     timestamp?: number,
     customHmac?: string,
-    nonce?: string
+    nonce?: string,
+    deviceId?: string
   ): JSONRPCRequest {
     const ts = timestamp || Date.now();
     const nonceValue = nonce || crypto.randomBytes(16).toString('hex');
 
-    const payload = {
+    const payload: any = {
       jsonrpc: '2.0' as const,
       method,
       params,
       id: 1,
       nonce: nonceValue,
     };
+
+    // Include deviceId if provided (must be in payload for HMAC calculation)
+    if (deviceId) {
+      payload.deviceId = deviceId;
+    }
 
     const messageToSign = ts + JSON.stringify(payload);
     const hmac =
@@ -144,6 +150,25 @@ describe('HMAC Validation', () => {
 
       // Tamper with method after signing
       message.method = 'fs.deleteFile';
+
+      const isValid = validateHMAC(message, signingKey);
+
+      expect(isValid).toBe(false);
+    });
+
+    it('should validate message with deviceId', () => {
+      const message = createSignedMessage('fs.readFile', { path: '/test.txt' }, undefined, undefined, undefined, 'device-123');
+
+      const isValid = validateHMAC(message, signingKey);
+
+      expect(isValid).toBe(true);
+    });
+
+    it('should reject message when deviceId is tampered', () => {
+      const message = createSignedMessage('fs.readFile', { path: '/test.txt' }, undefined, undefined, undefined, 'device-123') as any;
+
+      // Tamper with deviceId after signing
+      message.deviceId = 'device-456';
 
       const isValid = validateHMAC(message, signingKey);
 

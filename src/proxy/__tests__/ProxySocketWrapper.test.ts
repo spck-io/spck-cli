@@ -9,16 +9,18 @@ describe('ProxySocketWrapper', () => {
   let mockSendFn: jest.Mock;
   const connectionId = 'test-connection-123';
   const userId = 'test-user-456';
+  const deviceId = 'test-device-789';
 
   beforeEach(() => {
     mockSendFn = jest.fn();
-    wrapper = new ProxySocketWrapper(connectionId, userId, mockSendFn);
+    wrapper = new ProxySocketWrapper(connectionId, userId, mockSendFn, deviceId);
   });
 
   describe('constructor', () => {
-    it('should initialize with correct connection ID and user ID', () => {
+    it('should initialize with correct connection ID, user ID, and device ID', () => {
       expect(wrapper.id).toBe(connectionId);
       expect(wrapper.data.uid).toBe(userId);
+      expect(wrapper.data.deviceId).toBe(deviceId);
     });
 
     it('should initialize broadcast object', () => {
