@@ -86,7 +86,7 @@ export class FilesystemService {
           return result;
         case 'readdirDeep':
           result = await this.readdirDeep(safePath!, params);
-          logFsRead(method, params, deviceId, true, undefined, { files: result.files.length, folders: result.folders.length });
+          logFsRead(method, params, deviceId, true, undefined, { count: result.length });
           return result;
         case 'lstat':
           result = await this.lstat(safePath!);
@@ -502,11 +502,27 @@ export class FilesystemService {
 
   /**
    * Read directory recursively
+   * Performance optimizations:
+   * - matchPattern: Regex to filter paths (applied to full relative path)
+   * - limit: Maximum number of results (files + folders combined)
    */
   private async readdirDeep(safePath: string, params: any): Promise<any> {
     try {
       const includeFiles = params.files !== false;  // Default true
       const includeFolders = params.folders !== false;  // Default true
+      const limit = params.limit !== undefined && params.limit !== null
+        ? parseInt(params.limit, 10)
+        : null;
+
+      // Compile regex pattern if provided
+      let matchRegex: RegExp | null = null;
+      if (params.matchPattern) {
+        try {
+          matchRegex = new RegExp(params.matchPattern);
+        } catch (error: any) {
+          throw createRPCError(ErrorCode.INVALID_PARAMS, `Invalid matchPattern regex: ${error.message}`);
+        }
+      }
 
       // Parse ignoreName into a Set
       const ignoreSet = new Set<string>(['.git', '.spck-editor']);
@@ -518,18 +534,32 @@ export class FilesystemService {
         });
       }
 
-      const files: string[] = [];
-      const folders: string[] = [];
+      const results: string[] = [];
+
+      // Early exit if limit is 0
+      if (limit === 0) {
+        return [];
+      }
 
       // Get real root path for relative path calculations
       // (safePath might be resolved real path if it was a symlink)
       const realRoot = await this.getRealRootPath();
 
       // Recursive helper function
-      const walk = async (currentPath: string) => {
+      const walk = async (currentPath: string): Promise<void> => {
+        // Early exit if limit reached
+        if (limit !== null && results.length >= limit) {
+          return;
+        }
+
         const entries = await fs.readdir(currentPath);
 
         for (const name of entries) {
+          // Early exit if limit reached
+          if (limit !== null && results.length >= limit) {
+            return;
+          }
+
           // Skip ignored names
           if (ignoreSet.has(name)) {
             continue;
@@ -539,24 +569,45 @@ export class FilesystemService {
           const stats = await fs.stat(entryPath);
 
           if (stats.isDirectory()) {
+            // Convert to relative path using real root
+            const outputPath = path.relative(realRoot, entryPath);
+
+            // Apply filter and check limit for folders
             if (includeFolders) {
-              // Convert to relative path using real root
-              const outputPath = path.relative(realRoot, entryPath);
-              folders.push(outputPath);
+              const matches = !matchRegex || matchRegex.test(outputPath);
+              if (matches) {
+                results.push(outputPath);
+
+                // Check if limit reached
+                if (limit !== null && results.length >= limit) {
+                  return;
+                }
+              }
             }
+
             // Recurse into subdirectory
             await walk(entryPath);
           } else if (stats.isFile() && includeFiles) {
             // Convert to relative path using real root
             const outputPath = path.relative(realRoot, entryPath);
-            files.push(outputPath);
+
+            // Apply filter and check limit for files
+            const matches = !matchRegex || matchRegex.test(outputPath);
+            if (matches) {
+              results.push(outputPath);
+
+              // Check if limit reached
+              if (limit !== null && results.length >= limit) {
+                return;
+              }
+            }
           }
         }
       };
 
       await walk(safePath);
 
-      return { files, folders };
+      return results;
     } catch (error: any) {
       if (error.code === 'ENOENT') {
         throw createRPCError(ErrorCode.FILE_NOT_FOUND, `Directory not found: ${safePath}`);

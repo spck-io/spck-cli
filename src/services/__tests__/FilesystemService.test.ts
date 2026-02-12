@@ -482,16 +482,16 @@ describe('FilesystemService', () => {
     it('should recursively list all files and folders', async () => {
       const result = await service.handle('readdirDeep', { path: '/deep' }, mockSocket);
 
-      expect(result.files).toContain('deep/root.txt');
-      expect(result.files).toContain('deep/level1/file1.txt');
-      expect(result.files).toContain('deep/level1/level2/file2.txt');
+      expect(result).toContain('deep/root.txt');
+      expect(result).toContain('deep/level1/file1.txt');
+      expect(result).toContain('deep/level1/level2/file2.txt');
 
-      expect(result.folders).toContain('deep/level1');
-      expect(result.folders).toContain('deep/level1/level2');
+      expect(result).toContain('deep/level1');
+      expect(result).toContain('deep/level1/level2');
 
       // Should NOT include .git by default (auto-ignored)
       // node_modules is included
-      expect(result.folders).toContain('deep/node_modules');
+      expect(result).toContain('deep/node_modules');
     });
 
     it('should return only files when folders=false', async () => {
@@ -501,10 +501,11 @@ describe('FilesystemService', () => {
         mockSocket
       );
 
-      expect(result.files.length).toBeGreaterThan(0);
-      expect(result.folders).toEqual([]);
-      expect(result.files).toContain('deep/root.txt');
-      expect(result.files).toContain('deep/level1/file1.txt');
+      expect(result.length).toBeGreaterThan(0);
+      expect(result).toContain('deep/root.txt');
+      expect(result).toContain('deep/level1/file1.txt');
+      // Should not contain folders
+      expect(result).not.toContain('deep/level1');
     });
 
     it('should return only folders when files=false', async () => {
@@ -514,10 +515,11 @@ describe('FilesystemService', () => {
         mockSocket
       );
 
-      expect(result.files).toEqual([]);
-      expect(result.folders.length).toBeGreaterThan(0);
-      expect(result.folders).toContain('deep/level1');
-      expect(result.folders).toContain('deep/level1/level2');
+      expect(result.length).toBeGreaterThan(0);
+      expect(result).toContain('deep/level1');
+      expect(result).toContain('deep/level1/level2');
+      // Should not contain files
+      expect(result).not.toContain('deep/root.txt');
     });
 
     it('should filter ignored names', async () => {
@@ -528,14 +530,12 @@ describe('FilesystemService', () => {
       );
 
       // Should NOT contain .git or node_modules
-      expect(result.folders.some((f: string) => f.includes('.git'))).toBe(false);
-      expect(result.folders.some((f: string) => f.includes('node_modules'))).toBe(false);
-      expect(result.files.some((f: string) => f.includes('.git'))).toBe(false);
-      expect(result.files.some((f: string) => f.includes('node_modules'))).toBe(false);
+      expect(result.some((f: string) => f.includes('.git'))).toBe(false);
+      expect(result.some((f: string) => f.includes('node_modules'))).toBe(false);
 
       // Should still contain other files/folders
-      expect(result.files).toContain('deep/root.txt');
-      expect(result.folders).toContain('deep/level1');
+      expect(result).toContain('deep/root.txt');
+      expect(result).toContain('deep/level1');
     });
 
     it('should handle empty ignoreName gracefully', async () => {
@@ -545,8 +545,7 @@ describe('FilesystemService', () => {
         mockSocket
       );
 
-      expect(result.files.length).toBeGreaterThan(0);
-      expect(result.folders.length).toBeGreaterThan(0);
+      expect(result.length).toBeGreaterThan(0);
     });
 
     it('should handle ignoreName with spaces', async () => {
@@ -556,8 +555,8 @@ describe('FilesystemService', () => {
         mockSocket
       );
 
-      expect(result.folders.some((f: string) => f.includes('.git'))).toBe(false);
-      expect(result.folders.some((f: string) => f.includes('node_modules'))).toBe(false);
+      expect(result.some((f: string) => f.includes('.git'))).toBe(false);
+      expect(result.some((f: string) => f.includes('node_modules'))).toBe(false);
     });
 
     it('should throw error for non-existing directory', async () => {
@@ -573,8 +572,135 @@ describe('FilesystemService', () => {
 
       const result = await service.handle('readdirDeep', { path: '/empty' }, mockSocket);
 
-      expect(result.files).toEqual([]);
-      expect(result.folders).toEqual([]);
+      expect(result).toEqual([]);
+    });
+
+    it('should filter results with matchPattern regex', async () => {
+      const result = await service.handle(
+        'readdirDeep',
+        { path: '/deep', matchPattern: '\\.txt$' },
+        mockSocket
+      );
+
+      // Should only contain .txt files
+      expect(result).toContain('deep/root.txt');
+      expect(result).toContain('deep/level1/file1.txt');
+      expect(result).toContain('deep/level1/level2/file2.txt');
+
+      // Should NOT contain non-.txt files
+      expect(result.some((f: string) => f.endsWith('.json'))).toBe(false);
+    });
+
+    it('should filter folders with matchPattern regex', async () => {
+      const result = await service.handle(
+        'readdirDeep',
+        { path: '/deep', files: false, folders: true, matchPattern: 'level' },
+        mockSocket
+      );
+
+      // Should only contain folders with "level" in path
+      expect(result).toContain('deep/level1');
+      expect(result).toContain('deep/level1/level2');
+
+      // Should NOT contain node_modules
+      expect(result).not.toContain('deep/node_modules');
+    });
+
+    it('should limit results when limit parameter is provided', async () => {
+      const result = await service.handle(
+        'readdirDeep',
+        { path: '/deep', limit: 2 },
+        mockSocket
+      );
+
+      // Should return exactly 2 results (folders + files combined)
+      expect(result.length).toBe(2);
+    });
+
+    it('should combine matchPattern and limit correctly', async () => {
+      const result = await service.handle(
+        'readdirDeep',
+        { path: '/deep', matchPattern: '\\.txt$', limit: 2 },
+        mockSocket
+      );
+
+      // Should return max 2 .txt files
+      expect(result.length).toBeLessThanOrEqual(2);
+
+      // All returned files should match the pattern
+      result.forEach((file: string) => {
+        expect(file).toMatch(/\.txt$/);
+      });
+    });
+
+    it('should not truncate when limit is not reached', async () => {
+      const result = await service.handle(
+        'readdirDeep',
+        { path: '/deep', limit: 1000 },
+        mockSocket
+      );
+
+      // Should return all results when limit is high
+      expect(result.length).toBeGreaterThan(0);
+    });
+
+    it('should handle limit of 0', async () => {
+      const result = await service.handle(
+        'readdirDeep',
+        { path: '/deep', limit: 0 },
+        mockSocket
+      );
+
+      expect(result).toEqual([]);
+    });
+
+    it('should handle limit of 1', async () => {
+      const result = await service.handle(
+        'readdirDeep',
+        { path: '/deep', limit: 1 },
+        mockSocket
+      );
+
+      expect(result.length).toBe(1);
+    });
+
+    it('should return all results when no limit or pattern', async () => {
+      const result = await service.handle(
+        'readdirDeep',
+        { path: '/deep' },
+        mockSocket
+      );
+
+      expect(result.length).toBeGreaterThan(0);
+    });
+
+    it('should handle invalid regex in matchPattern', async () => {
+      await expect(
+        service.handle(
+          'readdirDeep',
+          { path: '/deep', matchPattern: '[invalid(' },
+          mockSocket
+        )
+      ).rejects.toMatchObject({
+        code: ErrorCode.INVALID_PARAMS,
+      });
+    });
+
+    it('should apply matchPattern to full relative path', async () => {
+      const result = await service.handle(
+        'readdirDeep',
+        { path: '/deep', matchPattern: '^deep/level1/' },
+        mockSocket
+      );
+
+      // Should only match paths starting with "deep/level1/"
+      result.forEach((path: string) => {
+        expect(path).toMatch(/^deep\/level1\//);
+      });
+
+      // Should NOT contain root.txt or node_modules
+      expect(result).not.toContain('deep/root.txt');
+      expect(result).not.toContain('deep/node_modules');
     });
   });
 
