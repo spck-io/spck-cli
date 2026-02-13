@@ -88,6 +88,10 @@ export class FilesystemService {
           result = await this.readdirDeep(safePath!, params);
           logFsRead(method, params, deviceId, true, undefined, { count: result.length });
           return result;
+        case 'bulkExists':
+          result = await this.bulkExists(params.path!, params);
+          logFsRead(method, params, deviceId, true, undefined, { count: result.length });
+          return result;
         case 'lstat':
           result = await this.lstat(safePath!);
           logFsRead(method, params, deviceId, true, undefined, { isFile: result.isFile, isDirectory: result.isDirectory });
@@ -110,7 +114,7 @@ export class FilesystemService {
     } catch (err) {
       error = err;
       // Determine if this was a read or write operation for logging
-      const readOps = ['exists', 'readFile', 'getFileHash', 'readdir', 'readdirDeep', 'lstat'];
+      const readOps = ['exists', 'readFile', 'getFileHash', 'readdir', 'readdirDeep', 'bulkExists', 'lstat'];
       if (readOps.includes(method)) {
         logFsRead(method, params, deviceId, false, error);
       } else {
@@ -204,6 +208,35 @@ export class FilesystemService {
     } catch {
       return { exists: false };
     }
+  }
+
+  /**
+   * Check existence of multiple paths in parallel
+   */
+  private async bulkExists(basePath: string, params: any): Promise<boolean[]> {
+    const { paths } = params;
+    if (!Array.isArray(paths)) {
+      throw createRPCError(ErrorCode.INVALID_PARAMS, 'paths must be an array');
+    }
+
+    // Validate and check all paths in parallel
+    const results = await Promise.all(
+      paths.map(async (relativePath: string) => {
+        try {
+          // Combine base path with relative path
+          const combinedPath = path.join(basePath, relativePath);
+          // Validate the combined path for security
+          const validatedPath = await this.validatePath(combinedPath);
+          // Check if the validated path exists
+          await fs.access(validatedPath);
+          return true;
+        } catch {
+          return false;
+        }
+      })
+    );
+
+    return results;
   }
 
   /**
@@ -514,11 +547,11 @@ export class FilesystemService {
         ? parseInt(params.limit, 10)
         : null;
 
-      // Compile regex pattern if provided
+      // Compile regex pattern if provided (case-insensitive)
       let matchRegex: RegExp | null = null;
       if (params.matchPattern) {
         try {
-          matchRegex = new RegExp(params.matchPattern);
+          matchRegex = new RegExp(params.matchPattern, 'i');
         } catch (error: any) {
           throw createRPCError(ErrorCode.INVALID_PARAMS, `Invalid matchPattern regex: ${error.message}`);
         }

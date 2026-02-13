@@ -840,6 +840,93 @@ describe('FilesystemService', () => {
     });
   });
 
+  describe('Bulk Operations - bulkExists', () => {
+    it('should check existence of multiple files with relative base path', async () => {
+      // Create test files
+      await fs.writeFile(path.join(testRoot, 'file1.txt'), 'content1');
+      await fs.writeFile(path.join(testRoot, 'file2.txt'), 'content2');
+      await fs.mkdir(path.join(testRoot, 'subdir'));
+      await fs.writeFile(path.join(testRoot, 'subdir', 'file3.txt'), 'content3');
+
+      const result = await service.handle(
+        'bulkExists',
+        {
+          path: '/',
+          paths: ['file1.txt', 'file2.txt', 'missing.txt', 'subdir/file3.txt'],
+        },
+        mockSocket
+      );
+
+      expect(result).toEqual([true, true, false, true]);
+    });
+
+    it('should check existence with basePath /', async () => {
+      // Create nested directory structure
+      await fs.mkdir(path.join(testRoot, 'home'));
+      await fs.mkdir(path.join(testRoot, 'home', 'user'));
+      await fs.mkdir(path.join(testRoot, 'home', 'user', 'project'));
+      await fs.writeFile(path.join(testRoot, 'home', 'user', 'project', 'index.js'), 'console.log("hello")');
+      await fs.writeFile(path.join(testRoot, 'home', 'user', 'project', 'README.md'), '# Project');
+
+      const result = await service.handle(
+        'bulkExists',
+        {
+          path: '/',
+          paths: ['home/user/project/index.js', 'home/user/project/README.md', 'home/user/project/missing.js'],
+        },
+        mockSocket
+      );
+
+      expect(result).toEqual([true, true, false]);
+    });
+
+    it('should validate paths and prevent directory traversal in bulkExists', async () => {
+      await fs.writeFile(path.join(testRoot, 'safe.txt'), 'content');
+
+      const result = await service.handle(
+        'bulkExists',
+        {
+          path: '/',
+          paths: ['safe.txt', '../../etc/passwd'],
+        },
+        mockSocket
+      );
+
+      // safe.txt exists, but ../../etc/passwd should be clamped and return false
+      expect(result[0]).toBe(true);
+      expect(result[1]).toBe(false);
+    });
+
+    it('should return empty array when paths is empty', async () => {
+      const result = await service.handle(
+        'bulkExists',
+        {
+          path: '/',
+          paths: [],
+        },
+        mockSocket
+      );
+
+      expect(result).toEqual([]);
+    });
+
+    it('should throw error when paths parameter is not an array', async () => {
+      await expect(
+        service.handle(
+          'bulkExists',
+          {
+            path: '/',
+            paths: 'not-an-array',
+          },
+          mockSocket
+        )
+      ).rejects.toMatchObject({
+        code: ErrorCode.INVALID_PARAMS,
+        message: expect.stringContaining('paths must be an array'),
+      });
+    });
+  });
+
   describe('Unknown Methods', () => {
     it('should throw error for unknown method', async () => {
       await expect(
