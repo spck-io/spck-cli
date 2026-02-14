@@ -213,13 +213,14 @@ export class FilesystemService {
   /**
    * Check existence of multiple paths in parallel
    */
-  private async bulkExists(basePath: string, params: any): Promise<boolean[]> {
+  private async bulkExists(basePath: string, params: any): Promise<number[]> {
     const { paths } = params;
     if (!Array.isArray(paths)) {
       throw createRPCError(ErrorCode.INVALID_PARAMS, 'paths must be an array');
     }
 
     // Validate and check all paths in parallel
+    // Return 1/0 instead of true/false for bandwidth efficiency
     const results = await Promise.all(
       paths.map(async (relativePath: string) => {
         try {
@@ -229,9 +230,9 @@ export class FilesystemService {
           const validatedPath = await this.validatePath(combinedPath);
           // Check if the validated path exists
           await fs.access(validatedPath);
-          return true;
+          return 1;
         } catch {
-          return false;
+          return 0;
         }
       })
     );

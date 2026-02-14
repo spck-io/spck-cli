@@ -1316,4 +1316,144 @@ describe('GitService', () => {
       });
     });
   });
+
+  describe('bulkIsIgnored', () => {
+    beforeEach(async () => {
+      // Initialize git repository
+      await execGit(['init'], repoPath);
+      await execGit(['config', 'user.email', 'test@example.com'], repoPath);
+      await execGit(['config', 'user.name', 'Test User'], repoPath);
+
+      // Create .gitignore with test patterns
+      await fs.writeFile(
+        path.join(repoPath, '.gitignore'),
+        '*.log\nnode_modules/\n.env\nbuild/\n'
+      );
+
+      // Create test files
+      await fs.writeFile(path.join(repoPath, 'file1.js'), 'test');
+      await fs.writeFile(path.join(repoPath, 'file2.log'), 'test');
+      await fs.writeFile(path.join(repoPath, '.env'), 'test');
+      await fs.mkdir(path.join(repoPath, 'src'), { recursive: true });
+      await fs.writeFile(path.join(repoPath, 'src', 'index.js'), 'test');
+      await fs.mkdir(path.join(repoPath, 'node_modules'), { recursive: true });
+      await fs.writeFile(path.join(repoPath, 'node_modules', 'test.js'), 'test');
+    });
+
+    it('should check multiple files and return 1/0 for ignored status', async () => {
+      const result = await service.handle(
+        'bulkIsIgnored',
+        {
+          dir: '/repo',
+          filepaths: [
+            'file1.js',      // not ignored
+            'file2.log',     // ignored (*.log)
+            '.env',          // ignored
+            'src/index.js',  // not ignored
+            'node_modules/test.js' // ignored
+          ]
+        },
+        mockSocket
+      );
+
+      expect(result).toEqual([0, 1, 1, 0, 1]);
+    });
+
+    it('should return empty array for empty input', async () => {
+      const result = await service.handle(
+        'bulkIsIgnored',
+        {
+          dir: '/repo',
+          filepaths: []
+        },
+        mockSocket
+      );
+
+      expect(result).toEqual([]);
+    });
+
+    it('should handle all ignored files', async () => {
+      const result = await service.handle(
+        'bulkIsIgnored',
+        {
+          dir: '/repo',
+          filepaths: [
+            'file2.log',
+            'debug.log',
+            '.env',
+            'node_modules/package.json'
+          ]
+        },
+        mockSocket
+      );
+
+      expect(result).toEqual([1, 1, 1, 1]);
+    });
+
+    it('should handle all non-ignored files', async () => {
+      const result = await service.handle(
+        'bulkIsIgnored',
+        {
+          dir: '/repo',
+          filepaths: [
+            'file1.js',
+            'src/index.js',
+            'package.json',
+            'README.md'
+          ]
+        },
+        mockSocket
+      );
+
+      expect(result).toEqual([0, 0, 0, 0]);
+    });
+
+    it('should work with single file', async () => {
+      const result = await service.handle(
+        'bulkIsIgnored',
+        {
+          dir: '/repo',
+          filepaths: ['file2.log']
+        },
+        mockSocket
+      );
+
+      expect(result).toEqual([1]);
+    });
+
+    it('should handle nested gitignore patterns', async () => {
+      await fs.mkdir(path.join(repoPath, 'build'), { recursive: true });
+      await fs.writeFile(path.join(repoPath, 'build', 'output.js'), 'test');
+
+      const result = await service.handle(
+        'bulkIsIgnored',
+        {
+          dir: '/repo',
+          filepaths: [
+            'build/output.js',  // ignored (build/ pattern)
+            'src/build.js'      // not ignored
+          ]
+        },
+        mockSocket
+      );
+
+      expect(result).toEqual([1, 0]);
+    });
+
+    it('should throw error for invalid params', async () => {
+      await expect(
+        service.handle(
+          'bulkIsIgnored',
+          {
+            dir: '/repo',
+            filepaths: 'not-an-array'
+          },
+          mockSocket
+        )
+      ).rejects.toMatchObject({
+        code: ErrorCode.INVALID_PARAMS,
+        message: 'filepaths must be an array'
+      });
+    });
+  });
 });

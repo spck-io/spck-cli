@@ -857,7 +857,7 @@ describe('FilesystemService', () => {
         mockSocket
       );
 
-      expect(result).toEqual([true, true, false, true]);
+      expect(result).toEqual([1, 1, 0, 1]);
     });
 
     it('should check existence with basePath /', async () => {
@@ -877,7 +877,7 @@ describe('FilesystemService', () => {
         mockSocket
       );
 
-      expect(result).toEqual([true, true, false]);
+      expect(result).toEqual([1, 1, 0]);
     });
 
     it('should validate paths and prevent directory traversal in bulkExists', async () => {
@@ -892,9 +892,9 @@ describe('FilesystemService', () => {
         mockSocket
       );
 
-      // safe.txt exists, but ../../etc/passwd should be clamped and return false
-      expect(result[0]).toBe(true);
-      expect(result[1]).toBe(false);
+      // safe.txt exists, but ../../etc/passwd should be clamped and return 0
+      expect(result[0]).toBe(1);
+      expect(result[1]).toBe(0);
     });
 
     it('should return empty array when paths is empty', async () => {

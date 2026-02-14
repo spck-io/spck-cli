@@ -36,7 +36,7 @@ export class GitService {
     // Define read and write operations
     const readOps = ['readCommit', 'readObject', 'getHeadTree', 'getOidAtPath', 'listFiles', 'resolveRef',
                      'currentBranch', 'log', 'status', 'statusCounts', 'getConfig', 'listBranches',
-                     'listRemotes', 'isIgnored', 'isInitialized', 'requestAuth'];
+                     'listRemotes', 'isIgnored', 'bulkIsIgnored', 'isInitialized', 'requestAuth'];
     const writeOps = ['add', 'remove', 'resetIndex', 'commit', 'setConfig', 'checkout', 'init',
                       'addRemote', 'deleteRemote', 'clearIndex'];
 
@@ -137,6 +137,10 @@ export class GitService {
         case 'isIgnored':
           result = await this.isIgnored(dir, params);
           logGitRead(method, params, deviceId, true, undefined, { filepath: params.filepath, ignored: result });
+          return result;
+        case 'bulkIsIgnored':
+          result = await this.bulkIsIgnored(dir, params);
+          logGitRead(method, params, deviceId, true, undefined, { count: result.length });
           return result;
         case 'isInitialized':
           result = await this.isInitialized(dir, params);
@@ -978,6 +982,41 @@ export class GitService {
     } catch (error) {
       // Exit code 1 means file is not ignored
       return false;
+    }
+  }
+
+  /**
+   * Check multiple files if they are ignored by .gitignore
+   * Returns array of 1 (ignored) or 0 (not ignored) for bandwidth efficiency
+   */
+  private async bulkIsIgnored(dir: string, params: any): Promise<number[]> {
+    const { filepaths } = params;
+    if (!Array.isArray(filepaths)) {
+      throw createRPCError(ErrorCode.INVALID_PARAMS, 'filepaths must be an array');
+    }
+
+    if (filepaths.length === 0) {
+      return [];
+    }
+
+    // Use git check-ignore with multiple paths for efficiency
+    // --stdin reads paths from stdin, -z uses null terminator
+    try {
+      const result = await this.execGit(['check-ignore', '--stdin', '-z'], {
+        cwd: dir,
+        input: filepaths.join('\0') + '\0'
+      });
+
+      // Parse output - ignored files are returned separated by null bytes
+      const ignoredPaths = new Set(
+        result.stdout.split('\0').filter(p => p.length > 0)
+      );
+
+      return filepaths.map(filepath => ignoredPaths.has(filepath) ? 1 : 0);
+    } catch (error) {
+      // If all files are not ignored, check-ignore exits with code 1
+      // In this case, return all 0s
+      return filepaths.map(() => 0);
     }
   }
 
