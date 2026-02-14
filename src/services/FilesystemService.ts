@@ -535,10 +535,13 @@ export class FilesystemService {
   }
 
   /**
-   * Read directory recursively
+   * Read directory recursively using breadth-first (level-order) traversal
    * Performance optimizations:
    * - matchPattern: Regex to filter paths (applied to full relative path)
    * - limit: Maximum number of results (files + folders combined)
+   *
+   * Breadth-first ensures top-level items are returned first, which is important
+   * when using the limit parameter to get a representative sample of the directory.
    */
   private async readdirDeep(safePath: string, params: any): Promise<any> {
     try {
@@ -575,71 +578,92 @@ export class FilesystemService {
         return [];
       }
 
+      // Verify initial directory exists before starting traversal
+      try {
+        const stats = await fs.stat(safePath);
+        if (!stats.isDirectory()) {
+          throw createRPCError(ErrorCode.FILE_NOT_FOUND, `Not a directory: ${safePath}`);
+        }
+      } catch (error: any) {
+        if (error.code === 'ENOENT') {
+          throw createRPCError(ErrorCode.FILE_NOT_FOUND, `Directory not found: ${safePath}`);
+        }
+        throw error;
+      }
+
       // Get real root path for relative path calculations
       // (safePath might be resolved real path if it was a symlink)
       const realRoot = await this.getRealRootPath();
 
-      // Recursive helper function
-      const walk = async (currentPath: string): Promise<void> => {
-        // Early exit if limit reached
-        if (limit !== null && results.length >= limit) {
-          return;
-        }
+      // Breadth-first traversal using a queue
+      let queue: string[] = [safePath];
 
-        const entries = await fs.readdir(currentPath);
+      while (queue.length > 0 && (limit === null || results.length < limit)) {
+        // Process current level
+        const currentLevel = queue;
+        queue = [];  // New queue for next level
 
-        for (const name of entries) {
+        for (const currentPath of currentLevel) {
           // Early exit if limit reached
           if (limit !== null && results.length >= limit) {
-            return;
+            break;
           }
 
-          // Skip ignored names
-          if (ignoreSet.has(name)) {
+          let entries: string[];
+          try {
+            entries = await fs.readdir(currentPath);
+          } catch (error: any) {
+            // Skip subdirectories we can't read (but initial dir should have been validated)
             continue;
           }
 
-          const entryPath = path.join(currentPath, name);
-          const stats = await fs.stat(entryPath);
+          for (const name of entries) {
+            // Early exit if limit reached
+            if (limit !== null && results.length >= limit) {
+              break;
+            }
 
-          if (stats.isDirectory()) {
-            // Convert to relative path using real root
-            const outputPath = path.relative(realRoot, entryPath);
+            // Skip ignored names
+            if (ignoreSet.has(name)) {
+              continue;
+            }
 
-            // Apply filter and check limit for folders
-            if (includeFolders) {
+            const entryPath = path.join(currentPath, name);
+            let stats;
+            try {
+              stats = await fs.stat(entryPath);
+            } catch (error: any) {
+              // Skip entries we can't stat
+              continue;
+            }
+
+            if (stats.isDirectory()) {
+              // Add to next level queue
+              queue.push(entryPath);
+
+              // Convert to relative path using real root
+              const outputPath = path.relative(realRoot, entryPath);
+
+              // Apply filter and check limit for folders
+              if (includeFolders) {
+                const matches = !matchRegex || matchRegex.test(outputPath);
+                if (matches) {
+                  results.push(outputPath);
+                }
+              }
+            } else if (stats.isFile() && includeFiles) {
+              // Convert to relative path using real root
+              const outputPath = path.relative(realRoot, entryPath);
+
+              // Apply filter and check limit for files
               const matches = !matchRegex || matchRegex.test(outputPath);
               if (matches) {
                 results.push(outputPath);
-
-                // Check if limit reached
-                if (limit !== null && results.length >= limit) {
-                  return;
-                }
-              }
-            }
-
-            // Recurse into subdirectory
-            await walk(entryPath);
-          } else if (stats.isFile() && includeFiles) {
-            // Convert to relative path using real root
-            const outputPath = path.relative(realRoot, entryPath);
-
-            // Apply filter and check limit for files
-            const matches = !matchRegex || matchRegex.test(outputPath);
-            if (matches) {
-              results.push(outputPath);
-
-              // Check if limit reached
-              if (limit !== null && results.length >= limit) {
-                return;
               }
             }
           }
         }
-      };
-
-      await walk(safePath);
+      }
 
       return results;
     } catch (error: any) {
