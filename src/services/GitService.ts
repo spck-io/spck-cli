@@ -366,7 +366,7 @@ export class GitService {
   /**
    * Get HEAD tree oid
    */
-  private async getHeadTree(dir: string, params: any): Promise<any> {
+  private async getHeadTree(dir: string, _params: any): Promise<any> {
     try {
       const { stdout } = await this.execGit(['rev-parse', 'HEAD^{tree}'], { cwd: dir });
       return { oid: stdout.trim() };
@@ -914,7 +914,7 @@ export class GitService {
   /**
    * List git remotes
    */
-  private async listRemotes(dir: string, params: any): Promise<any> {
+  private async listRemotes(dir: string, _params: any): Promise<any> {
     try {
       const { stdout } = await this.execGit(['remote', '-v'], { cwd: dir });
       const remotes: Array<{ remote: string; url: string }> = [];
@@ -960,7 +960,7 @@ export class GitService {
   /**
    * Clear git index (remove cached files)
    */
-  private async clearIndex(dir: string, params: any): Promise<{ success: boolean }> {
+  private async clearIndex(dir: string, _params: any): Promise<{ success: boolean }> {
     try {
       await this.execGit(['rm', '-r', '--cached', '-f', '.'], { cwd: dir });
       return { success: true };
@@ -1024,7 +1024,7 @@ export class GitService {
    * Check if directory is a git repository
    * Uses git rev-parse --is-inside-work-tree
    */
-  private async isInitialized(dir: string, params: any): Promise<boolean> {
+  private async isInitialized(dir: string, _params: any): Promise<boolean> {
     try {
       const { stdout } = await this.execGit(['rev-parse', '--is-inside-work-tree'], { cwd: dir });
       // Exit code 0 and stdout "true" means it's a git repository

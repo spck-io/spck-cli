@@ -151,7 +151,7 @@ export async function executeRipgrepStream(
       }
     });
 
-    proc.stderr?.on('data', (data) => {
+    proc.stderr?.on('data', (_data) => {
       // Ignore stderr for now
     });
 

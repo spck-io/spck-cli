@@ -81,7 +81,7 @@ export class ProxyClient {
    * Connect to proxy server
    */
   async connect(): Promise<void> {
-    const { config, existingConnectionSettings } = this.options;
+    const { existingConnectionSettings } = this.options;
 
     console.log('\n=== Connecting to Proxy Server ===\n');
 
@@ -486,7 +486,6 @@ export class ProxyClient {
 
     } catch (error: any) {
       const { deviceId } = authMessage;
-      const displayId = deviceId || connectionId;
       logConnection('auth_failed', deviceId, {
         connectionId,
         error: error.message,
@@ -753,7 +752,6 @@ export class ProxyClient {
    */
   private handleClientDisconnected(data: ProxyClientDisconnectedEvent): void {
     const connection = this.activeConnections.get(data.connectionId);
-    const displayId = connection?.deviceId || data.connectionId;
     logConnection('disconnected', connection?.deviceId, {
       connectionId: data.connectionId
     });

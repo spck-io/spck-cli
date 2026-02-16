@@ -4,8 +4,6 @@
  */
 
 import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import jwt from 'jsonwebtoken';
@@ -434,7 +432,7 @@ export async function main(): Promise<void> {
     .version()
     .alias('version', 'v')
     .strict()
-    .fail((msg, err, yargs) => {
+    .fail((msg, err, _yargs) => {
       if (err) throw err; // Preserve stack trace for actual errors
       console.error('\n❌ Error:', msg);
       console.error('\nRun with --help to see available commands and options.\n');

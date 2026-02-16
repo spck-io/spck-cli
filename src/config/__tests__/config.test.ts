@@ -3,7 +3,6 @@
  */
 
 import * as fs from 'fs';
-import * as path from 'path';
 import {
   loadConfig,
   saveConfig,
@@ -20,7 +19,6 @@ const mockFs = fs as jest.Mocked<typeof fs>;
 
 describe('config', () => {
   const mockCwd = '/mock/project';
-  const defaultConfigPath = `${mockCwd}/.spck-editor/config/spck-cli.config.json`;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -64,7 +62,7 @@ describe('config', () => {
     });
 
     it('should load and return valid config', () => {
-      mockFs.existsSync.mockImplementation((path: any) => {
+      mockFs.existsSync.mockImplementation((_path: any) => {
         // Config file and root directory exist
         return true;
       });

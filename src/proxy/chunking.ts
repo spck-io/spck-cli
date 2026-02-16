@@ -152,7 +152,7 @@ export class ChunkReassembler {
   /**
    * Clean up stale chunks (older than 30 seconds)
    */
-  cleanup(maxAge: number = 30000): void {
+  cleanup(_maxAge: number = 30000): void {
     // Note: This is a simple implementation that clears all chunks
     // A more sophisticated version could track timestamps
     this.chunks.clear();

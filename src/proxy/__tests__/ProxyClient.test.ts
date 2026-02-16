@@ -47,12 +47,10 @@ jest.mock('../../connection/hmac.js', () => ({
 }));
 
 import { ProxyClient } from '../ProxyClient.js';
-import { verifyFirebaseToken } from '../../connection/auth.js';
 import { requireValidHMAC } from '../../connection/hmac.js';
 import { RPCRouter } from '../../rpc/router.js';
 import { validateHandshakeTimestamp } from '../handshake-validation.js';
 
-const mockVerifyFirebaseToken = verifyFirebaseToken as jest.Mock;
 const mockRequireValidHMAC = requireValidHMAC as jest.Mock;
 const mockRPCRouter = RPCRouter as jest.Mocked<typeof RPCRouter>;
 const mockValidateHandshakeTimestamp = validateHandshakeTimestamp as jest.Mock;

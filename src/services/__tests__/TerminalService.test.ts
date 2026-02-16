@@ -245,7 +245,7 @@ describe('TerminalService', () => {
 
       // Create two terminals
       const terminal1 = await service.handle('create', { cols: 80, rows: 24 });
-      const terminal2 = await service.handle('create', { cols: 80, rows: 24 });
+      await service.handle('create', { cols: 80, rows: 24 });
 
       mockSocket.emit.mockClear();
 
@@ -518,7 +518,7 @@ describe('TerminalService', () => {
 
     it('should only list terminals for current user', async () => {
       // Create terminal for user-123
-      const terminal1 = await service.handle('create', { cols: 80, rows: 24 });
+      await service.handle('create', { cols: 80, rows: 24 });
 
       // Create service for different user
       const otherSocket = {
@@ -658,8 +658,8 @@ describe('TerminalService', () => {
 
   describe('Cleanup', () => {
     it('should kill all terminals on cleanup', async () => {
-      const terminal1 = await service.handle('create', { cols: 80, rows: 24 });
-      const terminal2 = await service.handle('create', { cols: 80, rows: 24 });
+      await service.handle('create', { cols: 80, rows: 24 });
+      await service.handle('create', { cols: 80, rows: 24 });
 
       // Clear previous calls
       mockPtyProcess.kill.mockClear();
@@ -671,7 +671,7 @@ describe('TerminalService', () => {
     });
 
     it('should not kill already exited terminals', async () => {
-      const terminalId = await service.handle('create', { cols: 80, rows: 24 });
+      await service.handle('create', { cols: 80, rows: 24 });
 
       // Simulate exit
       if (ptyExitHandler) {

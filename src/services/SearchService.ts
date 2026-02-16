@@ -13,7 +13,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ErrorCode, createRPCError, AuthenticatedSocket } from '../types.js';
 import { logSearchRead } from '../utils/logger.js';
-import { isRipgrepAvailable, executeRipgrep, executeRipgrepStream } from '../utils/ripgrep.js';
+import { isRipgrepAvailable, executeRipgrepStream } from '../utils/ripgrep.js';
 
 interface StreamSearchParams {
   glob: string;
@@ -224,7 +224,6 @@ export class SearchService {
     // This can happen when ellipsis are added
     if (result.length > maxLength) {
       // Trim from the end, preserving the match
-      const hasLeadingEllipsis = start > 0;
       const hasTrailingEllipsis = end < lineText.length;
 
       // Calculate how much to trim
@@ -438,7 +437,7 @@ export class SearchService {
    * Used as fallback when ripgrep is not available
    */
   private async findWithStreamNode(params: StreamSearchParams, socket: AuthenticatedSocket): Promise<void> {
-    const { glob, rootDir, maxResults, searchTerm, matchCase, useRegEx, onlyWholeWords } = params;
+    const { glob, maxResults, searchTerm, matchCase, useRegEx, onlyWholeWords } = params;
     const deviceId = socket.data.deviceId;
 
     try {
