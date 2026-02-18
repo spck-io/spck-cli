@@ -11,6 +11,7 @@ interface ExecGitOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   input?: string;
+  acceptExitCodes?: number[];
 }
 
 interface ExecGitResult {
@@ -20,7 +21,24 @@ interface ExecGitResult {
 }
 
 export class GitService {
+  private submoduleCache: Map<string, { submodules: Array<{ name: string; path: string }>; timestamp: number }> = new Map();
+  private static SUBMODULE_CACHE_TTL = 30000; // 30 seconds
+
   constructor(private rootPath: string) {}
+
+  /**
+   * Get submodules for a directory, using a short-lived cache to avoid
+   * repeated git submodule status calls during bulk operations.
+   */
+  private async getCachedSubmodules(dir: string): Promise<Array<{ name: string; path: string }>> {
+    const cached = this.submoduleCache.get(dir);
+    if (cached && Date.now() - cached.timestamp < GitService.SUBMODULE_CACHE_TTL) {
+      return cached.submodules;
+    }
+    const { submodules } = await this.listSubmodules(dir);
+    this.submoduleCache.set(dir, { submodules, timestamp: Date.now() });
+    return submodules;
+  }
 
   /**
    * Resolve the effective git working directory.
@@ -283,7 +301,8 @@ export class GitService {
       });
 
       git.on('close', (code) => {
-        if (code !== 0) {
+        const exitCode = code || 0;
+        if (exitCode !== 0 && !(options.acceptExitCodes && options.acceptExitCodes.includes(exitCode))) {
           // Log full output server-side for debugging
           console.error('Git command failed:', {
             args,
@@ -294,7 +313,7 @@ export class GitService {
           // Send sanitized error to client (no file paths from stderr/stdout)
           reject(new Error(`Git command failed with exit code ${code}`));
         } else {
-          resolve({ stdout, stderr, code: code || 0 });
+          resolve({ stdout, stderr, code: exitCode });
         }
       });
 
@@ -1013,23 +1032,65 @@ export class GitService {
   }
 
   /**
+   * Find which submodule a filepath belongs to (if any).
+   * Returns the submodule path and the filepath relative to the submodule root.
+   */
+  private findSubmoduleForPath(
+    filepath: string,
+    submodules: Array<{ name: string; path: string }>
+  ): { submodulePath: string; relativePath: string } | null {
+    for (const sub of submodules) {
+      if (filepath === sub.path || filepath.startsWith(sub.path + '/')) {
+        const relativePath = filepath === sub.path ? '.' : filepath.slice(sub.path.length + 1);
+        return { submodulePath: sub.path, relativePath };
+      }
+    }
+    return null;
+  }
+
+  /**
    * Check if file is ignored by .gitignore
+   * Handles files inside submodules by running check-ignore from the submodule dir
    */
   private async isIgnored(dir: string, params: any): Promise<boolean> {
     const { filepath } = params;
-    try {
-      await this.execGit(['check-ignore', filepath], { cwd: dir });
-      // Exit code 0 means file is ignored
-      return true;
-    } catch (error) {
-      // Exit code 1 means file is not ignored
-      return false;
+
+    // Check if filepath is inside a submodule
+    const submodules = await this.getCachedSubmodules(dir);
+    if (submodules.length > 0) {
+      const match = this.findSubmoduleForPath(filepath, submodules);
+      if (match) {
+        const subDir = path.join(dir, match.submodulePath);
+        // Exit code 0 = ignored, exit code 1 = not ignored
+        const result = await this.execGit(['check-ignore', match.relativePath], { cwd: subDir, acceptExitCodes: [1] });
+        return result.code === 0;
+      }
     }
+
+    // Exit code 0 = ignored, exit code 1 = not ignored
+    const result = await this.execGit(['check-ignore', filepath], { cwd: dir, acceptExitCodes: [1] });
+    return result.code === 0;
+  }
+
+  /**
+   * Run git check-ignore for a list of paths in a single directory.
+   * Returns a Set of ignored paths.
+   */
+  private async checkIgnorePaths(cwd: string, filepaths: string[]): Promise<Set<string>> {
+    if (filepaths.length === 0) return new Set();
+    // Exit code 1 means none are ignored - this is expected
+    const result = await this.execGit(['check-ignore', '--stdin', '-z'], {
+      cwd,
+      input: filepaths.join('\0') + '\0',
+      acceptExitCodes: [1]
+    });
+    return new Set(result.stdout.split('\0').filter(p => p.length > 0));
   }
 
   /**
    * Check multiple files if they are ignored by .gitignore
    * Returns array of 1 (ignored) or 0 (not ignored) for bandwidth efficiency
+   * Handles files inside submodules by routing check-ignore to the submodule dir
    */
   private async bulkIsIgnored(dir: string, params: any): Promise<number[]> {
     const { filepaths } = params;
@@ -1041,25 +1102,64 @@ export class GitService {
       return [];
     }
 
-    // Use git check-ignore with multiple paths for efficiency
-    // --stdin reads paths from stdin, -z uses null terminator
-    try {
-      const result = await this.execGit(['check-ignore', '--stdin', '-z'], {
-        cwd: dir,
-        input: filepaths.join('\0') + '\0'
-      });
+    // Check for submodules to handle paths inside them
+    const submodules = await this.getCachedSubmodules(dir);
 
-      // Parse output - ignored files are returned separated by null bytes
-      const ignoredPaths = new Set(
-        result.stdout.split('\0').filter(p => p.length > 0)
-      );
-
-      return filepaths.map(filepath => ignoredPaths.has(filepath) ? 1 : 0);
-    } catch (error) {
-      // If all files are not ignored, check-ignore exits with code 1
-      // In this case, return all 0s
-      return filepaths.map(() => 0);
+    if (submodules.length === 0) {
+      // No submodules, check all paths in the main repo
+      const ignoredPaths = await this.checkIgnorePaths(dir, filepaths);
+      return filepaths.map(fp => ignoredPaths.has(fp) ? 1 : 0);
     }
+
+    // Group paths by main repo vs submodule
+    const mainPaths: Array<{ index: number; filepath: string }> = [];
+    const submoduleGroups: Map<string, Array<{ index: number; relativePath: string }>> = new Map();
+
+    for (let i = 0; i < filepaths.length; i++) {
+      const fp = filepaths[i];
+      const match = this.findSubmoduleForPath(fp, submodules);
+      if (match) {
+        let group = submoduleGroups.get(match.submodulePath);
+        if (!group) {
+          group = [];
+          submoduleGroups.set(match.submodulePath, group);
+        }
+        group.push({ index: i, relativePath: match.relativePath });
+      } else {
+        mainPaths.push({ index: i, filepath: fp });
+      }
+    }
+
+    const results = new Array<number>(filepaths.length).fill(0);
+    const promises: Promise<void>[] = [];
+
+    // Check main repo paths
+    if (mainPaths.length > 0) {
+      const mainFilepaths = mainPaths.map(m => m.filepath);
+      promises.push(
+        this.checkIgnorePaths(dir, mainFilepaths).then(ignoredPaths => {
+          for (let i = 0; i < mainPaths.length; i++) {
+            results[mainPaths[i].index] = ignoredPaths.has(mainPaths[i].filepath) ? 1 : 0;
+          }
+        })
+      );
+    }
+
+    // Check each submodule's paths from its own directory
+    for (const [submodulePath, group] of submoduleGroups) {
+      const subDir = path.join(dir, submodulePath);
+      const subFilepaths = group.map(g => g.relativePath);
+      promises.push(
+        this.checkIgnorePaths(subDir, subFilepaths).then(ignoredPaths => {
+          for (let i = 0; i < group.length; i++) {
+            results[group[i].index] = ignoredPaths.has(group[i].relativePath) ? 1 : 0;
+          }
+        })
+      );
+    }
+
+    await Promise.all(promises);
+    return results;
   }
 
   /**
