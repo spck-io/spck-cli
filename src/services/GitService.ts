@@ -23,6 +23,22 @@ export class GitService {
   constructor(private rootPath: string) {}
 
   /**
+   * Resolve the effective git working directory.
+   * When gitRoot is provided (submodule path), resolve it relative to dir.
+   */
+  private resolveGitCwd(dir: string, gitRoot?: string): string {
+    if (gitRoot) {
+      const resolved = path.resolve(dir, gitRoot);
+      // Security: ensure resolved path stays within dir
+      if (!resolved.startsWith(dir)) {
+        throw createRPCError(ErrorCode.INVALID_PATH, 'Invalid gitRoot: path traversal not allowed');
+      }
+      return resolved;
+    }
+    return dir;
+  }
+
+  /**
    * Handle git RPC methods
    */
   async handle(method: string, params: any, socket: AuthenticatedSocket): Promise<any> {
@@ -32,119 +48,125 @@ export class GitService {
 
     // Validate and resolve git directory
     const dir = this.validateGitDir(params.dir);
+    // Resolve effective cwd for submodule support
+    const gitCwd = this.resolveGitCwd(dir, params.gitRoot);
 
     // Define read and write operations
     const readOps = ['readCommit', 'readObject', 'getHeadTree', 'getOidAtPath', 'listFiles', 'resolveRef',
                      'currentBranch', 'log', 'status', 'statusCounts', 'getConfig', 'listBranches',
-                     'listRemotes', 'isIgnored', 'bulkIsIgnored', 'isInitialized', 'requestAuth'];
+                     'listRemotes', 'isIgnored', 'bulkIsIgnored', 'isInitialized', 'listSubmodules', 'requestAuth'];
     const writeOps = ['add', 'remove', 'resetIndex', 'commit', 'setConfig', 'checkout', 'init',
                       'addRemote', 'deleteRemote', 'clearIndex'];
 
     try {
       switch (method) {
         case 'readCommit':
-          result = await this.readCommit(dir, params);
+          result = await this.readCommit(gitCwd, params);
           logGitRead(method, params, deviceId, true, undefined, { oid: params.oid });
           return result;
         case 'readObject':
-          result = await this.readObject(dir, params);
+          result = await this.readObject(gitCwd, params);
           logGitRead(method, params, deviceId, true, undefined, { oid: params.oid });
           return result;
         case 'getHeadTree':
-          result = await this.getHeadTree(dir, params);
+          result = await this.getHeadTree(gitCwd, params);
           logGitRead(method, params, deviceId, true, undefined, { oid: result.oid });
           return result;
         case 'getOidAtPath':
-          result = await this.getOidAtPath(dir, params);
+          result = await this.getOidAtPath(gitCwd, params);
           logGitRead(method, params, deviceId, true, undefined, { path: params.path, oid: result.oid });
           return result;
         case 'listFiles':
-          result = await this.listFiles(dir, params);
+          result = await this.listFiles(gitCwd, params);
           logGitRead(method, params, deviceId, true, undefined, { count: result.files.length });
           return result;
         case 'resolveRef':
-          result = await this.resolveRef(dir, params);
+          result = await this.resolveRef(gitCwd, params);
           logGitRead(method, params, deviceId, true, undefined, { ref: params.ref, oid: result.oid });
           return result;
         case 'currentBranch':
-          result = await this.currentBranch(dir, params);
+          result = await this.currentBranch(gitCwd, params);
           logGitRead(method, params, deviceId, true, undefined, { branch: result.branch });
           return result;
         case 'log':
-          result = await this.log(dir, params);
+          result = await this.log(gitCwd, params);
           logGitRead(method, params, deviceId, true, undefined, { commits: result.commits.length });
           return result;
         case 'status':
-          result = await this.status(dir, params);
+          result = await this.status(gitCwd, params);
           logGitRead(method, params, deviceId, true, undefined, { files: result.length });
           return result;
         case 'statusCounts':
-          result = await this.statusCounts(dir, params);
+          result = await this.statusCounts(gitCwd, params);
           logGitRead(method, params, deviceId, true, undefined, result);
           return result;
         case 'add':
-          result = await this.add(dir, params, socket);
+          result = await this.add(gitCwd, params, socket);
           logGitWrite(method, params, deviceId, true, undefined, { count: params.filepaths?.length || 0 });
           return result;
         case 'remove':
-          result = await this.remove(dir, params, socket);
+          result = await this.remove(gitCwd, params, socket);
           logGitWrite(method, params, deviceId, true, undefined, { count: params.filepaths?.length || 0 });
           return result;
         case 'resetIndex':
-          result = await this.resetIndex(dir, params, socket);
+          result = await this.resetIndex(gitCwd, params, socket);
           logGitWrite(method, params, deviceId, true);
           return result;
         case 'commit':
-          result = await this.commit(dir, params, socket);
+          result = await this.commit(gitCwd, params, socket);
           logGitWrite(method, params, deviceId, true, undefined, { oid: result.oid });
           return result;
         case 'getConfig':
-          result = await this.getConfig(dir, params);
+          result = await this.getConfig(gitCwd, params);
           logGitRead(method, params, deviceId, true, undefined, { path: params.path });
           return result;
         case 'setConfig':
-          result = await this.setConfig(dir, params);
+          result = await this.setConfig(gitCwd, params);
           logGitWrite(method, params, deviceId, true, undefined, { path: params.path });
           return result;
         case 'listBranches':
-          result = await this.listBranches(dir, params);
+          result = await this.listBranches(gitCwd, params);
           logGitRead(method, params, deviceId, true, undefined, { count: result.branches.length });
           return result;
         case 'checkout':
-          result = await this.checkout(dir, params);
+          result = await this.checkout(gitCwd, params);
           logGitWrite(method, params, deviceId, true);
           return result;
         case 'init':
-          result = await this.init(dir, params);
+          result = await this.init(gitCwd, params);
           logGitWrite(method, params, deviceId, true);
           return result;
         case 'listRemotes':
-          result = await this.listRemotes(dir, params);
+          result = await this.listRemotes(gitCwd, params);
           logGitRead(method, params, deviceId, true, undefined, { count: result.remotes.length });
           return result;
         case 'addRemote':
-          result = await this.addRemote(dir, params);
+          result = await this.addRemote(gitCwd, params);
           logGitWrite(method, params, deviceId, true, undefined, { remote: params.remote, url: params.url });
           return result;
         case 'deleteRemote':
-          result = await this.deleteRemote(dir, params);
+          result = await this.deleteRemote(gitCwd, params);
           logGitWrite(method, params, deviceId, true, undefined, { remote: params.remote });
           return result;
         case 'clearIndex':
-          result = await this.clearIndex(dir, params);
+          result = await this.clearIndex(gitCwd, params);
           logGitWrite(method, params, deviceId, true);
           return result;
         case 'isIgnored':
-          result = await this.isIgnored(dir, params);
+          result = await this.isIgnored(gitCwd, params);
           logGitRead(method, params, deviceId, true, undefined, { filepath: params.filepath, ignored: result });
           return result;
         case 'bulkIsIgnored':
-          result = await this.bulkIsIgnored(dir, params);
+          result = await this.bulkIsIgnored(gitCwd, params);
           logGitRead(method, params, deviceId, true, undefined, { count: result.length });
           return result;
         case 'isInitialized':
-          result = await this.isInitialized(dir, params);
+          result = await this.isInitialized(gitCwd, params);
           logGitRead(method, params, deviceId, true, undefined, { initialized: result });
+          return result;
+        case 'listSubmodules':
+          result = await this.listSubmodules(dir);
+          logGitRead(method, params, deviceId, true, undefined, { count: result.submodules.length });
           return result;
         case 'requestAuth':
           // This is called by server to request credentials from client
@@ -871,15 +893,35 @@ export class GitService {
 
   /**
    * List branches
+   * When remote is specified, returns branch names without the remote prefix
+   * to match isomorphic-git behavior (e.g. 'main' instead of 'origin/main')
    */
   private async listBranches(dir: string, params: any): Promise<any> {
     const args = params.remote ? ['branch', '-r'] : ['branch'];
     const { stdout } = await this.execGit(args, { cwd: dir });
 
+    const remote = params.remote;
+    const remotePrefix = remote ? `${remote}/` : '';
+
     const branches = stdout
       .split('\n')
       .map((line) => line.trim().replace(/^\* /, ''))
-      .filter((line) => line);
+      .filter((line) => line)
+      .filter((line) => {
+        // When listing remote branches, filter to only the specified remote
+        // and exclude HEAD pointer lines like "origin/HEAD -> origin/main"
+        if (remote) {
+          return line.startsWith(remotePrefix) && !line.includes(' -> ');
+        }
+        return true;
+      })
+      .map((line) => {
+        // Strip remote prefix to match isomorphic-git behavior
+        if (remote && line.startsWith(remotePrefix)) {
+          return line.substring(remotePrefix.length);
+        }
+        return line;
+      });
 
     return { branches };
   }
@@ -1032,6 +1074,30 @@ export class GitService {
     } catch (error) {
       // Exit code 128 means not a git repository
       return false;
+    }
+  }
+
+  /**
+   * List git submodules
+   * Uses git submodule status to detect submodules
+   * Note: always runs from the main repo dir (not gitCwd)
+   */
+  private async listSubmodules(dir: string): Promise<{ submodules: Array<{ name: string; path: string }> }> {
+    try {
+      const { stdout } = await this.execGit(['submodule', 'status'], { cwd: dir });
+      const submodules: Array<{ name: string; path: string }> = [];
+      const lines = stdout.split('\n').filter(l => l.trim());
+      for (const line of lines) {
+        // Format: " <sha1> <path> (<describe>)" or "-<sha1> <path>" (uninitialized)
+        const match = line.match(/^[\s+-]?([a-f0-9]+)\s+(\S+)/);
+        if (match) {
+          const subPath = match[2];
+          submodules.push({ name: subPath, path: subPath });
+        }
+      }
+      return { submodules };
+    } catch (error) {
+      return { submodules: [] };
     }
   }
 

@@ -384,7 +384,6 @@ export class TerminalService {
 
     // Serialize xterm buffer
     const buffer = session.serializeAddon.serialize();
-    console.log("buffer", buffer)
     // Send to client
     this.getSocket().emit('rpc', {
       jsonrpc: '2.0',
