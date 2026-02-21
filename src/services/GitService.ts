@@ -2,8 +2,11 @@
  * Git service - executes command-line git operations
  */
 
-import { spawn } from 'child_process';
+import { spawn, execFileSync } from 'child_process';
 import * as path from 'path';
+import * as http from 'http';
+import * as fs from 'fs';
+import * as os from 'os';
 import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types.js';
 import { logGitRead, logGitWrite } from '../utils/logger.js';
 
@@ -23,8 +26,24 @@ interface ExecGitResult {
 export class GitService {
   private submoduleCache: Map<string, { submodules: Array<{ name: string; path: string }>; timestamp: number }> = new Map();
   private static SUBMODULE_CACHE_TTL = 30000; // 30 seconds
+  private _hasCurl: boolean | null = null;
 
   constructor(private rootPath: string) {}
+
+  /**
+   * Check if curl is available on the system (cached)
+   */
+  private hasCurl(): boolean {
+    if (this._hasCurl === null) {
+      try {
+        execFileSync('curl', ['--version'], { stdio: 'ignore' });
+        this._hasCurl = true;
+      } catch {
+        this._hasCurl = false;
+      }
+    }
+    return this._hasCurl;
+  }
 
   /**
    * Get submodules for a directory, using a short-lived cache to avoid
@@ -72,9 +91,10 @@ export class GitService {
     // Define read and write operations
     const readOps = ['readCommit', 'readObject', 'getHeadTree', 'getOidAtPath', 'listFiles', 'resolveRef',
                      'currentBranch', 'log', 'status', 'statusCounts', 'getConfig', 'listBranches',
-                     'listRemotes', 'isIgnored', 'bulkIsIgnored', 'isInitialized', 'listSubmodules', 'requestAuth'];
+                     'listRemotes', 'isIgnored', 'bulkIsIgnored', 'isInitialized', 'listSubmodules', 'requestAuth',
+                     'getDefaultAuthor'];
     const writeOps = ['add', 'remove', 'resetIndex', 'commit', 'setConfig', 'checkout', 'init',
-                      'addRemote', 'deleteRemote', 'clearIndex'];
+                      'addRemote', 'deleteRemote', 'clearIndex', 'push', 'pull', 'fetch', 'clone'];
 
     try {
       switch (method) {
@@ -190,6 +210,26 @@ export class GitService {
           // This is called by server to request credentials from client
           result = await this.requestAuth(socket, params);
           logGitRead(method, params, deviceId, true);
+          return result;
+        case 'getDefaultAuthor':
+          result = await this.getDefaultAuthor(gitCwd);
+          logGitRead(method, params, deviceId, true, undefined, result);
+          return result;
+        case 'push':
+          result = await this.push(gitCwd, params, socket);
+          logGitWrite(method, params, deviceId, true, undefined, { remote: params.remote });
+          return result;
+        case 'pull':
+          result = await this.pull(gitCwd, params, socket);
+          logGitWrite(method, params, deviceId, true, undefined, { remote: params.remote });
+          return result;
+        case 'fetch':
+          result = await this.fetch(gitCwd, params, socket);
+          logGitWrite(method, params, deviceId, true, undefined, { remote: params.remote });
+          return result;
+        case 'clone':
+          result = await this.clone(gitCwd, params, socket);
+          logGitWrite(method, params, deviceId, true, undefined, { url: params.url });
           return result;
         default:
           throw createRPCError(ErrorCode.METHOD_NOT_FOUND, `Method not found: git.${method}`);
@@ -1218,23 +1258,286 @@ export class GitService {
   }
 
   /**
+   * Get default author from git config
+   */
+  private async getDefaultAuthor(dir: string): Promise<{ name: string; email: string }> {
+    let name = '';
+    let email = '';
+    try {
+      const nameResult = await this.execGit(['config', 'user.name'], { cwd: dir, acceptExitCodes: [1] });
+      if (nameResult.code === 0) name = nameResult.stdout.trim();
+    } catch (_) { /* ignore */ }
+    try {
+      const emailResult = await this.execGit(['config', 'user.email'], { cwd: dir, acceptExitCodes: [1] });
+      if (emailResult.code === 0) email = emailResult.stdout.trim();
+    } catch (_) { /* ignore */ }
+    return { name, email };
+  }
+
+  /**
+   * Push to remote
+   */
+  private async push(dir: string, params: any, socket: AuthenticatedSocket): Promise<{ success: boolean }> {
+    const remote = params.remote || 'origin';
+    const args = ['push', remote];
+
+    if (params.remoteRef) {
+      // Get current branch for the local side of the refspec
+      const { stdout } = await this.execGit(['symbolic-ref', '--short', 'HEAD'], { cwd: dir });
+      const currentBranch = stdout.trim();
+      args.push(`${currentBranch}:${params.remoteRef}`);
+    }
+
+    const { env: askpassEnv, cleanup } = await this.setupAskpass(socket);
+    try {
+      await this.execGit(args, { cwd: dir, env: askpassEnv });
+    } finally {
+      cleanup();
+    }
+
+    // Send change notification
+    socket.broadcast.emit('rpc', {
+      jsonrpc: '2.0',
+      method: 'git.changed',
+      params: { dir },
+    });
+
+    return { success: true };
+  }
+
+  /**
+   * Pull from remote
+   */
+  private async pull(dir: string, params: any, socket: AuthenticatedSocket): Promise<any> {
+    const remote = params.remote || 'origin';
+    const args = ['pull'];
+
+    if (params.fastForwardOnly) {
+      args.push('--ff-only');
+    }
+
+    args.push(remote);
+
+    if (params.ref) {
+      args.push(params.ref);
+    }
+
+    const env: Record<string, string> = {};
+    if (params.author) {
+      env.GIT_AUTHOR_NAME = params.author.name;
+      env.GIT_AUTHOR_EMAIL = params.author.email;
+      env.GIT_COMMITTER_NAME = params.author.name;
+      env.GIT_COMMITTER_EMAIL = params.author.email;
+    }
+
+    const { env: askpassEnv, cleanup } = await this.setupAskpass(socket);
+    Object.assign(env, askpassEnv);
+
+    let result;
+    try {
+      result = await this.execGit(args, { cwd: dir, env });
+    } finally {
+      cleanup();
+    }
+    const output = result.stdout + result.stderr;
+
+    // Parse output to determine merge type
+    const alreadyMerged = output.includes('Already up to date') || output.includes('Already up-to-date');
+    const fastForward = output.includes('Fast-forward');
+    const recursiveMerge = !alreadyMerged && !fastForward;
+
+    // Send change notification
+    socket.broadcast.emit('rpc', {
+      jsonrpc: '2.0',
+      method: 'git.changed',
+      params: { dir },
+    });
+
+    return {
+      alreadyMerged,
+      fastForward,
+      recursiveMerge,
+      mergeCommit: recursiveMerge ? true : undefined,
+    };
+  }
+
+  /**
+   * Fetch from remote
+   */
+  private async fetch(dir: string, params: any, socket: AuthenticatedSocket): Promise<{ success: boolean }> {
+    const remote = params.remote || 'origin';
+
+    const { env: askpassEnv, cleanup } = await this.setupAskpass(socket);
+    try {
+      await this.execGit(['fetch', remote], { cwd: dir, env: askpassEnv });
+    } finally {
+      cleanup();
+    }
+
+    // Send change notification
+    socket.broadcast.emit('rpc', {
+      jsonrpc: '2.0',
+      method: 'git.changed',
+      params: { dir },
+    });
+
+    return { success: true };
+  }
+
+  /**
+   * Clone a repository
+   */
+  private async clone(dir: string, params: any, socket: AuthenticatedSocket): Promise<{ success: boolean }> {
+    const args = ['clone', params.url, '.'];
+
+    if (params.ref) {
+      args.push('--branch', params.ref);
+    }
+
+    if (params.depth) {
+      args.push('--depth', String(params.depth));
+    }
+
+    if (params.singleBranch) {
+      args.push('--single-branch');
+    }
+
+    const { env: askpassEnv, cleanup } = await this.setupAskpass(socket);
+    try {
+      await this.execGit(args, { cwd: dir, env: askpassEnv });
+    } finally {
+      cleanup();
+    }
+
+    // Send change notification
+    socket.broadcast.emit('rpc', {
+      jsonrpc: '2.0',
+      method: 'git.changed',
+      params: { dir },
+    });
+
+    return { success: true };
+  }
+
+  /**
+   * Set up an askpass mechanism for SSH/Git credential prompts.
+   * Creates a temporary HTTP server and shell script that SSH_ASKPASS/GIT_ASKPASS
+   * points to. When SSH or git needs a passphrase/password, it calls the script,
+   * which forwards the prompt to the client via requestAuth.
+   */
+  private async setupAskpass(socket: AuthenticatedSocket): Promise<{
+    env: Record<string, string>;
+    cleanup: () => void;
+  }> {
+    return new Promise((resolve, reject) => {
+      const server = http.createServer((req, res) => {
+        let body = '';
+        req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+        req.on('end', async () => {
+          try {
+            const prompt = body || 'Password:';
+            const result = await this.requestAuth(socket, {
+              prompt,
+              type: 'askpass'
+            });
+            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            res.end(result?.password || '');
+          } catch (err) {
+            // Auth was denied or timed out
+            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            res.end('');
+          }
+        });
+      });
+
+      // Don't prevent Node.js from exiting
+      server.unref();
+
+      server.listen(0, '127.0.0.1', () => {
+        const addr = server.address() as { port: number };
+        const port = addr.port;
+        const useCurl = this.hasCurl();
+        const isWindows = process.platform === 'win32';
+        const filesToClean: string[] = [];
+
+        let scriptPath: string;
+
+        if (useCurl) {
+          // Use curl directly — available on macOS, most Linux, and newer Windows
+          if (isWindows) {
+            scriptPath = path.join(os.tmpdir(), `spck-askpass-${process.pid}-${Date.now()}.cmd`);
+            fs.writeFileSync(scriptPath,
+              `@curl -s --max-time 0 -X POST -d "%~1" "http://127.0.0.1:${port}/askpass" 2>nul\r\n`
+            );
+          } else {
+            scriptPath = path.join(os.tmpdir(), `spck-askpass-${process.pid}-${Date.now()}.sh`);
+            fs.writeFileSync(scriptPath,
+              `#!/bin/sh\ncurl -s --max-time 0 -X POST -d "$1" "http://127.0.0.1:${port}/askpass" 2>/dev/null\n`,
+              { mode: 0o700 }
+            );
+          }
+          filesToClean.push(scriptPath);
+        } else {
+          // Fallback to Node.js script (node is always available since we're running on it)
+          const nodeExe = process.execPath;
+          const jsPath = path.join(os.tmpdir(), `spck-askpass-${process.pid}-${Date.now()}.js`);
+          fs.writeFileSync(jsPath, [
+            `const h=require('http'),d=process.argv[2]||'';`,
+            `const r=h.request({hostname:'127.0.0.1',port:${port},path:'/askpass',method:'POST',` +
+              `headers:{'Content-Length':Buffer.byteLength(d)}},s=>{let b='';s.on('data',c=>b+=c);s.on('end',()=>process.stdout.write(b))});`,
+            `r.write(d);r.end();`,
+            ''
+          ].join('\n'));
+          filesToClean.push(jsPath);
+
+          if (isWindows) {
+            scriptPath = path.join(os.tmpdir(), `spck-askpass-${process.pid}-${Date.now()}.cmd`);
+            fs.writeFileSync(scriptPath,
+              `@"${nodeExe}" "${jsPath}" %1\r\n`
+            );
+          } else {
+            scriptPath = path.join(os.tmpdir(), `spck-askpass-${process.pid}-${Date.now()}.sh`);
+            fs.writeFileSync(scriptPath,
+              `#!/bin/sh\n"${nodeExe}" "${jsPath}" "$1"\n`,
+              { mode: 0o700 }
+            );
+          }
+          filesToClean.push(scriptPath);
+        }
+
+        const cleanup = () => {
+          server.close();
+          for (const f of filesToClean) {
+            try { fs.unlinkSync(f); } catch (_) { /* ignore */ }
+          }
+        };
+
+        resolve({
+          env: {
+            GIT_ASKPASS: scriptPath,
+            SSH_ASKPASS: scriptPath,
+            SSH_ASKPASS_REQUIRE: 'force',
+            DISPLAY: process.env.DISPLAY || ':0',
+            GIT_TERMINAL_PROMPT: '0',
+          },
+          cleanup
+        });
+      });
+
+      server.on('error', reject);
+    });
+  }
+
+  /**
    * Request authentication from client (server-to-client RPC)
    */
   private async requestAuth(socket: AuthenticatedSocket, params: any): Promise<any> {
     return new Promise((resolve, reject) => {
       const requestId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
 
-      // Timeout after 30 seconds
-      // Use .unref() so this timer doesn't prevent Node.js from exiting
-      const timeoutId = setTimeout(() => {
-        socket.off('rpc', responseHandler);
-        reject(new Error('Authentication request timed out'));
-      }, 30000).unref();
-
-      // Set up one-time response listener
+      // Set up one-time response listener (no timeout - wait indefinitely for user input)
       const responseHandler = (response: any) => {
         if (response.id === requestId) {
-          clearTimeout(timeoutId); // Clear timeout when response received
           socket.off('rpc', responseHandler);
           if (response.error) {
             reject(new Error(response.error.message));
@@ -1252,6 +1555,8 @@ export class GitService {
         method: 'git.requestAuth',
         params: {
           url: params.url,
+          prompt: params.prompt,
+          type: params.type,
           attempt: params.attempt || 1,
         },
         id: requestId,
