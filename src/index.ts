@@ -19,7 +19,7 @@ import {
   loadServerPreference,
   saveServerPreference,
 } from './config/credentials.js';
-import { fetchServerList, selectBestServer, displayServerPings } from './config/server-selection.js';
+import { fetchServerList, selectBestServer, displayServerPings, getDefaultServerList } from './config/server-selection.js';
 import { authenticateWithFirebase, getValidFirebaseToken } from './connection/firebase-auth.js';
 import { runSetup } from './setup/wizard.js';
 import { detectTools, displayFeatureSummary } from './utils/tool-detection.js';
@@ -146,8 +146,8 @@ export async function startProxyClient(
     // Step 7: Display feature summary
     displayFeatureSummary(tools, config.terminal.enabled, config.security.userAuthenticationEnabled);
 
-    // Step 8: Select proxy server
-    let proxyServerUrl: string | undefined;
+    // Step 8: Select relay server
+    let proxyServerUrl: string;
 
     if (options?.serverOverride) {
       // CLI --server flag overrides everything
@@ -163,23 +163,25 @@ export async function startProxyClient(
       } else {
         // Auto-select best server by ping
         try {
-          console.log('🌐 Selecting best proxy server...');
+          console.log('🌐 Selecting best relay server...');
           const servers = await fetchServerList();
-          if (servers.length > 0) {
-            await displayServerPings(servers);
-            const best = await selectBestServer(servers);
-            if (best.ping !== Infinity) {
-              proxyServerUrl = best.server.url;
-              saveServerPreference(proxyServerUrl);
-              const label = best.server.label.en || best.server.url;
-              console.log(`✅ Selected server: ${label} (${proxyServerUrl}) - ${best.ping}ms\n`);
-            } else {
-              console.warn('⚠️  All servers unreachable, using default\n');
-            }
+          await displayServerPings(servers);
+          const best = await selectBestServer(servers);
+          if (best.ping !== Infinity) {
+            proxyServerUrl = best.server.url;
+            saveServerPreference(proxyServerUrl);
+            const label = best.server.label.en || best.server.url;
+            console.log(`✅ Selected server: ${label} (${proxyServerUrl}) - ${best.ping}ms\n`);
+          } else {
+            // All servers unreachable — use first server from hardcoded list
+            proxyServerUrl = getDefaultServerList()[0].url;
+            console.warn(`⚠️  All servers unreachable, using default: ${proxyServerUrl}\n`);
           }
         } catch (error: any) {
-          console.warn(`⚠️  Failed to fetch server list: ${error.message}`);
-          console.warn('   Using default proxy server\n');
+          // Fetch/ping failed — use first server from hardcoded list
+          proxyServerUrl = getDefaultServerList()[0].url;
+          console.warn(`⚠️  Failed to select relay server: ${error.message}`);
+          console.warn(`   Using default: ${proxyServerUrl}\n`);
         }
       }
     }

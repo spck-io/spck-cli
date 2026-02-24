@@ -45,7 +45,7 @@ interface ProxyClientOptions {
   userId: string;
   tools: ToolDetectionResult;
   existingConnectionSettings?: ConnectionSettings;
-  proxyServerUrl?: string;
+  proxyServerUrl: string;
 }
 
 /**
@@ -85,12 +85,6 @@ export class ProxyClient {
   async connect(): Promise<void> {
     const { existingConnectionSettings } = this.options;
 
-    if (!this.options.proxyServerUrl) {
-      throw new Error(
-        'No relay server configured. Run the CLI again to auto-select a server,\n' +
-        'or specify one with: spck --server <server-url>'
-      );
-    }
     const relayServer = this.options.proxyServerUrl;
     console.log('\n=== Connecting to Relay Server ===\n');
     console.log(`   Relay server: ${relayServer}\n`);
@@ -289,8 +283,9 @@ export class ProxyClient {
 
     const { clientId, secret } = this.connectionSettings;
 
-    // Build connection URL with optional server name
-    let url = `spck://connect?clientId=${clientId}&secret=${secret}`;
+    // Build connection URL with relay server and optional server name
+    const relayServer = this.options.proxyServerUrl;
+    let url = `spck://connect?clientId=${clientId}&secret=${secret}&rs=${encodeURIComponent(relayServer)}`;
     if (this.config.name) {
       url += `&name=${encodeURIComponent(this.config.name)}`;
     }
@@ -302,7 +297,6 @@ export class ProxyClient {
     // Generate ASCII QR code
     qrcode.generate(url, { small: true });
 
-    const relayServer = this.options.proxyServerUrl;
     console.log('\n' + '-'.repeat(60));
     console.log(`Client ID: ${clientId}`);
     console.log(`Secret: ${secret}`);
