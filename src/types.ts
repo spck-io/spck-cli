@@ -54,6 +54,7 @@ export interface ConnectionSettings {
 export interface StoredCredentials {
   refreshToken: string;
   userId: string;
+  proxyServerUrl?: string;
 }
 
 // Firebase Credentials (runtime - includes ephemeral ID token)

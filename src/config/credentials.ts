@@ -56,11 +56,15 @@ export function loadCredentials(): StoredCredentials | null {
       throw error;
     }
 
-    // Return only the stored fields (refreshToken + userId)
-    return {
+    // Return only the stored fields (refreshToken + userId + optional proxyServerUrl)
+    const result: StoredCredentials = {
       refreshToken: credentials.refreshToken,
       userId: credentials.userId
     };
+    if (credentials.proxyServerUrl) {
+      result.proxyServerUrl = credentials.proxyServerUrl;
+    }
+    return result;
   } catch (error: any) {
     // JSON parse error or validation error
     if (error instanceof SyntaxError || error.code === 'CORRUPTED') {
@@ -97,11 +101,14 @@ export function saveCredentials(credentials: StoredCredentials): void {
       fs.mkdirSync(credentialsDir, { recursive: true, mode: 0o700 });
     }
 
-    // Only persist refreshToken + userId
+    // Persist refreshToken + userId + optional proxyServerUrl
     const storedData: StoredCredentials = {
       refreshToken: credentials.refreshToken,
       userId: credentials.userId
     };
+    if (credentials.proxyServerUrl) {
+      storedData.proxyServerUrl = credentials.proxyServerUrl;
+    }
 
     // Write credentials file with restricted permissions
     fs.writeFileSync(
@@ -210,6 +217,29 @@ export function clearConnectionSettings(): void {
 
   if (fs.existsSync(settingsPath)) {
     fs.unlinkSync(settingsPath);
+  }
+}
+
+/**
+ * Load saved proxy server preference from user-level credentials
+ */
+export function loadServerPreference(): string | null {
+  try {
+    const credentials = loadCredentials();
+    return credentials?.proxyServerUrl || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Save proxy server preference to user-level credentials
+ */
+export function saveServerPreference(proxyServerUrl: string): void {
+  const credentials = loadCredentials();
+  if (credentials) {
+    credentials.proxyServerUrl = proxyServerUrl;
+    saveCredentials(credentials);
   }
 }
 

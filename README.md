@@ -386,7 +386,7 @@ This reduces the attack surface if you don't need terminal functionality.
 
 6. **Firewall Configuration**
    - Ensure WebSocket connections (WSS) are allowed through your firewall
-   - The CLI connects to `wss://cli.spck.io`
+   - The CLI connects to a regional relay server over WSS (port 443)
 
 ### File Access Permissions
 

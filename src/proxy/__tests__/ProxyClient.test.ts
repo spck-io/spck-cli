@@ -117,6 +117,7 @@ describe('ProxyClient Security', () => {
       userId: 'test-user-123',
       connectedAt: Date.now(),
     },
+    proxyServerUrl: 'cli-na-1.spck.io',
   };
 
   beforeEach(() => {

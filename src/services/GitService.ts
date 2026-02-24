@@ -1170,7 +1170,7 @@ export class GitService {
       }
     }
 
-    const results = new Array<number>(filepaths.length).fill(0);
+    const results = Array.from({ length: filepaths.length }).fill(0) as number[];
     const promises: Promise<void>[] = [];
 
     // Check main repo paths

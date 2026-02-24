@@ -16,7 +16,10 @@ import {
   clearConnectionSettings,
   getCredentialsPath,
   getConnectionSettingsPath,
+  loadServerPreference,
+  saveServerPreference,
 } from './config/credentials.js';
+import { fetchServerList, selectBestServer, displayServerPings } from './config/server-selection.js';
 import { authenticateWithFirebase, getValidFirebaseToken } from './connection/firebase-auth.js';
 import { runSetup } from './setup/wizard.js';
 import { detectTools, displayFeatureSummary } from './utils/tool-detection.js';
@@ -35,6 +38,7 @@ export async function startProxyClient(
   options?: {
     disableGit?: boolean;
     disableRipgrep?: boolean;
+    serverOverride?: string;
   }
 ): Promise<void> {
   console.log('\n' + '='.repeat(60));
@@ -142,13 +146,52 @@ export async function startProxyClient(
     // Step 7: Display feature summary
     displayFeatureSummary(tools, config.terminal.enabled, config.security.userAuthenticationEnabled);
 
-    // Step 7: Create and connect ProxyClient
+    // Step 8: Select proxy server
+    let proxyServerUrl: string | undefined;
+
+    if (options?.serverOverride) {
+      // CLI --server flag overrides everything
+      proxyServerUrl = options.serverOverride;
+      saveServerPreference(proxyServerUrl);
+      console.log(`✅ Using server override: ${proxyServerUrl}\n`);
+    } else {
+      // Check saved preference
+      const savedServer = loadServerPreference();
+      if (savedServer) {
+        proxyServerUrl = savedServer;
+        console.log(`✅ Using saved server: ${proxyServerUrl}\n`);
+      } else {
+        // Auto-select best server by ping
+        try {
+          console.log('🌐 Selecting best proxy server...');
+          const servers = await fetchServerList();
+          if (servers.length > 0) {
+            await displayServerPings(servers);
+            const best = await selectBestServer(servers);
+            if (best.ping !== Infinity) {
+              proxyServerUrl = best.server.url;
+              saveServerPreference(proxyServerUrl);
+              const label = best.server.label.en || best.server.url;
+              console.log(`✅ Selected server: ${label} (${proxyServerUrl}) - ${best.ping}ms\n`);
+            } else {
+              console.warn('⚠️  All servers unreachable, using default\n');
+            }
+          }
+        } catch (error: any) {
+          console.warn(`⚠️  Failed to fetch server list: ${error.message}`);
+          console.warn('   Using default proxy server\n');
+        }
+      }
+    }
+
+    // Step 9: Create and connect ProxyClient
     proxyClient = new ProxyClient({
       config,
       firebaseToken: credentials.firebaseToken,
       userId: credentials.userId,
       tools,
       existingConnectionSettings: needsReconnect ? undefined : connectionSettings,
+      proxyServerUrl,
     });
 
     await proxyClient.connect();
@@ -416,6 +459,11 @@ export async function main(): Promise<void> {
       type: 'string',
       description: 'Root directory to serve (overrides config)',
     })
+    .option('server', {
+      alias: 's',
+      type: 'string',
+      description: 'Proxy server URL override (e.g., cli-na-1.spck.io)',
+    })
     // Hidden development flags (not documented)
     .option('__internal_disable_ripgrep', {
       type: 'boolean',
@@ -464,6 +512,7 @@ export async function main(): Promise<void> {
     await startProxyClient(argv.config as string | undefined, {
       disableGit: argv.__internal_disable_git as boolean | undefined,
       disableRipgrep: argv.__internal_disable_ripgrep as boolean | undefined,
+      serverOverride: argv.server as string | undefined,
     });
   }
 }

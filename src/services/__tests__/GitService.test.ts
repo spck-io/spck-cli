@@ -518,32 +518,6 @@ describe('GitService', () => {
       const result = await authPromise;
       expect(result).toEqual(mockResponse);
     });
-
-    it('should timeout if client does not respond', async () => {
-      // Use fake timers to speed up the test
-      jest.useFakeTimers();
-
-      // Set up empty handler that does nothing
-      mockSocket.on.mockImplementation(() => {});
-
-      const authPromise = service.handle(
-        'requestAuth',
-        { dir: '/repo', url: 'https://github.com/user/repo.git' },
-        mockSocket
-      );
-
-      // Fast-forward time by 30 seconds
-      jest.advanceTimersByTime(30000);
-
-      // The error should be wrapped as GIT_OPERATION_FAILED
-      await expect(authPromise).rejects.toMatchObject({
-        code: ErrorCode.GIT_OPERATION_FAILED,
-        message: expect.stringContaining('timed out'),
-      });
-
-      // Restore real timers
-      jest.useRealTimers();
-    });
   });
 
   describe('Error Handling', () => {

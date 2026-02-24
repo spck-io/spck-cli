@@ -36,7 +36,8 @@ import { needsChunking, chunkMessage } from './chunking.js';
 
 const KILL_TIMEOUT = 5000; // 5 seconds
 const SECRET_LENGTH = 33;
-const PROXY_URL = 'wss://cli.spck.io';
+// No default URL - proxyServerUrl must always be provided via options
+// (auto-selected by ping or overridden via --server flag)
 
 interface ProxyClientOptions {
   config: ServerConfig;
@@ -44,6 +45,7 @@ interface ProxyClientOptions {
   userId: string;
   tools: ToolDetectionResult;
   existingConnectionSettings?: ConnectionSettings;
+  proxyServerUrl?: string;
 }
 
 /**
@@ -83,14 +85,22 @@ export class ProxyClient {
   async connect(): Promise<void> {
     const { existingConnectionSettings } = this.options;
 
-    console.log('\n=== Connecting to Proxy Server ===\n');
+    if (!this.options.proxyServerUrl) {
+      throw new Error(
+        'No relay server configured. Run the CLI again to auto-select a server,\n' +
+        'or specify one with: spck --server <server-url>'
+      );
+    }
+    const relayServer = this.options.proxyServerUrl;
+    console.log('\n=== Connecting to Relay Server ===\n');
+    console.log(`   Relay server: ${relayServer}\n`);
 
     // Determine if we're renewing an existing connection
     const existingToken = existingConnectionSettings?.serverToken;
 
     // Create Socket.IO client - connect to /listen namespace
     // Note: /listen is a Socket.IO namespace, not an HTTP path
-    const namespaceUrl = PROXY_URL + '/listen';
+    const namespaceUrl = `wss://${relayServer}/listen`;
     this.socket = io(namespaceUrl, {
       transports: ['websocket'],
       auth: {
@@ -214,9 +224,10 @@ export class ProxyClient {
 
       this.socket.once('connect_error', (error: any) => {
         clearTimeout(timeout);
+        const currentProxyUrl = `wss://${this.options.proxyServerUrl}`;
         const enhancedError = new Error(
-          `Failed to connect to proxy server\n` +
-          `  URL: ${PROXY_URL}/listen\n` +
+          `Failed to connect to relay server\n` +
+          `  URL: ${currentProxyUrl}/listen\n` +
           `  Error: ${error.message || error.toString()}\n` +
           `  \n` +
           `  Possible causes:\n` +
@@ -291,13 +302,17 @@ export class ProxyClient {
     // Generate ASCII QR code
     qrcode.generate(url, { small: true });
 
+    const relayServer = this.options.proxyServerUrl;
     console.log('\n' + '-'.repeat(60));
     console.log(`Client ID: ${clientId}`);
     console.log(`Secret: ${secret}`);
     if (this.config.name) {
       console.log(`Name: ${this.config.name}`);
     }
-    console.log('-'.repeat(60) + '\n');
+    console.log(`Relay server: ${relayServer}`);
+    console.log('-'.repeat(60));
+    console.log(`\nIMPORTANT: The client must select the same relay server`);
+    console.log(`(${relayServer}) in Spck Editor to connect.\n`);
   }
 
   /**
