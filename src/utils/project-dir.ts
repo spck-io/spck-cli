@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
+import { t } from '../i18n/index.js';
 
 const PROJECT_DIR_NAME = '.spck-editor';
 const CONFIG_SUBDIR_NAME = 'config';
@@ -164,9 +165,9 @@ export function setupProjectDir(projectRoot: string): void {
     }
   }
 
-  console.log(`✅ Project directory configured`);
-  console.log(`   Directory: ${projectDir}`);
-  console.log(`   Config:    ${configSymlink} -> ${dataPath}\n`);
+  console.log(`✅ ${t('projectDir.configured')}`);
+  console.log(`   ${t('projectDir.directory', { path: projectDir })}`);
+  console.log(`   ${t('projectDir.configLink', { symlink: configSymlink, dataPath })}\n`);
 }
 
 /**

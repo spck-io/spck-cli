@@ -53,7 +53,7 @@ export async function detectTools(options?: {
       console.warn(`⚠️  ${t('tools.gitNotDetected')}`);
       console.warn(`   ${t('tools.gitDisabledHint')}`);
       console.warn(`   ${t('tools.gitInstallHint')}`);
-      console.warn('   https://git-scm.com/downloads\n');
+      console.warn(`   ${t('tools.gitInstallUrl')}\n`);
     }
   }
 
@@ -75,7 +75,7 @@ export async function detectTools(options?: {
       console.warn(`⚠️  ${t('tools.ripgrepNotDetected')}`);
       console.warn(`   ${t('tools.ripgrepDisabledHint')}`);
       console.warn(`   ${t('tools.ripgrepInstallHint')}`);
-      console.warn('   https://github.com/BurntSushi/ripgrep#installation\n');
+      console.warn(`   ${t('tools.ripgrepInstallUrl')}\n`);
     }
   }
 

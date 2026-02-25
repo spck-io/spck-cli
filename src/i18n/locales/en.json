@@ -44,7 +44,9 @@
     "ripgrepDetectedShort": "Ripgrep detected",
     "ripgrepNotDetected": "Ripgrep not detected",
     "ripgrepDisabledHint": "Fast search features will be disabled in this session.",
-    "ripgrepInstallHint": "Install ripgrep for high-performance code search:"
+    "ripgrepInstallHint": "Install ripgrep for high-performance code search:",
+    "gitInstallUrl": "https://git-scm.com/downloads",
+    "ripgrepInstallUrl": "https://github.com/BurntSushi/ripgrep#installation"
   },
   "features": {
     "title": "Available Features",
@@ -244,6 +246,17 @@
     "permissionHint2": "chmod 600 ~/.spck-editor/.credentials.json",
     "networkError": "Network connection error",
     "networkHint": "Please check your internet connection"
+  },
+  "credentials": {
+    "corrupted": "Credentials file is corrupted: {{path}}",
+    "corruptedHint": "Will trigger re-authentication...",
+    "settingsCorrupted": "Connection settings file is corrupted: {{path}}",
+    "settingsCorruptedHint": "Will reconnect to proxy..."
+  },
+  "projectDir": {
+    "configured": "Project directory configured",
+    "directory": "Directory: {{path}}",
+    "configLink": "Config:    {{symlink}} -> {{dataPath}}"
   },
   "setup": {
     "title": "Spck Networking CLI - Initial Setup",

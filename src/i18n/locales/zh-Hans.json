@@ -44,7 +44,9 @@
     "ripgrepDetectedShort": "检测到 ripgrep",
     "ripgrepNotDetected": "未检测到 ripgrep",
     "ripgrepDisabledHint": "本次会话中快速搜索功能将被禁用。",
-    "ripgrepInstallHint": "请安装 ripgrep 以获得高性能代码搜索:"
+    "ripgrepInstallHint": "请安装 ripgrep 以获得高性能代码搜索:",
+    "gitInstallUrl": "https://git-scm.com/downloads",
+    "ripgrepInstallUrl": "https://github.com/BurntSushi/ripgrep#installation"
   },
   "features": {
     "title": "可用功能",
@@ -237,6 +239,17 @@
     "permissionHint2": "chmod 600 ~/.spck-editor/.credentials.json",
     "networkError": "网络连接错误",
     "networkHint": "请检查您的网络连接"
+  },
+  "credentials": {
+    "corrupted": "凭证文件已损坏: {{path}}",
+    "corruptedHint": "将触发重新认证...",
+    "settingsCorrupted": "连接设置文件已损坏: {{path}}",
+    "settingsCorruptedHint": "将重新连接到代理..."
+  },
+  "projectDir": {
+    "configured": "项目目录已配置",
+    "directory": "目录: {{path}}",
+    "configLink": "配置:    {{symlink}} -> {{dataPath}}"
   },
   "setup": {
     "title": "Spck Networking CLI - 初始设置",

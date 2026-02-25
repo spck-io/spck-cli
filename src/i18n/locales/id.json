@@ -44,7 +44,9 @@
     "ripgrepDetectedShort": "ripgrep terdeteksi",
     "ripgrepNotDetected": "ripgrep tidak terdeteksi",
     "ripgrepDisabledHint": "Fitur pencarian cepat akan dinonaktifkan dalam sesi ini.",
-    "ripgrepInstallHint": "Instal ripgrep untuk pencarian kode berkinerja tinggi:"
+    "ripgrepInstallHint": "Instal ripgrep untuk pencarian kode berkinerja tinggi:",
+    "gitInstallUrl": "https://git-scm.com/downloads",
+    "ripgrepInstallUrl": "https://github.com/BurntSushi/ripgrep#installation"
   },
   "features": {
     "title": "Fitur yang Tersedia",
@@ -237,6 +239,17 @@
     "permissionHint2": "chmod 600 ~/.spck-editor/.credentials.json",
     "networkError": "Kesalahan koneksi jaringan",
     "networkHint": "Silakan periksa koneksi internet Anda"
+  },
+  "credentials": {
+    "corrupted": "File kredensial rusak: {{path}}",
+    "corruptedHint": "Autentikasi ulang akan dimulai...",
+    "settingsCorrupted": "File pengaturan koneksi rusak: {{path}}",
+    "settingsCorruptedHint": "Akan menyambung ulang ke proxy..."
+  },
+  "projectDir": {
+    "configured": "Direktori proyek dikonfigurasi",
+    "directory": "Direktori: {{path}}",
+    "configLink": "Konfigurasi:    {{symlink}} -> {{dataPath}}"
   },
   "setup": {
     "title": "Spck Networking CLI - Pengaturan Awal",

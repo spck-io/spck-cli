@@ -9,6 +9,7 @@ import * as os from 'os';
 import { StoredCredentials } from '../types.js';
 import { getProjectFilePath } from '../utils/project-dir.js';
 import { logAuth } from '../utils/logger.js';
+import { t } from '../i18n/index.js';
 
 /**
  * Get the user-level credentials directory
@@ -59,11 +60,9 @@ export function loadCredentials(): StoredCredentials | null {
     // Return only the stored fields (refreshToken + userId + optional proxyServerUrl)
     const result: StoredCredentials = {
       refreshToken: credentials.refreshToken,
-      userId: credentials.userId
+      userId: credentials.userId,
+      proxyServerUrl: credentials.proxyServerUrl
     };
-    if (credentials.proxyServerUrl) {
-      result.proxyServerUrl = credentials.proxyServerUrl;
-    }
     return result;
   } catch (error: any) {
     // JSON parse error or validation error
@@ -72,8 +71,8 @@ export function loadCredentials(): StoredCredentials | null {
         path: credentialsPath,
         error: error.message
       }, 'error');
-      console.warn('⚠️  Credentials file is corrupted:', credentialsPath);
-      console.warn('   Will trigger re-authentication...\n');
+      console.warn(`⚠️  ${t('credentials.corrupted', { path: credentialsPath })}`);
+      console.warn(`   ${t('credentials.corruptedHint')}\n`);
       const corruptedError: any = new Error('Credentials file is corrupted');
       corruptedError.code = 'CORRUPTED';
       corruptedError.path = credentialsPath;
@@ -167,8 +166,8 @@ export function loadConnectionSettings(): any | null {
         path: settingsPath,
         error: error.message
       }, 'error');
-      console.warn('⚠️  Connection settings file is corrupted:', settingsPath);
-      console.warn('   Will reconnect to proxy...\n');
+      console.warn(`⚠️  ${t('credentials.settingsCorrupted', { path: settingsPath })}`);
+      console.warn(`   ${t('credentials.settingsCorruptedHint')}\n`);
       const corruptedError: any = new Error('Connection settings file is corrupted');
       corruptedError.code = 'CORRUPTED';
       corruptedError.path = settingsPath;
