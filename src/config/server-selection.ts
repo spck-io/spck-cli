@@ -72,7 +72,7 @@ export async function fetchServerList(): Promise<CLIServer[]> {
  * and averaging the latency
  */
 export async function checkServerPing(serverUrl: string): Promise<number> {
-  const shortestTime = await Promise.race(
+  const shortestTime = await Promise.any(
     Array.from({ length: 4 }, async () => {
       const start = Date.now();
       try {

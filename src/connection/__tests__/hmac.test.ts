@@ -275,7 +275,7 @@ describe('HMAC Validation', () => {
 
       try {
         requireValidHMAC(message, signingKey);
-        fail('Should have thrown error');
+        expect.unreachable('Should have thrown error');
       } catch (error: any) {
         expect(error.data).toMatchObject({
           timestamp: threeMinutesAgo,
@@ -392,7 +392,7 @@ describe('HMAC Validation', () => {
       const replayMessage = createSignedMessage('fs.readFile', { path: '/test.txt' }, message.timestamp, undefined, nonce);
       try {
         requireValidHMAC(replayMessage, signingKey);
-        fail('Should have thrown error');
+        expect.unreachable('Should have thrown error');
       } catch (error: any) {
         expect(error.data).toMatchObject({
           nonce: nonce,
