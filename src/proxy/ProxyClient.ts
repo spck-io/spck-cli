@@ -28,6 +28,7 @@ import {
 import {
   saveConnectionSettings,
 } from '../config/credentials.js';
+import { t } from '../i18n/index.js';
 import { logAuth, logConnection } from '../utils/logger.js';
 import { RPCRouter } from '../rpc/router.js';
 import { validateHandshakeTimestamp } from './handshake-validation.js';
@@ -86,8 +87,8 @@ export class ProxyClient {
     const { existingConnectionSettings } = this.options;
 
     const relayServer = this.options.proxyServerUrl;
-    console.log('\n=== Connecting to Relay Server ===\n');
-    console.log(`   Relay server: ${relayServer}\n`);
+    console.log(`\n=== ${t('connection.title')} ===\n`);
+    console.log(`   ${t('connection.relayServer', { server: relayServer })}\n`);
 
     // Determine if we're renewing an existing connection
     const existingToken = existingConnectionSettings?.serverToken;
@@ -175,7 +176,7 @@ export class ProxyClient {
     // Error handling (async wrapper for handleError)
     this.socket.on('error', (error: ProxyErrorEvent) => {
       this.handleError(error).catch((err) => {
-        console.error('\n❌ Unhandled error in handleError:', err.message);
+        console.error(`\n❌ ${t('connection.unhandledError')}`, err.message);
         process.exit(1);
       });
     });
@@ -209,9 +210,9 @@ export class ProxyClient {
       this.socket.once('error', (error: any) => {
         clearTimeout(timeout);
         const enhancedError = new Error(
-          `Connection error: ${error.message || error.toString()}\n` +
-          `  Namespace: /listen\n` +
-          `  Error type: ${error.type || 'unknown'}`
+          `${t('connection.connectError', { message: error.message || error.toString() })}\n` +
+          `  ${t('connection.connectErrorNamespace')}\n` +
+          `  ${t('connection.connectErrorType', { type: error.type || 'unknown' })}`
         );
         reject(enhancedError);
       });
@@ -220,13 +221,13 @@ export class ProxyClient {
         clearTimeout(timeout);
         const currentProxyUrl = `wss://${this.options.proxyServerUrl}`;
         const enhancedError = new Error(
-          `Failed to connect to relay server\n` +
-          `  URL: ${currentProxyUrl}/listen\n` +
-          `  Error: ${error.message || error.toString()}\n` +
+          `${t('connection.connectFailed')}\n` +
+          `  ${t('connection.connectFailedUrl', { url: currentProxyUrl })}\n` +
+          `  ${t('connection.connectFailedError', { message: error.message || error.toString() })}\n` +
           `  \n` +
-          `  Possible causes:\n` +
-          `  - Server is not reachable (check your internet connection)\n` +
-          `  - Network/firewall blocking connection`
+          `  ${t('connection.connectFailedCauses')}\n` +
+          `  ${t('connection.connectFailedCause1')}\n` +
+          `  ${t('connection.connectFailedCause2')}`
         );
         reject(enhancedError);
       });
@@ -250,11 +251,11 @@ export class ProxyClient {
     if (existingSettings && existingSettings.clientId === data.clientId) {
       // Same clientId - reuse the secret
       secret = existingSettings.secret;
-      console.log('   Reusing existing secret for clientId');
+      console.log(`   ${t('connection.reusingSecret')}`);
     } else {
       // New clientId or no existing settings - generate new secret
       secret = crypto.randomBytes(SECRET_LENGTH).toString('base64url');
-      console.log('   Generated new secret for clientId');
+      console.log(`   ${t('connection.generatedSecret')}`);
     }
 
     // Save connection settings
@@ -291,22 +292,22 @@ export class ProxyClient {
     }
 
     console.log('\n' + '='.repeat(60));
-    console.log('Scan this QR code with Spck Editor mobile app:');
+    console.log(t('connection.scanQR'));
     console.log('='.repeat(60) + '\n');
 
     // Generate ASCII QR code
     qrcode.generate(url, { small: true });
 
     console.log('\n' + '-'.repeat(60));
-    console.log(`Client ID: ${clientId}`);
-    console.log(`Secret: ${secret}`);
+    console.log(t('connection.clientId', { id: clientId }));
+    console.log(t('connection.secret', { secret }));
     if (this.config.name) {
-      console.log(`Name: ${this.config.name}`);
+      console.log(t('connection.name', { name: this.config.name }));
     }
-    console.log(`Relay server: ${relayServer}`);
+    console.log(t('connection.relayServerLabel', { server: relayServer }));
     console.log('-'.repeat(60));
-    console.log(`\nIMPORTANT: The client must select the same relay server`);
-    console.log(`(${relayServer}) in Spck Editor to connect.\n`);
+    console.log(`\n${t('connection.relayServerMismatch')}`);
+    console.log(`${t('connection.relayServerMismatchHint', { server: relayServer })}\n`);
   }
 
   /**
@@ -328,14 +329,14 @@ export class ProxyClient {
     }, 'warn');
 
     console.warn('\n' + '⚠'.repeat(30));
-    console.warn('⚠️  MULTIPLE CONNECTION ATTEMPT DETECTED!');
+    console.warn(`⚠️  ${t('multipleConnection.detected')}`);
     console.warn('⚠'.repeat(30));
-    console.warn(`\nExisting connections: ${data.existingConnections.length}`);
-    console.warn(`New connection ID: ${data.newConnectionId}`);
-    console.warn('\nFor security reasons, new connections are rejected by default.');
-    console.warn('If you want to allow multiple connections, restart the CLI.\n');
-    console.warn('⚠️  If you did not initiate this connection, your client ID');
-    console.warn('    may have been compromised. Consider regenerating it.\n');
+    console.warn(`\n${t('multipleConnection.existingCount', { count: data.existingConnections.length })}`);
+    console.warn(t('multipleConnection.newConnectionId', { id: data.newConnectionId }));
+    console.warn(`\n${t('multipleConnection.rejectedHint')}`);
+    console.warn(`${t('multipleConnection.restartHint')}\n`);
+    console.warn(`⚠️  ${t('multipleConnection.compromiseWarning')}`);
+    console.warn(`    ${t('multipleConnection.compromiseHint')}\n`);
   }
 
   /**
@@ -358,13 +359,13 @@ export class ProxyClient {
       }
 
       const connection = this.activeConnections.get(connectionId);
-      const displayId = connection?.deviceId || connectionId;
-      console.warn(`Unknown message type from ${displayId}:`, data);
+      const displayId = connection?.deviceId ?? '';
+      console.warn(`${t('connection.unknownMessageType', { deviceId: displayId })}:`, data);
 
     } catch (error: any) {
       const connection = this.activeConnections.get(connectionId);
-      const displayId = connection?.deviceId || connectionId;
-      console.error(`Error handling message from ${displayId}:`, error.message);
+      const displayId = connection?.deviceId ?? '';
+      console.error(`${t('connection.errorHandlingMessage', { deviceId: displayId })}:`, error.message);
 
       // Send error response if it's an RPC message
       if (data.id) {
@@ -395,7 +396,7 @@ export class ProxyClient {
         break;
 
       default:
-        console.warn(`Unknown handshake message type: ${data.type}`);
+        console.warn(t('connection.unknownHandshakeType', { type: data.type }));
     }
   }
 
@@ -445,9 +446,9 @@ export class ProxyClient {
           userId: this.connectionSettings.userId,
           firstConnection: true
         }, 'warn');
-        console.log(`\n🆕 New device connecting: ${deviceId}`);
-        console.log(`   This is the first time this device has connected.`);
-        console.log(`   If you did not initiate this connection, your credentials may be compromised.\n`);
+        console.log(`\n🆕 ${t('connection.newDevice', { deviceId })}`);
+        console.log(`   ${t('connection.newDeviceWarning')}`);
+        console.log(`   ${t('connection.newDeviceCompromised')}\n`);
         this.knownDeviceIds.add(deviceId);
       }
 
@@ -483,7 +484,7 @@ export class ProxyClient {
 
       // Check if user authentication is required
       if (userVerificationRequired) {
-        console.log(`   Requesting user verification...`);
+        console.log(`   ${t('connection.userVerifying')}`);
         this.sendToClient(connectionId, 'handshake', {
           type: 'request_user_verification',
           message: 'Please provide Firebase authentication',
@@ -516,11 +517,11 @@ export class ProxyClient {
     const connection = this.activeConnections.get(connectionId);
     if (!connection || !connection.authenticated) {
       const displayId = connection?.deviceId || connectionId;
-      console.warn(`Rejecting user_verification from unauthenticated connection: ${displayId}`);
+      console.warn(t('connection.rejectingUnauthenticated', { event: 'user_verification', deviceId: displayId }));
       return;
     }
 
-    const displayId = connection.deviceId;
+    const displayId = connection.deviceId || connectionId;
 
     try {
       // Verify Firebase token
@@ -536,14 +537,14 @@ export class ProxyClient {
       );
 
       // If we get here, token is valid and UID matches (if userAuthenticationEnabled)
-      console.log(`✅ User verified for ${displayId}: ${payload.sub}`);
+      console.log(`✅ ${t('connection.userVerified', { deviceId: displayId, userId: payload.sub ?? '' })}`);
       connection.userVerified = true;
 
       // Continue to protocol negotiation
       this.sendProtocolInfo(connectionId);
 
     } catch (error: any) {
-      console.error(`❌ User verification failed for ${displayId}: ${error.message}`);
+      console.error(`❌ ${t('connection.userVerifyFailed', { deviceId: displayId, message: error.message })}`);
 
       // When user verification is required, reject on failure
       if (connection.userVerificationRequired) {
@@ -555,7 +556,7 @@ export class ProxyClient {
         return;
       }
 
-      console.log(`   Continuing anyway (verification is optional)`);
+      console.log(`   ${t('connection.userVerifyOptional')}`);
       // Continue to protocol negotiation
       this.sendProtocolInfo(connectionId);
     }
@@ -585,9 +586,9 @@ export class ProxyClient {
   private async handleProtocolSelection(connectionId: string, version: number): Promise<void> {
     // Security check: Verify connection is properly authenticated before completing handshake
     const connection = this.activeConnections.get(connectionId);
+    const displayId = connection?.deviceId ?? '';
     if (!connection || !connection.authenticated) {
-      const displayId = connection?.deviceId || connectionId;
-      console.warn(`Rejecting protocol_selected from unauthenticated connection: ${displayId}`);
+      console.warn(t('connection.rejectingUnauthenticated', { event: 'protocol_selected', deviceId: displayId }));
       this.sendToClient(connectionId, 'handshake', {
         type: 'error',
         code: 'not_authenticated',
@@ -596,11 +597,9 @@ export class ProxyClient {
       return;
     }
 
-    const displayId = connection.deviceId;
-
     // Security check: If user verification is required, ensure it was completed
     if (connection.userVerificationRequired && !connection.userVerified) {
-      console.warn(`Rejecting protocol_selected - user verification required but not completed: ${displayId}`);
+      console.warn(t('connection.rejectingUserVerification', { deviceId: displayId }));
       this.sendToClient(connectionId, 'handshake', {
         type: 'error',
         code: 'user_verification_required',
@@ -611,15 +610,12 @@ export class ProxyClient {
 
     if (version !== 1) {
       console.error(
-        `❌ Unsupported protocol version ${version} from ${displayId}. ` +
-        `This CLI only supports protocol v1. ` +
-        `An upgrade is required: update your client/library (and this CLI, if applicable) to the latest version so protocol versions match. ` +
-        `If you installed the CLI globally, run: npm i -g spck@latest`
+        `❌ ${t('connection.protocolUnsupported', { version, deviceId: displayId })}`
       );
       return;
     }
 
-    console.log(`✅ Protocol v${version} negotiated with ${displayId}`);
+    console.log(`✅ ${t('connection.protocolNegotiated', { version, deviceId: displayId })}`);
 
     // Mark connection as fully established
     connection.handshakeComplete = true;
@@ -647,13 +643,11 @@ export class ProxyClient {
   private async handleRPCMessage(connectionId: string, message: any): Promise<void> {
     // Check if connection is authenticated and handshake complete
     const connection = this.activeConnections.get(connectionId);
+    const displayId = connection?.deviceId ?? '';
     if (!connection || !connection.handshakeComplete) {
-      const displayId = connection?.deviceId || connectionId;
-      console.warn(`Rejecting RPC from unauthenticated connection: ${displayId}`);
+      console.warn(t('connection.rejectingUnauthenticated', { event: 'RPC', deviceId: displayId }));
       return;
     }
-
-    const displayId = connection.deviceId;
 
     // Distinguish between RPC request (has method) and RPC response (has result/error)
     const isRequest = 'method' in message;
@@ -669,7 +663,7 @@ export class ProxyClient {
     }
 
     if (!isRequest) {
-      console.warn(`Invalid RPC message from ${displayId}:`, message);
+      console.warn(`${t('connection.invalidRpcMessage', { deviceId: displayId })}:`, message);
       return;
     }
 
@@ -725,7 +719,7 @@ export class ProxyClient {
       const connection = this.activeConnections.get(connectionId);
       const displayId = connection?.deviceId || connectionId;
 
-      console.log(`📦 Chunking large ${event} message: ${chunks.length} chunks (~${Math.round(chunks.length * 800 / 1024)}MB) for ${displayId}`);
+      console.log(`📦 ${t('connection.chunkingMessage', { event, chunks: chunks.length, size: Math.round(chunks.length * 800 / 1024), deviceId: displayId })}`);
 
       // Send each chunk as an 'rpc' event with special __chunk marker
       // This ensures chunks are routed correctly through the proxy-server
@@ -775,7 +769,7 @@ export class ProxyClient {
   private async handleError(error: ProxyErrorEvent): Promise<void> {
     // Special handling for expired_firebase_token - attempt refresh before giving up
     if (error.code === 'expired_firebase_token' && !this.tokenRefreshAttempted) {
-      console.warn('\n⚠️  Firebase token expired. Attempting to refresh...');
+      console.warn(`\n⚠️  ${t('proxyError.firebaseTokenExpiring')}`);
       this.tokenRefreshAttempted = true;
 
       try {
@@ -783,88 +777,88 @@ export class ProxyClient {
         // If successful, the connection will be re-established
         return;
       } catch (refreshError: any) {
-        console.error(`\n❌ Token refresh failed: ${refreshError.message}`);
+        console.error(`\n❌ ${t('proxyError.tokenRefreshFailed', { message: refreshError.message })}`);
         // Fall through to regular error handling
       }
     }
 
     // Regular error handling
-    console.error(`\n❌ Proxy error: ${error.message}`);
+    console.error(`\n❌ ${t('proxyError.error', { message: error.message })}`);
 
     switch (error.code) {
       case 'subscription_error_4020':
-        console.error('\n⚠️  Your access token has expired or timed out.');
-        console.error('Please try again or re-authenticate with: spck auth login\n');
+        console.error(`\n⚠️  ${t('proxyError.tokenExpiredTimeout')}`);
+        console.error(`${t('proxyError.tokenExpiredHint')}\n`);
         break;
 
       case 'subscription_error_4021':
-        console.error('\n⚠️  Your login token has been revoked.');
-        console.error('Please re-authenticate: spck auth logout && spck auth login\n');
+        console.error(`\n⚠️  ${t('proxyError.tokenRevoked')}`);
+        console.error(`${t('proxyError.tokenRevokedHint')}\n`);
         break;
 
       case 'subscription_error_9996':
-        console.error('\n⚠️  Privacy policy consent required.');
-        console.error('Please accept the privacy policy in the Spck Editor app');
-        console.error('under Account Settings to use this feature.\n');
+        console.error(`\n⚠️  ${t('proxyError.privacyConsent')}`);
+        console.error(t('proxyError.privacyConsentHint1'));
+        console.error(`${t('proxyError.privacyConsentHint2')}\n`);
         break;
 
       case 'subscription_error_9997':
-        console.error('\n⚠️  Your account is being deleted.');
-        console.error('Please wait 72 hours before trying again.\n');
+        console.error(`\n⚠️  ${t('proxyError.accountDeleting')}`);
+        console.error(`${t('proxyError.accountDeletingHint')}\n`);
         break;
 
       case 'subscription_error_9998':
-        console.error('\n⛔ This account has been banned.');
-        console.error('Your account has been banned for violation of the');
-        console.error('Terms of Service agreement.\n');
+        console.error(`\n⛔ ${t('proxyError.accountBanned')}`);
+        console.error(t('proxyError.accountBannedHint1'));
+        console.error(`${t('proxyError.accountBannedHint2')}\n`);
         break;
 
       case 'subscription_check_failed':
-        console.error('\n⚠️  Unable to verify subscription status.');
-        console.error('This may be a temporary issue. Please try again later.\n');
+        console.error(`\n⚠️  ${t('proxyError.subscriptionCheckFailed')}`);
+        console.error(`${t('proxyError.subscriptionCheckFailedHint')}\n`);
         break;
 
       case 'subscription_required':
-        console.error('\n⚠️  This feature requires a paid subscription.');
-        console.error('Visit https://spck.io/subscription to upgrade.\n');
+        console.error(`\n⚠️  ${t('proxyError.subscriptionRequired')}`);
+        console.error(`${t('proxyError.subscriptionRequiredHint')}\n`);
         break;
 
       case 'max_connections_reached': {
         const maxConnections = (error as any).maxConnections || 5;
-        console.error(`\n⚠️  Maximum of ${maxConnections} CLI connections reached.`);
-        console.error('Close other CLI instances and try again.\n');
+        console.error(`\n⚠️  ${t('proxyError.maxConnections', { max: maxConnections })}`);
+        console.error(`${t('proxyError.maxConnectionsHint')}\n`);
         break;
       }
 
       case 'duplicate_client_id':
-        console.error('\n⚠️  A CLI with this client ID is already connected.');
-        console.error('This can happen if:');
-        console.error('  - Another CLI instance is still running with the same connection');
-        console.error('  - A previous connection did not properly disconnect');
-        console.error('\nPlease:');
-        console.error('  1. Close any other running CLI instances');
-        console.error('  2. Wait a few seconds for the previous connection to timeout');
-        console.error('  3. Try connecting again\n');
+        console.error(`\n⚠️  ${t('proxyError.duplicateClientId')}`);
+        console.error(t('proxyError.duplicateHint1'));
+        console.error(`  ${t('proxyError.duplicateHint2')}`);
+        console.error(`  ${t('proxyError.duplicateHint3')}`);
+        console.error(`\n${t('proxyError.duplicateHint4')}`);
+        console.error(`  ${t('proxyError.duplicateHint5')}`);
+        console.error(`  ${t('proxyError.duplicateHint6')}`);
+        console.error(`  ${t('proxyError.duplicateHint7')}\n`);
         break;
 
       case 'expired_firebase_token':
         if (this.tokenRefreshAttempted) {
-          console.error('\n⚠️  Firebase token expired and refresh failed.');
-          console.error('Please re-authenticate: spck auth login\n');
+          console.error(`\n⚠️  ${t('proxyError.firebaseExpiredRefreshFailed')}`);
+          console.error(`${t('proxyError.firebaseExpiredRefreshFailedHint')}\n`);
         } else {
-          console.error('\n⚠️  Firebase token expired.');
-          console.error('Please re-authenticate: spck auth login\n');
+          console.error(`\n⚠️  ${t('proxyError.firebaseExpired')}`);
+          console.error(`${t('proxyError.firebaseExpiredHint')}\n`);
         }
         break;
 
       case 'invalid_firebase_token':
-        console.error('\n⚠️  Firebase token is invalid (not expired).');
-        console.error('The token may be corrupted or from a different account.');
-        console.error('Please re-authenticate: spck auth login\n');
+        console.error(`\n⚠️  ${t('proxyError.firebaseInvalid')}`);
+        console.error(t('proxyError.firebaseInvalidHint1'));
+        console.error(`${t('proxyError.firebaseInvalidHint2')}\n`);
         break;
 
       default:
-        console.error('\n⚠️  A problem occurred when verifying your subscription.');
+        console.error(`\n⚠️  ${t('proxyError.defaultError')}`);
         console.error(error.message)
         break;
     }
@@ -876,38 +870,38 @@ export class ProxyClient {
    * Handle disconnect from proxy
    */
   private handleDisconnect(reason: string): void {
-    console.warn(`\n⚠️  Disconnected from proxy: ${reason}`);
+    console.warn(`\n⚠️  ${t('connection.disconnectedFromProxy', { reason })}`);
 
     if (reason === 'io server disconnect') {
       // Server forcefully disconnected us
-      console.error('Server terminated connection. Exiting...\n');
+      console.error(`${t('connection.serverTerminated')}\n`);
       process.exit(1);
     }
 
     // Socket.IO will auto-reconnect
-    console.log('Attempting to reconnect...');
+    console.log(t('connection.attemptingReconnect'));
   }
 
   /**
    * Handle reconnection attempt
    */
   private handleReconnectAttempt(attemptNumber: number): void {
-    console.log(`🔄 Reconnection attempt ${attemptNumber}/5...`);
+    console.log(`🔄 ${t('connection.reconnectAttempt', { attempt: attemptNumber })}`);
   }
 
   /**
    * Handle successful reconnection
    */
   private handleReconnect(attemptNumber: number): void {
-    console.log(`\n✅ Reconnected after ${attemptNumber} attempts\n`);
+    console.log(`\n✅ ${t('connection.reconnected', { attempts: attemptNumber })}\n`);
   }
 
   /**
    * Handle reconnection failure
    */
   private handleReconnectFailed(): void {
-    console.error('\n❌ Failed to reconnect after 5 attempts.');
-    console.error('Exiting...\n');
+    console.error(`\n❌ ${t('connection.reconnectFailed')}`);
+    console.error(`${t('connection.exiting')}\n`);
     process.exit(1);
   }
 
@@ -917,18 +911,18 @@ export class ProxyClient {
   async disconnect(): Promise<void> {
     if (!this.socket) return;
 
-    console.log('\n🛑 Shutting down gracefully...');
+    console.log(`\n🛑 ${t('connection.shuttingDown')}`);
 
     return new Promise((resolve) => {
       const timeout = setTimeout(() => {
-        console.warn('⚠️  Kill acknowledgment timeout, forcing disconnect');
+        console.warn(`⚠️  ${t('connection.killTimeout')}`);
         this.socket?.disconnect();
         resolve();
       }, KILL_TIMEOUT);
 
       this.socket!.once('killed', () => {
         clearTimeout(timeout);
-        console.log('✅ Gracefully disconnected from proxy');
+        console.log(`✅ ${t('connection.gracefulDisconnect')}`);
         this.socket?.disconnect();
         resolve();
       });

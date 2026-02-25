@@ -6,6 +6,7 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { ToolDetectionResult } from '../types.js';
+import { t } from '../i18n/index.js';
 
 const execAsync = promisify(exec);
 
@@ -28,7 +29,7 @@ export async function detectTools(options?: {
   disableGit?: boolean;
   disableRipgrep?: boolean;
 }): Promise<ToolDetectionResult> {
-  console.log('\n=== Tool Detection ===\n');
+  console.log(`\n=== ${t('tools.title')} ===\n`);
 
   const result: ToolDetectionResult = {
     git: false,
@@ -37,28 +38,28 @@ export async function detectTools(options?: {
 
   // Check Git (unless force-disabled for development)
   if (options?.disableGit) {
-    console.log('⚠️  Git force-disabled (development mode)');
+    console.log(`⚠️  ${t('tools.gitForceDisabled')}`);
   } else {
     result.git = await isCommandAvailable('git');
 
     if (result.git) {
       try {
         const { stdout } = await execAsync('git --version');
-        console.log(`✅ Git detected: ${stdout.trim()}`);
+        console.log(`✅ ${t('tools.gitDetected', { version: stdout.trim() })}`);
       } catch {
-        console.log('✅ Git detected');
+        console.log(`✅ ${t('tools.gitDetectedShort')}`);
       }
     } else {
-      console.warn('⚠️  Git not detected');
-      console.warn('   Git features will be disabled in this session.');
-      console.warn('   Install Git to enable version control features:');
+      console.warn(`⚠️  ${t('tools.gitNotDetected')}`);
+      console.warn(`   ${t('tools.gitDisabledHint')}`);
+      console.warn(`   ${t('tools.gitInstallHint')}`);
       console.warn('   https://git-scm.com/downloads\n');
     }
   }
 
   // Check Ripgrep (unless force-disabled for development)
   if (options?.disableRipgrep) {
-    console.log('⚠️  Ripgrep force-disabled (development mode)');
+    console.log(`⚠️  ${t('tools.ripgrepForceDisabled')}`);
   } else {
     result.ripgrep = await isCommandAvailable('rg');
 
@@ -66,14 +67,14 @@ export async function detectTools(options?: {
       try {
         const { stdout } = await execAsync('rg --version');
         const firstLine = stdout.split('\n')[0];
-        console.log(`✅ Ripgrep detected: ${firstLine}`);
+        console.log(`✅ ${t('tools.ripgrepDetected', { version: firstLine })}`);
       } catch {
-        console.log('✅ Ripgrep detected');
+        console.log(`✅ ${t('tools.ripgrepDetectedShort')}`);
       }
     } else {
-      console.warn('⚠️  Ripgrep not detected');
-      console.warn('   Fast search features will be disabled in this session.');
-      console.warn('   Install ripgrep for high-performance code search:');
+      console.warn(`⚠️  ${t('tools.ripgrepNotDetected')}`);
+      console.warn(`   ${t('tools.ripgrepDisabledHint')}`);
+      console.warn(`   ${t('tools.ripgrepInstallHint')}`);
       console.warn('   https://github.com/BurntSushi/ripgrep#installation\n');
     }
   }
@@ -89,45 +90,45 @@ export function displayFeatureSummary(
   terminalEnabled: boolean,
   userAuthEnabled?: boolean
 ): void {
-  console.log('\n=== Available Features ===\n');
+  console.log(`\n=== ${t('features.title')} ===\n`);
 
   const features: string[] = [];
 
   // Always available
-  features.push('✅ Filesystem operations');
+  features.push(`✅ ${t('features.filesystem')}`);
 
   // Conditional features
   if (tools.git) {
-    features.push('✅ Git version control');
+    features.push(`✅ ${t('features.gitEnabled')}`);
   } else {
-    features.push('❌ Git version control (git not installed)');
+    features.push(`❌ ${t('features.gitDisabled')}`);
   }
 
   if (tools.ripgrep) {
-    features.push('✅ Fast search (ripgrep)');
+    features.push(`✅ ${t('features.searchFast')}`);
   } else {
-    features.push('⚠️  Basic search (ripgrep not installed)');
+    features.push(`⚠️  ${t('features.searchBasic')}`);
   }
 
   if (terminalEnabled) {
-    features.push('✅ Terminal service');
+    features.push(`✅ ${t('features.terminalEnabled')}`);
   } else {
-    features.push('❌ Terminal service (disabled in config)');
+    features.push(`❌ ${t('features.terminalDisabled')}`);
   }
 
   features.forEach(feature => console.log(`   ${feature}`));
 
   // Display authentication mode
-  console.log('\n=== Security Mode ===\n');
+  console.log(`\n=== ${t('features.securityTitle')} ===\n`);
   if (userAuthEnabled) {
-    console.log('   🔐 User Authentication: ENABLED');
-    console.log('   → Requires Firebase authentication for all connections');
-    console.log('   → Adds user identity verification layer');
-    console.log('   → Compatible with Spck Editor (not Lite)\n');
+    console.log(`   🔐 ${t('features.userAuthEnabled')}`);
+    console.log(`   → ${t('features.userAuthEnabledHint1')}`);
+    console.log(`   → ${t('features.userAuthEnabledHint2')}`);
+    console.log(`   → ${t('features.userAuthEnabledHint3')}\n`);
   } else {
-    console.log('   🔓 User Authentication: DISABLED');
-    console.log('   → Connections protected by secret signing key only');
-    console.log('   → Lower latency, no Firebase auth required');
-    console.log('   → Compatible with Spck Editor Lite\n');
+    console.log(`   🔓 ${t('features.userAuthDisabled')}`);
+    console.log(`   → ${t('features.userAuthDisabledHint1')}`);
+    console.log(`   → ${t('features.userAuthDisabledHint2')}`);
+    console.log(`   → ${t('features.userAuthDisabledHint3')}\n`);
   }
 }

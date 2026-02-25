@@ -8,6 +8,7 @@ import { ServerConfig } from '../types.js';
 import { saveConfig, createDefaultConfig } from '../config/config.js';
 import { ensureProjectDir } from '../utils/project-dir.js';
 import { gitignoreExists, isSpckEditorIgnored, addSpckEditorToGitignore } from '../utils/gitignore.js';
+import { t } from '../i18n/index.js';
 
 const USER_AUTH_DOCS_URL = 'https://docs.spck.io/networking/user-auth';
 
@@ -57,20 +58,20 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
   const rl = createPrompt();
 
   console.log('\n' + '='.repeat(60));
-  console.log('     Spck Networking CLI - Initial Setup');
+  console.log('     ' + t('setup.title'));
   console.log('='.repeat(60) + '\n');
 
-  console.log('This wizard will help you configure the Spck Networking CLI.');
-  console.log('The CLI connects to a proxy server to enable remote access');
-  console.log('to your local filesystem, git, and terminal.\n');
+  console.log(t('setup.description1'));
+  console.log(t('setup.description2'));
+  console.log(t('setup.description3') + '\n');
 
   try {
     // Step 1: Root directory
-    console.log('--- Project Configuration ---\n');
+    console.log('--- ' + t('setup.projectConfig') + ' ---\n');
 
     const root = await question(
       rl,
-      `Root directory to serve [${process.cwd()}]: `
+      t('setup.rootDirPrompt', { default: process.cwd() })
     );
     const rootPath = root.trim() || process.cwd();
 
@@ -78,12 +79,12 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
     const defaultConfig = createDefaultConfig();
 
     // Step 2: Terminal service
-    console.log('\n--- Terminal Configuration ---\n');
-    console.log('Terminal service allows remote shell access to your machine.');
+    console.log('\n--- ' + t('setup.terminalConfig') + ' ---\n');
+    console.log(t('setup.terminalDescription'));
 
     const terminalEnabled = await questionYesNo(
       rl,
-      'Enable terminal service? [Y/n]: ',
+      t('setup.terminalPrompt'),
       true
     );
 
@@ -94,7 +95,7 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
     if (terminalEnabled) {
       const advancedTerminal = await questionYesNo(
         rl,
-        '\nConfigure advanced terminal settings? [y/N]: ',
+        '\n' + t('setup.advancedTerminalPrompt'),
         false
       );
 
@@ -102,30 +103,30 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
         console.log('');
         const bufferInput = await question(
           rl,
-          `Maximum buffer lines (terminal history) [${maxBufferedLines}]: `
+          t('setup.maxBufferPrompt', { default: String(maxBufferedLines) })
         );
         maxBufferedLines = parseInt(bufferInput) || 5000;
 
-        console.log('   (Larger buffer stores more history but may slow synchronization)\n');
+        console.log('   ' + t('setup.maxBufferHint') + '\n');
 
         const maxTermInput = await question(
           rl,
-          `Maximum terminal processes [${maxTerminals}]: `
+          t('setup.maxTerminalsPrompt', { default: String(maxTerminals) })
         );
         maxTerminals = parseInt(maxTermInput) || 10;
       }
     }
 
     // Step 5: Security configuration
-    console.log('\n--- Security Configuration ---\n');
-    console.log('Additional user authentication adds an extra security layer');
-    console.log('by requiring the client to verify their Firebase identity.');
-    console.log('This increases initial connection time by ~3-15 seconds.');
-    console.log(`Learn more: ${USER_AUTH_DOCS_URL}\n`);
+    console.log('\n--- ' + t('setup.securityConfig') + ' ---\n');
+    console.log(t('setup.securityDescription1'));
+    console.log(t('setup.securityDescription2'));
+    console.log(t('setup.securityDescription3'));
+    console.log(t('setup.securityDocsHint', { url: USER_AUTH_DOCS_URL }) + '\n');
 
     const userAuthEnabled = await questionYesNo(
       rl,
-      'Enable additional user authentication? [y/N]: ',
+      t('setup.securityPrompt'),
       false
     );
 
@@ -134,14 +135,14 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
 
     if (gitignoreExists(rootPath)) {
       if (!isSpckEditorIgnored(rootPath)) {
-        console.log('\n--- Git Configuration ---\n');
-        console.log('A .gitignore file was detected in your project directory.');
-        console.log('It is recommended to add .spck-editor/ to .gitignore to prevent');
-        console.log('accidentally committing the directory to version control.\n');
+        console.log('\n--- ' + t('setup.gitConfig') + ' ---\n');
+        console.log(t('setup.gitignoreDetected'));
+        console.log(t('setup.gitignoreRecommend1'));
+        console.log(t('setup.gitignoreRecommend2') + '\n');
 
         shouldAddToGitignore = await questionYesNo(
           rl,
-          'Add .spck-editor/ to .gitignore? [Y/n]: ',
+          t('setup.gitignorePrompt'),
           true
         );
       }
@@ -186,15 +187,15 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
     if (shouldAddToGitignore) {
       try {
         addSpckEditorToGitignore(config.root);
-        console.log('\n✅ Added .spck-editor/ to .gitignore');
+        console.log('\n✅ ' + t('setup.gitignoreAdded'));
       } catch (error: any) {
-        console.warn(`\n⚠️  Failed to update .gitignore: ${error.message}`);
-        console.warn('   You can manually add .spck-editor/ to your .gitignore file.');
+        console.warn('\n⚠️  ' + t('setup.gitignoreFailed', { message: error.message }));
+        console.warn('   ' + t('setup.gitignoreManualHint'));
       }
     }
 
     console.log('\n' + '='.repeat(60));
-    console.log('✅ Configuration saved successfully!');
+    console.log('✅ ' + t('config.saved'));
     console.log('='.repeat(60) + '\n');
 
     displayConfigSummary(config);
@@ -203,7 +204,7 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
 
   } catch (error: any) {
     rl.close();
-    console.error('\n❌ Setup failed:', error.message);
+    console.error('\n❌ ' + t('setup.setupFailed', { message: error.message }));
     throw error;
   }
 }
@@ -212,16 +213,16 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
  * Display configuration summary
  */
 function displayConfigSummary(config: ServerConfig): void {
-  console.log('Configuration summary:');
-  console.log(`  Server name: ${config.name || 'Not set'}`);
-  console.log(`  Root directory: ${config.root}`);
-  console.log(`  Terminal service: ${config.terminal.enabled ? 'Enabled' : 'Disabled'}`);
+  console.log(t('setup.configSummary'));
+  console.log('  ' + t('setup.summaryName', { name: config.name || t('setup.summaryNameNotSet') }));
+  console.log('  ' + t('setup.summaryRoot', { root: config.root }));
+  console.log('  ' + t('setup.summaryTerminal', { status: config.terminal.enabled ? t('setup.summaryEnabled') : t('setup.summaryDisabled') }));
 
   if (config.terminal.enabled) {
-    console.log(`    - Max buffer lines: ${config.terminal.maxBufferedLines}`);
-    console.log(`    - Max processes: ${config.terminal.maxTerminals}`);
+    console.log('  ' + t('setup.summaryMaxBuffer', { value: String(config.terminal.maxBufferedLines) }));
+    console.log('  ' + t('setup.summaryMaxProcesses', { value: String(config.terminal.maxTerminals) }));
   }
 
-  console.log(`  User authentication: ${config.security.userAuthenticationEnabled ? 'Enabled' : 'Disabled'}`);
+  console.log('  ' + t('setup.summaryUserAuth', { status: config.security.userAuthenticationEnabled ? t('setup.summaryEnabled') : t('setup.summaryDisabled') }));
   console.log('');
 }

@@ -8,7 +8,7 @@ module.exports = {
     '^.+\\.js$': 'ts-jest',
   },
   transformIgnorePatterns: [
-    'node_modules/(?!(default-shell)/)',
+    'node_modules/(?!(default-shell|os-locale)/)',
   ],
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',

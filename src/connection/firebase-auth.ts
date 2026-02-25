@@ -16,6 +16,7 @@ import qrcode from 'qrcode-terminal';
 import { FirebaseCredentials, StoredCredentials } from '../types.js';
 import { saveCredentials } from '../config/credentials.js';
 import { logAuth } from '../utils/logger.js';
+import { t } from '../i18n/index.js';
 
 const AUTH_TIMEOUT = 10 * 60 * 1000; // 10 minutes
 const FIREBASE_AUTH_BASE_URL = 'https://spck.io/auth';
@@ -116,11 +117,11 @@ function parsePostBody(req: http.IncomingMessage): Promise<Record<string, string
  * Token is received via POST to prevent exposure in URLs
  */
 export async function authenticateWithFirebase(): Promise<FirebaseCredentials> {
-  console.log('\n=== Firebase Authentication ===\n');
+  console.log('\n=== ' + t('auth.title') + ' ===\n');
 
   // 1. Start local HTTP server
   const port = await getAvailablePort();
-  console.log(`Starting local callback server on port ${port}...`);
+  console.log(t('auth.startingCallback', { port: String(port) }));
 
   const callbackServer = http.createServer();
 
@@ -144,22 +145,22 @@ export async function authenticateWithFirebase(): Promise<FirebaseCredentials> {
   manualUrl.searchParams.set('code', code);
 
   // 4. Open browser (primary method)
-  console.log('Opening browser for authentication...\n');
+  console.log(t('auth.openingBrowser') + '\n');
 
   try {
     await open(browserUrl.toString());
   } catch (error: any) {
-    console.warn(`⚠️  Could not open browser automatically: ${error.message}\n`);
+    console.warn('⚠️  ' + t('auth.couldNotOpenBrowser', { message: error.message }) + '\n');
   }
 
   // 5. Display fallback method
-  console.log('If browser doesn\'t open, authenticate manually:\n');
+  console.log(t('auth.manualAuthHint') + '\n');
 
   // Display QR code
   qrcode.generate(manualUrl.toString(), { small: true });
 
-  console.log(`\nOr visit: ${manualUrl.toString()}\n`);
-  console.log('Waiting for authentication (timeout: 10 minutes)...\n');
+  console.log('\n' + t('auth.visitUrl', { url: manualUrl.toString() }) + '\n');
+  console.log(t('auth.waiting') + '\n');
 
   // 6. Wait for authentication from either source (browser or manual)
   const abortController = new AbortController();
@@ -362,8 +363,8 @@ export async function authenticateWithFirebase(): Promise<FirebaseCredentials> {
     method: 'firebase'
   });
 
-  console.log('✅ Authentication successful!');
-  console.log(`   User ID: ${result.userId}\n`);
+  console.log('✅ ' + t('auth.success'));
+  console.log('   ' + t('auth.userId', { userId: result.userId }) + '\n');
 
   return result;
 }
@@ -386,7 +387,7 @@ const FIREBASE_API_KEY = 'AIzaSyCFgtHhWiM-EdFBdiDw9ISHfcGOqbV3OCU';
  */
 export async function refreshFirebaseToken(storedCredentials: StoredCredentials): Promise<FirebaseCredentials> {
   if (!storedCredentials.refreshToken) {
-    console.log('⚠️  No refresh token available. Re-authentication required.');
+    console.log('⚠️  ' + t('auth.noRefreshToken'));
     return authenticateWithFirebase();
   }
 
@@ -412,7 +413,7 @@ export async function refreshFirebaseToken(storedCredentials: StoredCredentials)
           userId: storedCredentials.userId,
           reason: errorMessage
         }, 'warn');
-        console.log('⚠️  Refresh token expired or invalid. Re-authentication required.');
+        console.log('⚠️  ' + t('auth.refreshTokenExpired'));
         return authenticateWithFirebase();
       }
 
@@ -451,8 +452,8 @@ export async function refreshFirebaseToken(storedCredentials: StoredCredentials)
       userId: storedCredentials.userId,
       error: error.message
     }, 'error');
-    console.error('Token refresh error:', error.message);
-    console.log('⚠️  Token refresh failed. Re-authentication required.');
+    console.error(t('auth.tokenRefreshError', { message: error.message }));
+    console.log('⚠️  ' + t('auth.tokenRefreshFailed'));
     return authenticateWithFirebase();
   }
 }
@@ -462,6 +463,6 @@ export async function refreshFirebaseToken(storedCredentials: StoredCredentials)
  * Always generates a fresh ID token using the refresh token
  */
 export async function getValidFirebaseToken(storedCredentials: StoredCredentials): Promise<FirebaseCredentials> {
-  console.log('🔄 Generating fresh Firebase ID token...');
+  console.log('🔄 ' + t('auth.generatingToken'));
   return refreshFirebaseToken(storedCredentials);
 }

@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ServerConfig } from '../types.js';
 import { getProjectFilePath } from '../utils/project-dir.js';
+import { t } from '../i18n/index.js';
 
 const DEFAULT_CONFIG_FILENAME = 'spck-cli.config.json';
 
@@ -23,8 +24,8 @@ export function loadConfig(configPath?: string): ServerConfig {
     : getProjectFilePath(process.cwd(), DEFAULT_CONFIG_FILENAME);
 
   if (!fs.existsSync(fullPath)) {
-    console.log(`\nConfiguration file not found: ${fullPath}`);
-    console.log('Running setup wizard to create initial configuration...\n');
+    console.log('\n' + t('config.fileNotFound', { path: fullPath }));
+    console.log(t('config.fileNotFoundHint') + '\n');
 
     // Signal to caller that setup is needed
     throw new ConfigNotFoundError(fullPath);
@@ -41,8 +42,8 @@ export function loadConfig(configPath?: string): ServerConfig {
   } catch (error: any) {
     // JSON parse error or validation error
     if (error instanceof SyntaxError || (error.message && error.message.includes('Invalid'))) {
-      console.warn('⚠️  Configuration file is corrupted:', fullPath);
-      console.warn('   Will run setup wizard to recreate...\n');
+      console.warn('⚠️  ' + t('config.fileCorrupted', { path: fullPath }));
+      console.warn('   ' + t('config.fileCorruptedHint') + '\n');
       const corruptedError: any = new Error('Configuration file is corrupted');
       corruptedError.code = 'CORRUPTED';
       corruptedError.path = fullPath;

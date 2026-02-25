@@ -3,6 +3,9 @@
  * Fetches available relay servers, checks ping, and auto-selects the best one
  */
 
+import { t } from '../i18n/index.js';
+import { getLocale } from '../i18n/index.js';
+
 export interface CLIServer {
   label: Record<string, string>;
   url: string;
@@ -110,7 +113,7 @@ export async function selectBestServer(
  * Display ping results for all servers
  */
 export async function displayServerPings(servers: CLIServer[]): Promise<Map<string, number>> {
-  console.log('\n   Checking server latency...\n');
+  console.log('\n   ' + t('server.checkingLatency') + '\n');
 
   const pingResults = new Map<string, number>();
   const results = await Promise.all(
@@ -124,9 +127,10 @@ export async function displayServerPings(servers: CLIServer[]): Promise<Map<stri
     })
   );
 
+  const locale = getLocale();
   for (const { server, ping } of results) {
-    const label = server.label.en || server.url;
-    const pingStr = ping === Infinity ? 'unreachable' : `${ping}ms`;
+    const label = server.label[locale] || server.label.en || server.url;
+    const pingStr = ping === Infinity ? t('server.unreachable') : `${ping}ms`;
     console.log(`   ${label}: ${pingStr}`);
     pingResults.set(server.url, ping);
   }
