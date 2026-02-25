@@ -1,3 +1,4 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 /**
  * Tests for SearchService - Line Trimming Functionality
  */
@@ -5,10 +6,10 @@
 import { SearchService } from '../SearchService.js';
 
 // Mock ripgrep utilities to prevent spawning child processes during tests
-jest.mock('../../utils/ripgrep', () => ({
-  isRipgrepAvailable: jest.fn().mockResolvedValue(false),
-  executeRipgrep: jest.fn(),
-  executeRipgrepStream: jest.fn(),
+vi.mock('../../utils/ripgrep', () => ({
+  isRipgrepAvailable: vi.fn().mockResolvedValue(false),
+  executeRipgrep: vi.fn(),
+  executeRipgrepStream: vi.fn(),
 }));
 
 describe('SearchService - Line Trimming', () => {
@@ -227,9 +228,9 @@ describe('SearchService - Search Functionality', () => {
     mockSocket = {
       id: 'test-socket',
       data: { uid: 'test-user', deviceId: 'test-device' },
-      emit: jest.fn(),
-      on: jest.fn(),
-      off: jest.fn(),
+      emit: vi.fn(),
+      on: vi.fn(),
+      off: vi.fn(),
     };
 
     // Create test files

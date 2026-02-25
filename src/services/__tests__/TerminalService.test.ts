@@ -1,3 +1,4 @@
+import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
 /**
  * Tests for TerminalService
  */
@@ -6,38 +7,40 @@ import { TerminalService } from '../TerminalService.js';
 import { ErrorCode } from '../../types.js';
 
 // Mock node-pty
-jest.mock('node-pty', () => {
+vi.mock('node-pty', () => {
   const mockPty = {
-    onData: jest.fn(),
-    onExit: jest.fn(),
-    write: jest.fn(),
-    kill: jest.fn(),
-    resize: jest.fn(),
+    onData: vi.fn(),
+    onExit: vi.fn(),
+    write: vi.fn(),
+    kill: vi.fn(),
+    resize: vi.fn(),
   };
 
   return {
-    spawn: jest.fn(() => mockPty),
+    spawn: vi.fn(() => mockPty),
   };
 });
 
 // Mock @xterm/headless
-jest.mock('@xterm/headless', () => {
-  return {
-    Terminal: jest.fn().mockImplementation(() => ({
-      write: jest.fn(),
-      resize: jest.fn(),
-      loadAddon: jest.fn(),
+vi.mock('@xterm/headless', () => {
+  const mod = {
+    Terminal: vi.fn().mockImplementation(() => ({
+      write: vi.fn(),
+      resize: vi.fn(),
+      loadAddon: vi.fn(),
     })),
   };
+  return { default: mod, ...mod };
 });
 
 // Mock @xterm/addon-serialize
-jest.mock('@xterm/addon-serialize', () => {
-  return {
-    SerializeAddon: jest.fn().mockImplementation(() => ({
-      serialize: jest.fn(() => 'serialized-buffer'),
+vi.mock('@xterm/addon-serialize', () => {
+  const mod = {
+    SerializeAddon: vi.fn().mockImplementation(() => ({
+      serialize: vi.fn(() => 'serialized-buffer'),
     })),
   };
+  return { default: mod, ...mod };
 });
 
 import * as pty from 'node-pty';
@@ -58,49 +61,49 @@ describe('TerminalService', () => {
 
   beforeEach(() => {
     // Reset all mocks
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     // Set up mock socket (with all SocketInterface properties)
     mockSocket = {
       id: 'test-socket',
       data: { uid: 'test-user-123', deviceId: 'test-device-123' },
-      emit: jest.fn(),
-      on: jest.fn(),
-      off: jest.fn(),
+      emit: vi.fn(),
+      on: vi.fn(),
+      off: vi.fn(),
       broadcast: {
-        emit: jest.fn(),
+        emit: vi.fn(),
       },
     };
 
     // Set up mock PTY process
     mockPtyProcess = {
-      onData: jest.fn((handler: Function) => {
+      onData: vi.fn((handler: Function) => {
         ptyDataHandler = handler;
       }),
-      onExit: jest.fn((handler: Function) => {
+      onExit: vi.fn((handler: Function) => {
         ptyExitHandler = handler;
       }),
-      write: jest.fn(),
-      kill: jest.fn(),
-      resize: jest.fn(),
+      write: vi.fn(),
+      kill: vi.fn(),
+      resize: vi.fn(),
     };
 
     // Set up mock xterm
     mockXterm = {
-      write: jest.fn(),
-      resize: jest.fn(),
-      loadAddon: jest.fn(),
+      write: vi.fn(),
+      resize: vi.fn(),
+      loadAddon: vi.fn(),
     };
 
     // Set up mock serialize addon
     mockSerializeAddon = {
-      serialize: jest.fn(() => 'serialized-buffer-content'),
+      serialize: vi.fn(() => 'serialized-buffer-content'),
     };
 
     // Configure mocks
-    (pty.spawn as jest.Mock).mockReturnValue(mockPtyProcess);
-    (XtermHeadless as unknown as jest.Mock).mockImplementation(() => mockXterm);
-    (SerializeAddon as unknown as jest.Mock).mockImplementation(() => mockSerializeAddon);
+    (pty.spawn as Mock).mockReturnValue(mockPtyProcess);
+    (XtermHeadless as unknown as Mock).mockImplementation(() => mockXterm);
+    (SerializeAddon as unknown as Mock).mockImplementation(() => mockSerializeAddon);
 
     // Create service
     service = new TerminalService(() => mockSocket, 10, 10000, '/test/root');
@@ -223,23 +226,23 @@ describe('TerminalService', () => {
       let dataHandler2: Function | null = null;
 
       const mockPty1 = {
-        onData: jest.fn((handler: Function) => { dataHandler1 = handler; }),
-        onExit: jest.fn(),
-        write: jest.fn(),
-        kill: jest.fn(),
-        resize: jest.fn(),
+        onData: vi.fn((handler: Function) => { dataHandler1 = handler; }),
+        onExit: vi.fn(),
+        write: vi.fn(),
+        kill: vi.fn(),
+        resize: vi.fn(),
       };
 
       const mockPty2 = {
-        onData: jest.fn((handler: Function) => { dataHandler2 = handler; }),
-        onExit: jest.fn(),
-        write: jest.fn(),
-        kill: jest.fn(),
-        resize: jest.fn(),
+        onData: vi.fn((handler: Function) => { dataHandler2 = handler; }),
+        onExit: vi.fn(),
+        write: vi.fn(),
+        kill: vi.fn(),
+        resize: vi.fn(),
       };
 
       // Return different mocks for each spawn call
-      (pty.spawn as jest.Mock)
+      (pty.spawn as Mock)
         .mockReturnValueOnce(mockPty1)
         .mockReturnValueOnce(mockPty2);
 

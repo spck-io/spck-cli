@@ -12,9 +12,9 @@
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "watch": "tsc --watch",
-    "test": "jest --forceExit",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix"
   },
@@ -46,7 +46,6 @@
     "yargs": "17.7.2"
   },
   "devDependencies": {
-    "@types/jest": "^29.5.0",
     "@types/jsonwebtoken": "^9.0.5",
     "@types/node": "^20.0.0",
     "@types/node-fetch": "^2.6.11",
@@ -55,9 +54,8 @@
     "@types/write-file-atomic": "^4.0.3",
     "@types/ws": "^8.5.10",
     "@types/yargs": "^17.0.32",
-    "jest": "^29.7.0",
-    "ts-jest": "^29.1.0",
     "ts-node": "^10.9.2",
+    "vitest": "^3.0.0",
     "typescript": "^5.3.0"
   },
   "engines": {

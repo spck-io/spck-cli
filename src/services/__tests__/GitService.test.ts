@@ -1,3 +1,4 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 /**
  * Tests for GitService
  */
@@ -46,11 +47,11 @@ describe('GitService', () => {
     mockSocket = {
       id: 'test-socket',
       data: { uid: 'test-user', deviceId: 'test-device' },
-      emit: jest.fn(),
-      on: jest.fn(),
-      off: jest.fn(),
+      emit: vi.fn(),
+      on: vi.fn(),
+      off: vi.fn(),
       broadcast: {
-        emit: jest.fn(),
+        emit: vi.fn(),
       },
     };
   });

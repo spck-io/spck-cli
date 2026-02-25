@@ -1,3 +1,4 @@
+import { describe, it, expect, beforeEach, afterEach, vi, type Mocked } from 'vitest';
 /**
  * Unit tests for credentials management
  */
@@ -18,24 +19,24 @@ import {
 import { StoredCredentials } from '../../types.js';
 
 // Mock modules
-jest.mock('fs');
-jest.mock('os');
+vi.mock('fs');
+vi.mock('os');
 
-const mockFs = fs as jest.Mocked<typeof fs>;
-const mockOs = os as jest.Mocked<typeof os>;
+const mockFs = fs as Mocked<typeof fs>;
+const mockOs = os as Mocked<typeof os>;
 
 describe('credentials', () => {
   const mockHomedir = '/mock/home';
   const mockCwd = '/mock/project';
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     mockOs.homedir.mockReturnValue(mockHomedir);
-    jest.spyOn(process, 'cwd').mockReturnValue(mockCwd);
+    vi.spyOn(process, 'cwd').mockReturnValue(mockCwd);
   });
 
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   describe('getCredentialsPath()', () => {

@@ -1,3 +1,4 @@
+import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
 /**
  * Unit tests for ProxySocketWrapper
  */
@@ -6,13 +7,13 @@ import { ProxySocketWrapper } from '../ProxySocketWrapper.js';
 
 describe('ProxySocketWrapper', () => {
   let wrapper: ProxySocketWrapper;
-  let mockSendFn: jest.Mock;
+  let mockSendFn: Mock;
   const connectionId = 'test-connection-123';
   const userId = 'test-user-456';
   const deviceId = 'test-device-789';
 
   beforeEach(() => {
-    mockSendFn = jest.fn();
+    mockSendFn = vi.fn();
     wrapper = new ProxySocketWrapper(connectionId, userId, mockSendFn, deviceId);
   });
 
@@ -71,7 +72,7 @@ describe('ProxySocketWrapper', () => {
 
   describe('on()', () => {
     it('should register event listener', () => {
-      const listener = jest.fn();
+      const listener = vi.fn();
 
       wrapper.on('rpc', listener);
 
@@ -82,8 +83,8 @@ describe('ProxySocketWrapper', () => {
     });
 
     it('should support multiple listeners for same event', () => {
-      const listener1 = jest.fn();
-      const listener2 = jest.fn();
+      const listener1 = vi.fn();
+      const listener2 = vi.fn();
 
       wrapper.on('rpc', listener1);
       wrapper.on('rpc', listener2);
@@ -95,7 +96,7 @@ describe('ProxySocketWrapper', () => {
     });
 
     it('should return this for chaining', () => {
-      const listener = jest.fn();
+      const listener = vi.fn();
       const result = wrapper.on('test', listener);
       expect(result).toBe(wrapper);
     });
@@ -103,8 +104,8 @@ describe('ProxySocketWrapper', () => {
 
   describe('off()', () => {
     it('should remove specific listener', () => {
-      const listener1 = jest.fn();
-      const listener2 = jest.fn();
+      const listener1 = vi.fn();
+      const listener2 = vi.fn();
 
       wrapper.on('rpc', listener1);
       wrapper.on('rpc', listener2);
@@ -117,8 +118,8 @@ describe('ProxySocketWrapper', () => {
     });
 
     it('should remove all listeners for event when no listener specified', () => {
-      const listener1 = jest.fn();
-      const listener2 = jest.fn();
+      const listener1 = vi.fn();
+      const listener2 = vi.fn();
 
       wrapper.on('rpc', listener1);
       wrapper.on('rpc', listener2);
@@ -131,7 +132,7 @@ describe('ProxySocketWrapper', () => {
     });
 
     it('should return this for chaining', () => {
-      const listener = jest.fn();
+      const listener = vi.fn();
       wrapper.on('test', listener);
       const result = wrapper.off('test', listener);
       expect(result).toBe(wrapper);
@@ -140,7 +141,7 @@ describe('ProxySocketWrapper', () => {
 
   describe('once()', () => {
     it('should trigger listener only once', () => {
-      const listener = jest.fn();
+      const listener = vi.fn();
 
       wrapper.once('rpc', listener);
 
@@ -152,7 +153,7 @@ describe('ProxySocketWrapper', () => {
     });
 
     it('should return this for chaining', () => {
-      const listener = jest.fn();
+      const listener = vi.fn();
       const result = wrapper.once('test', listener);
       expect(result).toBe(wrapper);
     });
@@ -160,8 +161,8 @@ describe('ProxySocketWrapper', () => {
 
   describe('removeAllListeners()', () => {
     it('should remove all listeners for specific event', () => {
-      const listener1 = jest.fn();
-      const listener2 = jest.fn();
+      const listener1 = vi.fn();
+      const listener2 = vi.fn();
 
       wrapper.on('event1', listener1);
       wrapper.on('event2', listener2);
@@ -176,8 +177,8 @@ describe('ProxySocketWrapper', () => {
     });
 
     it('should remove all listeners when no event specified', () => {
-      const listener1 = jest.fn();
-      const listener2 = jest.fn();
+      const listener1 = vi.fn();
+      const listener2 = vi.fn();
 
       wrapper.on('event1', listener1);
       wrapper.on('event2', listener2);
@@ -199,7 +200,7 @@ describe('ProxySocketWrapper', () => {
 
   describe('triggerEvent()', () => {
     it('should call all registered listeners with arguments', () => {
-      const listener = jest.fn();
+      const listener = vi.fn();
 
       wrapper.on('test', listener);
       wrapper.triggerEvent('test', 'arg1', 'arg2', 'arg3');
@@ -208,12 +209,12 @@ describe('ProxySocketWrapper', () => {
     });
 
     it('should handle errors in listeners gracefully', () => {
-      const errorListener = jest.fn(() => {
+      const errorListener = vi.fn(() => {
         throw new Error('Listener error');
       });
-      const goodListener = jest.fn();
+      const goodListener = vi.fn();
 
-      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation();
 
       wrapper.on('test', errorListener);
       wrapper.on('test', goodListener);

@@ -1,15 +1,16 @@
+import { describe, it, expect, beforeEach, vi, type Mock, type MockedClass } from 'vitest';
 /**
  * Tests for JSON-RPC Router
  */
 
 // Mock xterm headless modules BEFORE importing TerminalService
-jest.mock('@xterm/headless', () => ({
-  default: { Terminal: jest.fn() },
-  Terminal: jest.fn(),
+vi.mock('@xterm/headless', () => ({
+  default: { Terminal: vi.fn() },
+  Terminal: vi.fn(),
 }));
-jest.mock('@xterm/addon-serialize', () => ({
-  default: { SerializeAddon: jest.fn() },
-  SerializeAddon: jest.fn(),
+vi.mock('@xterm/addon-serialize', () => ({
+  default: { SerializeAddon: vi.fn() },
+  SerializeAddon: vi.fn(),
 }));
 
 import * as crypto from 'crypto';
@@ -50,19 +51,32 @@ function createRequest(method: string, params?: any, id?: number | string): JSON
 }
 
 // Mock services
-jest.mock('../../services/FilesystemService');
-jest.mock('../../services/GitService');
-jest.mock('../../services/TerminalService');
+vi.mock('../../services/FilesystemService', () => {
+  const MockFS = vi.fn();
+  MockFS.prototype.handle = vi.fn();
+  return { FilesystemService: MockFS };
+});
+vi.mock('../../services/GitService', () => {
+  const MockGit = vi.fn();
+  MockGit.prototype.handle = vi.fn();
+  return { GitService: MockGit };
+});
+vi.mock('../../services/TerminalService', () => {
+  const MockTerm = vi.fn();
+  MockTerm.prototype.handle = vi.fn();
+  MockTerm.prototype.cleanup = vi.fn();
+  return { TerminalService: MockTerm };
+});
 
-const MockFilesystemService = FilesystemService as jest.MockedClass<typeof FilesystemService>;
-const MockGitService = GitService as jest.MockedClass<typeof GitService>;
-const MockTerminalService = TerminalService as jest.MockedClass<typeof TerminalService>;
+const MockFilesystemService = FilesystemService as MockedClass<typeof FilesystemService>;
+const MockGitService = GitService as MockedClass<typeof GitService>;
+const MockTerminalService = TerminalService as MockedClass<typeof TerminalService>;
 
 describe('RPCRouter', () => {
   let mockSocket: any;
-  let mockFsHandle: jest.Mock;
-  let mockGitHandle: jest.Mock;
-  let mockTerminalHandle: jest.Mock;
+  let mockFsHandle: Mock;
+  let mockGitHandle: Mock;
+  let mockTerminalHandle: Mock;
 
   beforeEach(() => {
     mockSocket = {
@@ -70,25 +84,25 @@ describe('RPCRouter', () => {
       data: {
         uid: 'test-user-123',
       },
-      emit: jest.fn(),
-      on: jest.fn(),
-      off: jest.fn(),
+      emit: vi.fn(),
+      on: vi.fn(),
+      off: vi.fn(),
       broadcast: {
-        emit: jest.fn(),
+        emit: vi.fn(),
       },
     };
 
     // Clear all mocks
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     // Clear router state between tests
     (RPCRouter as any).terminalServices = new Map();
     (RPCRouter as any).currentSockets = new Map();
 
     // Set up default mock implementations
-    mockFsHandle = jest.fn().mockResolvedValue({ success: true });
-    mockGitHandle = jest.fn().mockResolvedValue({ success: true });
-    mockTerminalHandle = jest.fn().mockResolvedValue('term-123');
+    mockFsHandle = vi.fn().mockResolvedValue({ success: true });
+    mockGitHandle = vi.fn().mockResolvedValue({ success: true });
+    mockTerminalHandle = vi.fn().mockResolvedValue('term-123');
 
     // Mock the service prototypes
     MockFilesystemService.prototype.handle = mockFsHandle;
@@ -96,7 +110,7 @@ describe('RPCRouter', () => {
 
     // Create mock instance for terminal service that will be returned by constructor
     // Use a single tracked cleanup function across all instances
-    const mockCleanupFn = jest.fn();
+    const mockCleanupFn = vi.fn();
     MockTerminalService.mockImplementation(() => ({
       handle: mockTerminalHandle,
       cleanup: mockCleanupFn,
@@ -296,7 +310,7 @@ describe('RPCRouter', () => {
   describe('Terminal Service Cleanup', () => {
     it('should cleanup terminal service on disconnect', async () => {
       // Setup a mock cleanup function that will be tracked
-      const mockCleanup = jest.fn();
+      const mockCleanup = vi.fn();
 
       // Create a new mock instance with cleanup
       const mockServiceWithCleanup = {

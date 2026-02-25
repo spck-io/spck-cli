@@ -14,7 +14,7 @@
     "declarationMap": true,
     "sourceMap": true,
     "moduleResolution": "node",
-    "types": ["jest"]
+    "types": []
   },
   "include": ["src/**/*"],
   "exclude": [

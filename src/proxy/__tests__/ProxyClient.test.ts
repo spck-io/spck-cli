@@ -1,3 +1,4 @@
+import { describe, it, expect, beforeEach, vi, type Mock, type Mocked } from 'vitest';
 /**
  * Tests for ProxyClient security - Handshake protocol and HMAC verification
  *
@@ -11,49 +12,51 @@ import * as crypto from 'crypto';
 import { ErrorCode } from '../../types.js';
 
 // Mock dependencies
-jest.mock('socket.io-client', () => ({
-  io: jest.fn(() => mockSocket),
+vi.mock('socket.io-client', () => ({
+  io: vi.fn(() => mockSocket),
 }));
 
-jest.mock('qrcode-terminal', () => ({
-  generate: jest.fn(),
+vi.mock('qrcode-terminal', () => ({
+  default: { generate: vi.fn() },
+  generate: vi.fn(),
 }));
 
-jest.mock('../../connection/auth.js', () => ({
-  verifyFirebaseToken: jest.fn(),
+vi.mock('../../connection/auth.js', () => ({
+  verifyFirebaseToken: vi.fn(),
 }));
 
-jest.mock('../../config/credentials.js', () => ({
-  saveConnectionSettings: jest.fn(),
-  loadConnectionSettings: jest.fn(),
-  isServerTokenExpired: jest.fn(),
+vi.mock('../../config/credentials.js', () => ({
+  saveConnectionSettings: vi.fn(),
+  loadConnectionSettings: vi.fn(),
+  isServerTokenExpired: vi.fn(),
 }));
 
-jest.mock('../../rpc/router.js', () => ({
+vi.mock('../../rpc/router.js', () => ({
   RPCRouter: {
-    initialize: jest.fn(),
-    route: jest.fn(),
-    cleanup: jest.fn(),
+    initialize: vi.fn(),
+    route: vi.fn(),
+    cleanup: vi.fn(),
   },
 }));
 
-jest.mock('../handshake-validation.js', () => ({
-  validateHandshakeTimestamp: jest.fn(() => ({ valid: true })),
+vi.mock('../handshake-validation.js', () => ({
+  validateHandshakeTimestamp: vi.fn(() => ({ valid: true })),
 }));
 
-jest.mock('../../connection/hmac.js', () => ({
-  requireValidHMAC: jest.fn(),
-  validateHMAC: jest.fn(() => true),
+vi.mock('../../connection/hmac.js', () => ({
+  requireValidHMAC: vi.fn(),
+  validateHMAC: vi.fn(() => true),
 }));
 
 import { ProxyClient } from '../ProxyClient.js';
 import { requireValidHMAC } from '../../connection/hmac.js';
 import { RPCRouter } from '../../rpc/router.js';
 import { validateHandshakeTimestamp } from '../handshake-validation.js';
+import { io } from 'socket.io-client';
 
-const mockRequireValidHMAC = requireValidHMAC as jest.Mock;
-const mockRPCRouter = RPCRouter as jest.Mocked<typeof RPCRouter>;
-const mockValidateHandshakeTimestamp = validateHandshakeTimestamp as jest.Mock;
+const mockRequireValidHMAC = requireValidHMAC as Mock;
+const mockRPCRouter = RPCRouter as Mocked<typeof RPCRouter>;
+const mockValidateHandshakeTimestamp = validateHandshakeTimestamp as Mock;
 
 // Shared mock socket that all tests use
 let mockSocket: any;
@@ -121,28 +124,27 @@ describe('ProxyClient Security', () => {
   };
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     eventHandlers = {};
 
     // Create fresh mock socket for each test
     mockSocket = {
-      on: jest.fn((event: string, handler: Function) => {
+      on: vi.fn((event: string, handler: Function) => {
         if (!eventHandlers[event]) eventHandlers[event] = [];
         eventHandlers[event].push(handler);
       }),
-      once: jest.fn((event: string, handler: Function) => {
+      once: vi.fn((event: string, handler: Function) => {
         if (!eventHandlers[event]) eventHandlers[event] = [];
         eventHandlers[event].push(handler);
       }),
-      off: jest.fn(),
-      emit: jest.fn(),
-      disconnect: jest.fn(),
+      off: vi.fn(),
+      emit: vi.fn(),
+      disconnect: vi.fn(),
       id: 'mock-socket-id',
     };
 
     // Update the io mock to return our fresh socket
-    const { io } = require('socket.io-client');
-    io.mockReturnValue(mockSocket);
+    (io as Mock).mockReturnValue(mockSocket);
 
     mockValidateHandshakeTimestamp.mockReturnValue({ valid: true });
     mockRequireValidHMAC.mockImplementation(() => {});

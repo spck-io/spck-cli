@@ -1,3 +1,4 @@
+import { describe, it, expect, beforeEach, afterEach, vi, type Mocked } from 'vitest';
 /**
  * Unit tests for config management
  */
@@ -13,20 +14,20 @@ import {
 import { ServerConfig } from '../../types.js';
 
 // Mock fs module
-jest.mock('fs');
+vi.mock('fs');
 
-const mockFs = fs as jest.Mocked<typeof fs>;
+const mockFs = fs as Mocked<typeof fs>;
 
 describe('config', () => {
   const mockCwd = '/mock/project';
 
   beforeEach(() => {
-    jest.clearAllMocks();
-    jest.spyOn(process, 'cwd').mockReturnValue(mockCwd);
+    vi.clearAllMocks();
+    vi.spyOn(process, 'cwd').mockReturnValue(mockCwd);
   });
 
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   describe('loadConfig()', () => {
