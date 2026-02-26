@@ -28,6 +28,10 @@
     "git",
     "terminal"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/spck-io/spck-cli"
+  },
   "author": "Spck Editor",
   "license": "MIT",
   "dependencies": {
