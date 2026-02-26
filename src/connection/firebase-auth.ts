@@ -443,7 +443,8 @@ export async function refreshFirebaseToken(storedCredentials: StoredCredentials)
     // Save only refreshToken + userId to disk (not the ephemeral ID token)
     saveCredentials({
       refreshToken: fullCredentials.refreshToken,
-      userId: fullCredentials.userId
+      userId: fullCredentials.userId,
+      proxyServerUrl: storedCredentials.proxyServerUrl
     });
 
     return fullCredentials;

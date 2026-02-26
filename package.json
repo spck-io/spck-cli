@@ -16,7 +16,9 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "oxlint",
-    "lint:fix": "oxlint --fix"
+    "lint:fix": "oxlint --fix",
+    "prepublishOnly": "npm run lint && npm test",
+    "prepare": "npm run build"
   },
   "keywords": [
     "spck",
