@@ -89,7 +89,7 @@ export class FilesystemService {
           logFsRead(method, params, deviceId, true, undefined, { count: result.length });
           return result;
         case 'bulkExists':
-          result = await this.bulkExists(params.path!, params);
+          result = await this.bulkExists(safePath!, params);
           logFsRead(method, params, deviceId, true, undefined, { count: result.length });
           return result;
         case 'lstat':
@@ -219,17 +219,25 @@ export class FilesystemService {
       throw createRPCError(ErrorCode.INVALID_PARAMS, 'paths must be an array');
     }
 
+    // basePath is already validated/resolved by validatePath in handle()
+    const realRoot = await this.getRealRootPath();
+
     // Validate and check all paths in parallel
     // Return 1/0 instead of true/false for bandwidth efficiency
     const results = await Promise.all(
       paths.map(async (relativePath: string) => {
         try {
-          // Combine base path with relative path
-          const combinedPath = path.join(basePath, relativePath);
-          // Validate the combined path for security
-          const validatedPath = await this.validatePath(combinedPath);
-          // Check if the validated path exists
-          await fs.access(validatedPath);
+          // Normalize relative path and prevent traversal
+          const normalized = path.normalize(relativePath);
+          if (normalized.includes('..')) return 0;
+
+          // Resolve against validated base path
+          const absolute = path.resolve(basePath, normalized);
+
+          // Ensure still within root
+          if (!absolute.startsWith(realRoot)) return 0;
+
+          await fs.access(absolute);
           return 1;
         } catch {
           return 0;

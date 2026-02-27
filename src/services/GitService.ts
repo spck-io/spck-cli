@@ -7,6 +7,7 @@ import * as path from 'path';
 import * as http from 'http';
 import * as fs from 'fs';
 import * as os from 'os';
+import * as crypto from 'crypto';
 import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types.js';
 import { logGitRead, logGitWrite } from '../utils/logger.js';
 
@@ -556,7 +557,7 @@ export class GitService {
     const args = [
       'log',
       '--format=%H%n%T%n%P%n%an%n%ae%n%at%n%cn%n%ce%n%ct%n%B%n--END-COMMIT--',
-      params.ref || 'HEAD',
+      params.ref ? this.sanitizeRef(params.ref) : 'HEAD',
     ];
 
     if (params.depth) {
@@ -850,7 +851,7 @@ export class GitService {
    * Reset file(s) in index to match ref (git reset <ref> -- <filepath(s)>)
    */
   private async resetIndex(dir: string, params: any, socket: AuthenticatedSocket): Promise<{ success: boolean }> {
-    const ref = params.ref || 'HEAD';
+    const ref = params.ref ? this.sanitizeRef(params.ref) : 'HEAD';
 
     // Handle both single filepath and multiple filepaths
     if (params.filepaths && Array.isArray(params.filepaths)) {
@@ -908,9 +909,52 @@ export class GitService {
   }
 
   /**
+   * Allowed git config key patterns.
+   * Only these keys can be read or written via the RPC interface
+   * to prevent injection of dangerous config like core.sshCommand.
+   */
+  private static ALLOWED_CONFIG_KEYS = new Set([
+    'user.name',
+    'user.email',
+    'push.default',
+    'pull.rebase',
+    'pull.ff',
+    'init.defaultBranch',
+    'merge.ff',
+  ]);
+
+  /**
+   * Allowed git config key prefixes for dynamic keys (e.g. remote.origin.url)
+   */
+  private static ALLOWED_CONFIG_PREFIXES = [
+    'remote.',
+    'branch.',
+    'core.',
+  ];
+
+  /**
+   * Validate that a git config key is allowed
+   */
+  private validateConfigKey(key: string): void {
+    if (GitService.ALLOWED_CONFIG_KEYS.has(key)) {
+      return;
+    }
+    for (const prefix of GitService.ALLOWED_CONFIG_PREFIXES) {
+      if (key.startsWith(prefix)) {
+        return;
+      }
+    }
+    throw createRPCError(
+      ErrorCode.INVALID_PARAMS,
+      `Git config key not allowed: ${key}`
+    );
+  }
+
+  /**
    * Get config value
    */
   private async getConfig(dir: string, params: any): Promise<any> {
+    this.validateConfigKey(params.path);
     try {
       const { stdout } = await this.execGit(['config', '--get', params.path], { cwd: dir });
       return { value: stdout.trim() };
@@ -928,6 +972,7 @@ export class GitService {
    */
   private async setConfig(dir: string, params: any): Promise<{ success: boolean }> {
     const { path, value, append } = params;
+    this.validateConfigKey(path);
 
     if (value === undefined) {
       // Delete the config entry
@@ -986,13 +1031,32 @@ export class GitService {
   }
 
   /**
+   * Validate a git ref (branch name, tag, or commit hash)
+   * Rejects refs that could be interpreted as flags
+   */
+  private sanitizeRef(ref: string): string {
+    if (!ref || typeof ref !== 'string') {
+      throw createRPCError(ErrorCode.INVALID_PARAMS, 'Invalid ref: must be a non-empty string');
+    }
+    if (ref.startsWith('-')) {
+      throw createRPCError(ErrorCode.INVALID_PARAMS, 'Invalid ref: cannot start with dash');
+    }
+    if (/[\x00-\x1F\x7F]/.test(ref)) {
+      throw createRPCError(ErrorCode.INVALID_PARAMS, 'Invalid ref: contains control characters');
+    }
+    return ref;
+  }
+
+  /**
    * Checkout branch or commit
    */
   private async checkout(dir: string, params: any): Promise<{ success: boolean }> {
-    const args = ['checkout', params.ref];
+    const ref = this.sanitizeRef(params.ref);
+    const args = ['checkout'];
     if (params.force) {
       args.push('--force');
     }
+    args.push(ref);
 
     await this.execGit(args, { cwd: dir });
 
@@ -1319,7 +1383,7 @@ export class GitService {
     args.push(remote);
 
     if (params.ref) {
-      args.push(params.ref);
+      args.push(this.sanitizeRef(params.ref));
     }
 
     const env: Record<string, string> = {};
@@ -1388,10 +1452,19 @@ export class GitService {
    * Clone a repository
    */
   private async clone(dir: string, params: any, socket: AuthenticatedSocket): Promise<{ success: boolean }> {
-    const args = ['clone', params.url, '.'];
+    // Validate clone URL - reject dangerous transports
+    const url = params.url;
+    if (!url || typeof url !== 'string') {
+      throw createRPCError(ErrorCode.INVALID_PARAMS, 'Clone URL is required');
+    }
+    if (/^ext::/i.test(url)) {
+      throw createRPCError(ErrorCode.INVALID_PARAMS, 'ext:: transport is not allowed');
+    }
+
+    const args = ['clone', url, '.'];
 
     if (params.ref) {
-      args.push('--branch', params.ref);
+      args.push('--branch', this.sanitizeRef(params.ref));
     }
 
     if (params.depth) {
@@ -1465,12 +1538,12 @@ export class GitService {
         if (useCurl) {
           // Use curl directly — available on macOS, most Linux, and newer Windows
           if (isWindows) {
-            scriptPath = path.join(os.tmpdir(), `spck-askpass-${process.pid}-${Date.now()}.cmd`);
+            scriptPath = path.join(os.tmpdir(), `spck-askpass-${crypto.randomBytes(16).toString('hex')}.cmd`);
             fs.writeFileSync(scriptPath,
               `@curl -s --max-time 0 -X POST -d "%~1" "http://127.0.0.1:${port}/askpass" 2>nul\r\n`
             );
           } else {
-            scriptPath = path.join(os.tmpdir(), `spck-askpass-${process.pid}-${Date.now()}.sh`);
+            scriptPath = path.join(os.tmpdir(), `spck-askpass-${crypto.randomBytes(16).toString('hex')}.sh`);
             fs.writeFileSync(scriptPath,
               `#!/bin/sh\ncurl -s --max-time 0 -X POST -d "$1" "http://127.0.0.1:${port}/askpass" 2>/dev/null\n`,
               { mode: 0o700 }
@@ -1480,7 +1553,7 @@ export class GitService {
         } else {
           // Fallback to Node.js script (node is always available since we're running on it)
           const nodeExe = process.execPath;
-          const jsPath = path.join(os.tmpdir(), `spck-askpass-${process.pid}-${Date.now()}.js`);
+          const jsPath = path.join(os.tmpdir(), `spck-askpass-${crypto.randomBytes(16).toString('hex')}.js`);
           fs.writeFileSync(jsPath, [
             `const h=require('http'),d=process.argv[2]||'';`,
             `const r=h.request({hostname:'127.0.0.1',port:${port},path:'/askpass',method:'POST',` +
@@ -1491,12 +1564,12 @@ export class GitService {
           filesToClean.push(jsPath);
 
           if (isWindows) {
-            scriptPath = path.join(os.tmpdir(), `spck-askpass-${process.pid}-${Date.now()}.cmd`);
+            scriptPath = path.join(os.tmpdir(), `spck-askpass-${crypto.randomBytes(16).toString('hex')}.cmd`);
             fs.writeFileSync(scriptPath,
               `@"${nodeExe}" "${jsPath}" %1\r\n`
             );
           } else {
-            scriptPath = path.join(os.tmpdir(), `spck-askpass-${process.pid}-${Date.now()}.sh`);
+            scriptPath = path.join(os.tmpdir(), `spck-askpass-${crypto.randomBytes(16).toString('hex')}.sh`);
             fs.writeFileSync(scriptPath,
               `#!/bin/sh\n"${nodeExe}" "${jsPath}" "$1"\n`,
               { mode: 0o700 }

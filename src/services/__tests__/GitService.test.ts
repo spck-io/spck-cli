@@ -720,7 +720,7 @@ describe('GitService', () => {
     it('should return undefined for non-existent config key', async () => {
       const result = await service.handle(
         'getConfig',
-        { dir: '/repo', path: 'nonexistent.key' },
+        { dir: '/repo', path: 'core.pager' },
         mockSocket
       );
 
@@ -761,17 +761,17 @@ describe('GitService', () => {
     });
 
     it('should unset config value when value is undefined', async () => {
-      await execGit(['config', 'test.key', 'testvalue'], repoPath);
+      await execGit(['config', 'core.pager', 'less'], repoPath);
 
       await service.handle(
         'setConfig',
-        { dir: '/repo', path: 'test.key', value: undefined },
+        { dir: '/repo', path: 'core.pager', value: undefined },
         mockSocket
       );
 
       const result = await service.handle(
         'getConfig',
-        { dir: '/repo', path: 'test.key' },
+        { dir: '/repo', path: 'core.pager' },
         mockSocket
       );
 
@@ -779,16 +779,16 @@ describe('GitService', () => {
     });
 
     it('should append config value when append is true', async () => {
-      await execGit(['config', 'test.multi', 'value1'], repoPath);
+      await execGit(['config', 'remote.origin.fetch', 'value1'], repoPath);
 
       await service.handle(
         'setConfig',
-        { dir: '/repo', path: 'test.multi', value: 'value2', append: true },
+        { dir: '/repo', path: 'remote.origin.fetch', value: 'value2', append: true },
         mockSocket
       );
 
       // Get all values
-      const result = await execGit(['config', '--get-all', 'test.multi'], repoPath);
+      const result = await execGit(['config', '--get-all', 'remote.origin.fetch'], repoPath);
       expect(result).toContain('value1');
       expect(result).toContain('value2');
     });
@@ -796,7 +796,7 @@ describe('GitService', () => {
     it('should handle unsetting non-existent key gracefully', async () => {
       const result = await service.handle(
         'setConfig',
-        { dir: '/repo', path: 'nonexistent.key', value: undefined },
+        { dir: '/repo', path: 'core.pager', value: undefined },
         mockSocket
       );
 
@@ -1429,6 +1429,124 @@ describe('GitService', () => {
         code: ErrorCode.INVALID_PARAMS,
         message: 'filepaths must be an array'
       });
+    });
+
+    it('should respect .gitignore inside submodules', async () => {
+      // Create a submodule with its own .gitignore
+      const submodulePath = path.join(testRoot, 'mylib');
+      await fs.mkdir(submodulePath);
+      await execGit(['init'], submodulePath);
+      await execGit(['config', 'user.email', 'test@example.com'], submodulePath);
+      await execGit(['config', 'user.name', 'Test User'], submodulePath);
+      await fs.writeFile(path.join(submodulePath, '.gitignore'), 'dist/\n*.tmp\n');
+      await fs.writeFile(path.join(submodulePath, 'index.js'), 'module.exports = {}');
+      await fs.mkdir(path.join(submodulePath, 'dist'), { recursive: true });
+      await fs.writeFile(path.join(submodulePath, 'dist', 'bundle.js'), 'bundled');
+      await fs.writeFile(path.join(submodulePath, 'cache.tmp'), 'temp');
+      await execGit(['add', '.'], submodulePath);
+      await execGit(['commit', '-m', 'init submodule'], submodulePath);
+
+      // Add submodule to main repo (allow file transport for local test)
+      await execGit(['-c', 'protocol.file.allow=always', 'submodule', 'add', submodulePath, 'mylib'], repoPath);
+      await execGit(['commit', '-m', 'add submodule'], repoPath);
+
+      // Create submodule-specific ignored files in the working tree
+      await fs.mkdir(path.join(repoPath, 'mylib', 'dist'), { recursive: true });
+      await fs.writeFile(path.join(repoPath, 'mylib', 'dist', 'bundle.js'), 'bundled');
+      await fs.writeFile(path.join(repoPath, 'mylib', 'cache.tmp'), 'temp');
+
+      const result = await service.handle(
+        'bulkIsIgnored',
+        {
+          dir: '/repo',
+          filepaths: [
+            'mylib/index.js',        // not ignored by submodule's .gitignore
+            'mylib/dist/bundle.js',  // ignored by submodule's .gitignore (dist/)
+            'mylib/cache.tmp',       // ignored by submodule's .gitignore (*.tmp)
+            'file1.js',              // not ignored by main repo
+            'file2.log',             // ignored by main repo's .gitignore (*.log)
+          ]
+        },
+        mockSocket
+      );
+
+      expect(result).toEqual([0, 1, 1, 0, 1]);
+    });
+
+    it('should respect .gitignore inside submodules for paths not ignored by parent', async () => {
+      // Create a submodule with its own .gitignore that differs from parent
+      const submodulePath = path.join(testRoot, 'mylib');
+      await fs.mkdir(submodulePath);
+      await execGit(['init'], submodulePath);
+      await execGit(['config', 'user.email', 'test@example.com'], submodulePath);
+      await execGit(['config', 'user.name', 'Test User'], submodulePath);
+      // Submodule ignores "vendor/" which the parent does NOT ignore
+      await fs.writeFile(path.join(submodulePath, '.gitignore'), 'vendor/\n');
+      await fs.writeFile(path.join(submodulePath, 'lib.js'), 'code');
+      await execGit(['add', '.'], submodulePath);
+      await execGit(['commit', '-m', 'init submodule'], submodulePath);
+
+      // Add submodule to main repo
+      await execGit(['-c', 'protocol.file.allow=always', 'submodule', 'add', submodulePath, 'mylib'], repoPath);
+      await execGit(['commit', '-m', 'add submodule'], repoPath);
+
+      // Create vendor dir inside submodule in working tree
+      await fs.mkdir(path.join(repoPath, 'mylib', 'vendor'), { recursive: true });
+      await fs.writeFile(path.join(repoPath, 'mylib', 'vendor', 'dep.js'), 'dependency');
+
+      const result = await service.handle(
+        'bulkIsIgnored',
+        {
+          dir: '/repo',
+          filepaths: [
+            'mylib/lib.js',           // not ignored
+            'mylib/vendor/dep.js',    // ignored by submodule's .gitignore (vendor/)
+          ]
+        },
+        mockSocket
+      );
+
+      // vendor/dep.js should be ignored by the submodule's .gitignore, NOT the parent's
+      expect(result).toEqual([0, 1]);
+    });
+
+    it('should respect .gitignore when gitRoot targets a submodule', async () => {
+      // Create a submodule with its own .gitignore
+      const submodulePath = path.join(testRoot, 'mylib');
+      await fs.mkdir(submodulePath);
+      await execGit(['init'], submodulePath);
+      await execGit(['config', 'user.email', 'test@example.com'], submodulePath);
+      await execGit(['config', 'user.name', 'Test User'], submodulePath);
+      await fs.writeFile(path.join(submodulePath, '.gitignore'), 'coverage/\n*.bak\n');
+      await fs.writeFile(path.join(submodulePath, 'src.js'), 'code');
+      await execGit(['add', '.'], submodulePath);
+      await execGit(['commit', '-m', 'init submodule'], submodulePath);
+
+      // Add submodule to main repo
+      await execGit(['-c', 'protocol.file.allow=always', 'submodule', 'add', submodulePath, 'mylib'], repoPath);
+      await execGit(['commit', '-m', 'add submodule'], repoPath);
+
+      // Create ignored content in working tree
+      await fs.mkdir(path.join(repoPath, 'mylib', 'coverage'), { recursive: true });
+      await fs.writeFile(path.join(repoPath, 'mylib', 'coverage', 'report.html'), 'report');
+      await fs.writeFile(path.join(repoPath, 'mylib', 'old.bak'), 'backup');
+
+      // Call with gitRoot pointing to submodule, filepaths relative to submodule
+      const result = await service.handle(
+        'bulkIsIgnored',
+        {
+          dir: '/repo',
+          gitRoot: 'mylib',
+          filepaths: [
+            'src.js',              // not ignored
+            'coverage/report.html', // ignored (coverage/)
+            'old.bak',             // ignored (*.bak)
+          ]
+        },
+        mockSocket
+      );
+
+      expect(result).toEqual([0, 1, 1]);
     });
   });
 });
