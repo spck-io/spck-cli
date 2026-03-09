@@ -193,7 +193,7 @@ export async function startProxyClient(
       firebaseToken: credentials.firebaseToken,
       userId: credentials.userId,
       tools,
-      existingConnectionSettings: needsReconnect ? undefined : connectionSettings,
+      existingConnectionSettings: connectionSettings || undefined,
       proxyServerUrl,
     });
 

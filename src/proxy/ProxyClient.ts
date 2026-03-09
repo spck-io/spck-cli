@@ -145,8 +145,7 @@ export class ProxyClient {
         this.socket = null;
       }
 
-      // Clear connection settings since we're reconnecting
-      this.connectionSettings = null;
+      // Preserve connection settings for secret reuse, clear active connections
       this.activeConnections.clear();
 
       // Reconnect with new token

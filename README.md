@@ -115,7 +115,8 @@ If the QR code doesn't work or you prefer manual entry:
 1. Open **Spck Editor** mobile app
 2. Tap **Projects** → **New Project** → **Link Remote Server**
 3. Enter the **Client ID** and **Secret** shown below the QR code in your terminal
-4. Tap **Connect**
+4. Select a Relay server, must match what is shown in the terminal.
+5. Tap **Connect**
 
 Once connected, you can browse and edit your local files from the mobile app!
 
@@ -272,9 +273,6 @@ All communication between the CLI and Spck Editor mobile app is encrypted:
 
 - **WSS (WebSocket Secure)**: All WebSocket connections use TLS/SSL encryption
 - **HTTPS**: All HTTP requests to the proxy server use HTTPS
-- **End-to-End Protection**: Data is encrypted in transit from your computer to the mobile app
-
-This ensures that even if network traffic is intercepted, your files and credentials cannot be read by third parties.
 
 ### Request Signing and Authentication
 
