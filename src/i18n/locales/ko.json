@@ -171,6 +171,8 @@
     "firebaseInvalidHint2": "재인증하세요: spck auth login",
     "firebaseTokenExpiring": "Firebase 토큰이 만료되었습니다. 갱신을 시도하는 중...",
     "tokenRefreshFailed": "토큰 갱신에 실패했습니다: {{message}}",
+    "dailyLimitExceeded": "일일 30분 무료 사용 한도에 도달했습니다.",
+    "dailyLimitExceededHint": "무제한 CLI 액세스를 위해 Supporter 또는 Gold로 업그레이드하세요: https://spck.io/subscription",
     "defaultError": "구독 확인 중 문제가 발생했습니다."
   },
   "errors": {

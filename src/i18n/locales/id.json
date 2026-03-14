@@ -171,6 +171,8 @@
     "firebaseInvalidHint2": "Silakan autentikasi ulang: spck auth login",
     "firebaseTokenExpiring": "Token Firebase kedaluwarsa. Mencoba memperbarui...",
     "tokenRefreshFailed": "Pembaruan token gagal: {{message}}",
+    "dailyLimitExceeded": "Batas harian gratis 30 menit telah tercapai.",
+    "dailyLimitExceededHint": "Upgrade ke Supporter atau Gold untuk akses CLI tanpa batas: https://spck.io/subscription",
     "defaultError": "Terjadi masalah saat memverifikasi langganan Anda."
   },
   "errors": {

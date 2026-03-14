@@ -178,6 +178,8 @@
     "firebaseInvalidHint2": "Please re-authenticate: spck auth login",
     "firebaseTokenExpiring": "Firebase token expired. Attempting to refresh...",
     "tokenRefreshFailed": "Token refresh failed: {{message}}",
+    "dailyLimitExceeded": "Daily free tier limit of 30 minutes has been reached.",
+    "dailyLimitExceededHint": "Upgrade to Supporter or Gold for unlimited CLI access: https://spck.io/subscription",
     "defaultError": "A problem occurred when verifying your subscription."
   },
   "errors": {

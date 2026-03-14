@@ -171,6 +171,8 @@
     "firebaseInvalidHint2": "请重新认证: spck auth login",
     "firebaseTokenExpiring": "Firebase 令牌已过期。正在尝试刷新...",
     "tokenRefreshFailed": "令牌刷新失败: {{message}}",
+    "dailyLimitExceeded": "已达到每日30分钟的免费使用限额。",
+    "dailyLimitExceededHint": "升级到Supporter或Gold以获得无限CLI访问: https://spck.io/subscription",
     "defaultError": "验证订阅时出现问题。"
   },
   "errors": {

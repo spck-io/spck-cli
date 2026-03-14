@@ -252,6 +252,7 @@ export interface ProxyClientMessageEvent {
 
 export interface ProxyClientDisconnectedEvent {
   connectionId: string;
+  reason?: string;
 }
 
 export interface ProxyErrorEvent {

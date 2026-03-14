@@ -171,6 +171,8 @@
     "firebaseInvalidHint2": "再認証してください: spck auth login",
     "firebaseTokenExpiring": "Firebase トークンが期限切れです。更新を試みています...",
     "tokenRefreshFailed": "トークンの更新に失敗しました: {{message}}",
+    "dailyLimitExceeded": "1日30分の無料利用制限に達しました。",
+    "dailyLimitExceededHint": "無制限のCLIアクセスのためにSupporterまたはGoldにアップグレードしてください: https://spck.io/subscription",
     "defaultError": "サブスクリプションの確認中に問題が発生しました。"
   },
   "errors": {

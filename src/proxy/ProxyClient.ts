@@ -758,6 +758,11 @@ export class ProxyClient {
       connectionId: data.connectionId
     });
 
+    if (data.reason === 'daily_limit_exceeded') {
+      console.warn(`\n⚠️  ${t('proxyError.dailyLimitExceeded')}`);
+      console.warn(`${t('proxyError.dailyLimitExceededHint')}\n`);
+    }
+
     // Clean up connection tracking
     this.activeConnections.delete(data.connectionId);
   }
@@ -820,6 +825,11 @@ export class ProxyClient {
       case 'subscription_required':
         console.error(`\n⚠️  ${t('proxyError.subscriptionRequired')}`);
         console.error(`${t('proxyError.subscriptionRequiredHint')}\n`);
+        break;
+
+      case 'daily_limit_exceeded':
+        console.error(`\n⚠️  ${t('proxyError.dailyLimitExceeded')}`);
+        console.error(`${t('proxyError.dailyLimitExceededHint')}\n`);
         break;
 
       case 'max_connections_reached': {
