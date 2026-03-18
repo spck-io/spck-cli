@@ -425,7 +425,8 @@ export async function refreshFirebaseToken(storedCredentials: StoredCredentials)
     // Firebase returns: id_token, refresh_token, expires_in, token_type, user_id
     const newToken = data.id_token;
     const newRefreshToken = data.refresh_token;
-    const expiresIn = parseInt(data.expires_in, 10) || 3600; // Default 1 hour
+    const parsedExpiresIn = parseInt(data.expires_in, 10);
+    const expiresIn = isNaN(parsedExpiresIn) ? 3600 : parsedExpiresIn; // Default 1 hour
     const userId = data.user_id;
 
     if (!newToken) {
