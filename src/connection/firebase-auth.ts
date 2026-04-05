@@ -22,6 +22,21 @@ const AUTH_TIMEOUT = 10 * 60 * 1000; // 10 minutes
 const FIREBASE_AUTH_BASE_URL = 'https://spck.io/auth';
 const FIREBASE_API_BASE_URL = 'https://spck.io/api/auth';
 
+// Module-level references to allow aborting auth from outside (e.g., SIGINT handler)
+let _authAbortController: AbortController | null = null;
+let _authCallbackServer: http.Server | null = null;
+
+/**
+ * Abort any in-progress authentication (e.g., on SIGINT).
+ * Cancels the pending fetch and closes the local callback server.
+ */
+export function abortCurrentAuth(): void {
+  _authAbortController?.abort();
+  _authCallbackServer?.close();
+  _authAbortController = null;
+  _authCallbackServer = null;
+}
+
 /**
  * Find an available port for the local callback server
  */
@@ -164,6 +179,8 @@ export async function authenticateWithFirebase(): Promise<FirebaseCredentials> {
 
   // 6. Wait for authentication from either source (browser or manual)
   const abortController = new AbortController();
+  _authAbortController = abortController;
+  _authCallbackServer = callbackServer;
 
   const result = await new Promise<FirebaseCredentials>((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -352,8 +369,10 @@ export async function authenticateWithFirebase(): Promise<FirebaseCredentials> {
     });
   });
 
-  // 6. Close server
+  // 6. Close server and clear module-level references
   callbackServer.close();
+  _authAbortController = null;
+  _authCallbackServer = null;
 
   // 7. Save credentials
   saveCredentials(result);

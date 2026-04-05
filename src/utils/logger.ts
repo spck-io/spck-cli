@@ -158,6 +158,35 @@ function formatPath(p: string | undefined, maxLen: number = 50): string {
 }
 
 /**
+ * Format byte count as human-readable size string
+ */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Debounce state for browser proxy console output
+const BROWSER_PROXY_DEBOUNCE_MS = 1000;
+let _browserDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let _browserSuccessCount = 0;
+let _browserTotalBytes = 0;
+let _browserLastUid = '';
+
+function flushBrowserProxyLog(): void {
+  if (_browserSuccessCount === 0) return;
+  const timestamp = chalk.gray(formatTimeCompact());
+  const uidStr = chalk.gray(formatUid(_browserLastUid));
+  const sizeStr = chalk.gray(formatBytes(_browserTotalBytes));
+  const countStr = chalk.white(String(_browserSuccessCount));
+  console.log(`${timestamp} ${uidStr} ${chalk.green('✓')} ${chalk.blueBright('BROWSER')} ${countStr} files fetched (${sizeStr})`);
+  _browserSuccessCount = 0;
+  _browserTotalBytes = 0;
+  _browserLastUid = '';
+  _browserDebounceTimer = null;
+}
+
+/**
  * Log a filesystem read operation
  */
 export function logFsRead(
@@ -515,17 +544,19 @@ export function logBrowserProxy(
   metadata?: Record<string, any>
 ): void {
   const httpMethod = (params.method || 'GET').toUpperCase();
-  const displayUrl = formatPath(params.url, 60);
-  const timestamp = chalk.gray(formatTimeCompact());
-  const uidStr = chalk.gray(formatUid(uid));
-  const statusStr = metadata?.status ? ` ${chalk.gray(String(metadata.status))}` : '';
-  const sizeStr = metadata?.size ? ` ${chalk.gray(metadata.size + 'b')}` : '';
 
   if (success) {
-    const msg = `${timestamp} ${uidStr} ${chalk.green('✓')} ${chalk.blueBright('BROWSER')} ${chalk.white(httpMethod.padEnd(7))} ${chalk.gray(displayUrl)}${statusStr}${sizeStr}`;
-    console.log(msg);
     writeToFile(`[INFO] BROWSER PROXY ${httpMethod} ${params.url} uid=${uid} success=true status=${metadata?.status}`);
+    // Accumulate and debounce console output into a single summary line
+    _browserSuccessCount++;
+    _browserTotalBytes += metadata?.size ?? 0;
+    _browserLastUid = uid;
+    if (_browserDebounceTimer) clearTimeout(_browserDebounceTimer);
+    _browserDebounceTimer = setTimeout(flushBrowserProxyLog, BROWSER_PROXY_DEBOUNCE_MS);
   } else {
+    const displayUrl = formatPath(params.url, 60);
+    const timestamp = chalk.gray(formatTimeCompact());
+    const uidStr = chalk.gray(formatUid(uid));
     const errMsg = error?.message || String(error);
     const msg = `${timestamp} ${uidStr} ${chalk.red('✗')} ${chalk.blueBright('BROWSER')} ${chalk.white(httpMethod.padEnd(7))} ${chalk.gray(displayUrl)} ${chalk.red(errMsg)}`;
     console.log(msg);

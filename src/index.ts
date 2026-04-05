@@ -20,7 +20,7 @@ import {
   saveServerPreference,
 } from './config/credentials.js';
 import { fetchServerList, selectBestServer, displayServerPings, getDefaultServerList } from './config/server-selection.js';
-import { authenticateWithFirebase, getValidFirebaseToken } from './connection/firebase-auth.js';
+import { authenticateWithFirebase, getValidFirebaseToken, abortCurrentAuth } from './connection/firebase-auth.js';
 import { runSetup } from './setup/wizard.js';
 import { detectTools, displayFeatureSummary } from './utils/tool-detection.js';
 import { ensureProjectDir } from './utils/project-dir.js';
@@ -387,6 +387,9 @@ export async function showAccountInfo(): Promise<void> {
 function setupGracefulShutdown(): void {
   const shutdown = async (signal: string) => {
     console.log(`\n\n${t('setup.received', { signal })}`);
+
+    // Abort any pending authentication (cancels in-flight fetch + closes callback server)
+    abortCurrentAuth();
 
     if (proxyClient) {
       try {
