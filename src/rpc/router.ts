@@ -7,6 +7,7 @@ import { FilesystemService } from '../services/FilesystemService.js';
 import { GitService } from '../services/GitService.js';
 import { TerminalService } from '../services/TerminalService.js';
 import { SearchService } from '../services/SearchService.js';
+import { BrowserProxyService } from '../services/BrowserProxyService.js';
 
 export class RPCRouter {
   private static filesystemService: FilesystemService;
@@ -14,6 +15,7 @@ export class RPCRouter {
   private static searchService: SearchService;
   private static terminalServices: Map<string, TerminalService> = new Map();
   private static currentSockets: Map<string, AuthenticatedSocket> = new Map();
+  private static browserProxyService: BrowserProxyService;
   private static rootPath: string;
   private static tools: ToolDetectionResult;
 
@@ -25,6 +27,7 @@ export class RPCRouter {
     this.tools = tools;
     this.filesystemService = new FilesystemService(rootPath, config.filesystem);
     this.gitService = new GitService(rootPath);
+    this.browserProxyService = new BrowserProxyService();
 
     // Parse maxFileSize from config
     const maxFileSizeBytes = this.parseFileSize(config.filesystem.maxFileSize);
@@ -86,8 +89,10 @@ export class RPCRouter {
   ): Promise<any> {
     const { method, params } = message;
 
-    // Parse method prefix
-    const [service, methodName] = method.split('.');
+    // Parse method prefix (split on first dot only so sub-namespaces like browser.proxy.request are preserved)
+    const dotIndex = method.indexOf('.');
+    const service = dotIndex !== -1 ? method.slice(0, dotIndex) : method;
+    const methodName = dotIndex !== -1 ? method.slice(dotIndex + 1) : '';
 
     if (!service || !methodName) {
       throw createRPCError(
@@ -117,6 +122,13 @@ export class RPCRouter {
         case 'terminal':
           const terminalService = this.getTerminalService(socket);
           return await terminalService.handle(methodName, params);
+
+        case 'browser': {
+          // methodName is 'proxy.request' — strip the 'proxy.' sub-namespace
+          const dotIdx = methodName.indexOf('.');
+          const browserMethod = dotIdx !== -1 ? methodName.slice(dotIdx + 1) : methodName;
+          return await this.browserProxyService.handle(browserMethod, params, socket);
+        }
 
         default:
           throw createRPCError(

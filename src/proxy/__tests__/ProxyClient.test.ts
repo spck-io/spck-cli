@@ -29,6 +29,8 @@ vi.mock('../../config/credentials.js', () => ({
   saveConnectionSettings: vi.fn(),
   loadConnectionSettings: vi.fn(),
   isServerTokenExpired: vi.fn(),
+  loadGlobalConfig: vi.fn(() => ({ knownDeviceIds: [] })),
+  saveGlobalConfig: vi.fn(),
 }));
 
 vi.mock('../../rpc/router.js', () => ({
@@ -53,10 +55,13 @@ import { requireValidHMAC } from '../../connection/hmac.js';
 import { RPCRouter } from '../../rpc/router.js';
 import { validateHandshakeTimestamp } from '../handshake-validation.js';
 import { io } from 'socket.io-client';
+import { loadGlobalConfig, saveGlobalConfig } from '../../config/credentials.js';
 
 const mockRequireValidHMAC = requireValidHMAC as Mock;
 const mockRPCRouter = RPCRouter as Mocked<typeof RPCRouter>;
 const mockValidateHandshakeTimestamp = validateHandshakeTimestamp as Mock;
+const mockLoadGlobalConfig = loadGlobalConfig as Mock;
+const mockSaveGlobalConfig = saveGlobalConfig as Mock;
 
 // Shared mock socket that all tests use
 let mockSocket: any;
@@ -417,6 +422,96 @@ describe('ProxyClient Security', () => {
 
       // RPCRouter should NOT be called
       expect(mockRPCRouter.route).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Known Device ID Persistence', () => {
+    it('should initialize knownDeviceIds from loadGlobalConfig on construction', () => {
+      mockLoadGlobalConfig.mockReturnValue({ knownDeviceIds: ['persisted-device-1', 'persisted-device-2'] });
+
+      // Construction triggers loadGlobalConfig via the field initializer
+      new ProxyClient(defaultOptions as any);
+
+      expect(mockLoadGlobalConfig).toHaveBeenCalled();
+    });
+
+    it('should treat a device from global config as known (no saveGlobalConfig call)', async () => {
+      mockLoadGlobalConfig.mockReturnValue({ knownDeviceIds: ['test-device-123'] });
+
+      await setupClient();
+
+      await triggerEvent('client_connecting', { connectionId: 'known-conn-1' });
+
+      // Use the pre-loaded device ID — no new-device path should fire
+      const authMessage = createAuthMessage(TEST_SECRET, TEST_CLIENT_ID, 'test-device-123');
+      await triggerEvent('client_message', { connectionId: 'known-conn-1', data: authMessage });
+
+      expect(mockSaveGlobalConfig).not.toHaveBeenCalled();
+    });
+
+    it('should save global config when a genuinely new device connects', async () => {
+      mockLoadGlobalConfig.mockReturnValue({ knownDeviceIds: [] });
+
+      await setupClient();
+
+      await triggerEvent('client_connecting', { connectionId: 'new-conn-1' });
+
+      const authMessage = createAuthMessage(TEST_SECRET, TEST_CLIENT_ID, 'brand-new-device');
+      await triggerEvent('client_message', { connectionId: 'new-conn-1', data: authMessage });
+
+      expect(mockSaveGlobalConfig).toHaveBeenCalledWith(
+        expect.objectContaining({ knownDeviceIds: expect.arrayContaining(['brand-new-device']) })
+      );
+    });
+
+    it('should accumulate multiple new device IDs across connections', async () => {
+      mockLoadGlobalConfig.mockReturnValue({ knownDeviceIds: [] });
+
+      await setupClient();
+
+      await triggerEvent('client_connecting', { connectionId: 'conn-a' });
+      await triggerEvent('client_message', {
+        connectionId: 'conn-a',
+        data: createAuthMessage(TEST_SECRET, TEST_CLIENT_ID, 'device-alpha'),
+      });
+
+      await triggerEvent('client_connecting', { connectionId: 'conn-b' });
+      await triggerEvent('client_message', {
+        connectionId: 'conn-b',
+        data: createAuthMessage(TEST_SECRET, TEST_CLIENT_ID, 'device-beta'),
+      });
+
+      expect(mockSaveGlobalConfig).toHaveBeenCalledTimes(2);
+      // Second call should include both devices
+      expect(mockSaveGlobalConfig).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          knownDeviceIds: expect.arrayContaining(['device-alpha', 'device-beta']),
+        })
+      );
+    });
+
+    it('should not save global config again when an already-seen device reconnects', async () => {
+      mockLoadGlobalConfig.mockReturnValue({ knownDeviceIds: [] });
+
+      await setupClient();
+
+      // First connection — new device
+      await triggerEvent('client_connecting', { connectionId: 'first-conn' });
+      await triggerEvent('client_message', {
+        connectionId: 'first-conn',
+        data: createAuthMessage(TEST_SECRET, TEST_CLIENT_ID, 'recurring-device'),
+      });
+
+      mockSaveGlobalConfig.mockClear();
+
+      // Second connection — same device
+      await triggerEvent('client_connecting', { connectionId: 'second-conn' });
+      await triggerEvent('client_message', {
+        connectionId: 'second-conn',
+        data: createAuthMessage(TEST_SECRET, TEST_CLIENT_ID, 'recurring-device'),
+      });
+
+      expect(mockSaveGlobalConfig).not.toHaveBeenCalled();
     });
   });
 

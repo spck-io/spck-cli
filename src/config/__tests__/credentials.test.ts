@@ -13,10 +13,13 @@ import {
   isServerTokenExpired,
   getCredentialsPath,
   getConnectionSettingsPath,
+  getGlobalConfigPath,
+  loadGlobalConfig,
+  saveGlobalConfig,
   clearCredentials,
   clearConnectionSettings,
 } from '../credentials.js';
-import { StoredCredentials } from '../../types.js';
+import { StoredCredentials, GlobalConfig } from '../../types.js';
 
 // Mock modules
 vi.mock('fs');
@@ -388,6 +391,104 @@ describe('credentials', () => {
       clearConnectionSettings();
 
       expect(mockFs.unlinkSync).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getGlobalConfigPath()', () => {
+    it('should return path in user home directory', () => {
+      const configPath = getGlobalConfigPath();
+      expect(configPath).toBe(`${mockHomedir}/.spck-editor/global.config`);
+    });
+  });
+
+  describe('loadGlobalConfig()', () => {
+    it('should return default config if file does not exist', () => {
+      mockFs.existsSync.mockReturnValue(false);
+
+      const result = loadGlobalConfig();
+
+      expect(result).toEqual({ knownDeviceIds: [] });
+    });
+
+    it('should load and return valid global config', () => {
+      const mockConfig: GlobalConfig = {
+        knownDeviceIds: ['device-aaa', 'device-bbb'],
+      };
+
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockReturnValue(JSON.stringify(mockConfig));
+
+      const result = loadGlobalConfig();
+
+      expect(result).toEqual(mockConfig);
+    });
+
+    it('should return default config if JSON is invalid', () => {
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockReturnValue('not valid json{');
+
+      const result = loadGlobalConfig();
+
+      expect(result).toEqual({ knownDeviceIds: [] });
+    });
+
+    it('should return default config if knownDeviceIds is not an array', () => {
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ knownDeviceIds: 'bad' }));
+
+      const result = loadGlobalConfig();
+
+      expect(result).toEqual({ knownDeviceIds: [] });
+    });
+
+    it('should return empty knownDeviceIds if field is missing', () => {
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({}));
+
+      const result = loadGlobalConfig();
+
+      expect(result).toEqual({ knownDeviceIds: [] });
+    });
+  });
+
+  describe('saveGlobalConfig()', () => {
+    const mockConfig: GlobalConfig = {
+      knownDeviceIds: ['device-aaa', 'device-bbb'],
+    };
+
+    it('should create directory if it does not exist', () => {
+      mockFs.existsSync.mockReturnValue(false);
+      mockFs.mkdirSync.mockReturnValue(undefined);
+      mockFs.writeFileSync.mockReturnValue(undefined);
+
+      saveGlobalConfig(mockConfig);
+
+      expect(mockFs.mkdirSync).toHaveBeenCalledWith(
+        `${mockHomedir}/.spck-editor`,
+        { recursive: true, mode: 0o700 }
+      );
+    });
+
+    it('should write config file with correct content and restricted permissions', () => {
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.writeFileSync.mockReturnValue(undefined);
+
+      saveGlobalConfig(mockConfig);
+
+      expect(mockFs.writeFileSync).toHaveBeenCalledWith(
+        `${mockHomedir}/.spck-editor/global.config`,
+        JSON.stringify(mockConfig, null, 2),
+        { encoding: 'utf8', mode: 0o600 }
+      );
+    });
+
+    it('should not create directory if it already exists', () => {
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.writeFileSync.mockReturnValue(undefined);
+
+      saveGlobalConfig(mockConfig);
+
+      expect(mockFs.mkdirSync).not.toHaveBeenCalled();
     });
   });
 });

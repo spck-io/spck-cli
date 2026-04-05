@@ -6,7 +6,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { StoredCredentials } from '../types.js';
+import { StoredCredentials, GlobalConfig } from '../types.js';
 import { getProjectFilePath } from '../utils/project-dir.js';
 import { logAuth } from '../utils/logger.js';
 import { t } from '../i18n/index.js';
@@ -23,6 +23,52 @@ export function getCredentialsDir(): string {
  */
 export function getCredentialsPath(): string {
   return path.join(getCredentialsDir(), '.credentials.json');
+}
+
+/**
+ * Get the global config file path
+ */
+export function getGlobalConfigPath(): string {
+  return path.join(getCredentialsDir(), 'global.config');
+}
+
+/**
+ * Load global config from user-level storage
+ */
+export function loadGlobalConfig(): GlobalConfig {
+  const configPath = getGlobalConfigPath();
+
+  if (!fs.existsSync(configPath)) {
+    return { knownDeviceIds: [] };
+  }
+
+  try {
+    const data = fs.readFileSync(configPath, 'utf8');
+    const parsed = JSON.parse(data);
+    return {
+      knownDeviceIds: Array.isArray(parsed.knownDeviceIds) ? parsed.knownDeviceIds : [],
+    };
+  } catch {
+    return { knownDeviceIds: [] };
+  }
+}
+
+/**
+ * Save global config to user-level storage
+ */
+export function saveGlobalConfig(config: GlobalConfig): void {
+  const credentialsDir = getCredentialsDir();
+  const configPath = getGlobalConfigPath();
+
+  if (!fs.existsSync(credentialsDir)) {
+    fs.mkdirSync(credentialsDir, { recursive: true, mode: 0o700 });
+  }
+
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify(config, null, 2),
+    { encoding: 'utf8', mode: 0o600 }
+  );
 }
 
 /**

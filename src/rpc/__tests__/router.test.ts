@@ -344,15 +344,15 @@ describe('RPCRouter', () => {
 
   describe('Edge Cases', () => {
     it('should handle method with multiple dots', async () => {
-      // Method "fs.some.deep.method" splits into service="fs", method="some"
-      // Additional parts after the second dot are ignored
+      // Method "fs.some.deep.method" splits into service="fs", methodName="some.deep.method"
+      // Only the first dot is used to separate service from method; sub-namespaces are preserved
       const result = await RPCRouter.route(
         createRequest('fs.some.deep.method', {}, 30),
         mockSocket
       );
 
-      // Should route to fs service with "some" as the method
-      expect(mockFsHandle).toHaveBeenCalledWith('some', {}, mockSocket);
+      // Should route to fs service with the full sub-method "some.deep.method"
+      expect(mockFsHandle).toHaveBeenCalledWith('some.deep.method', {}, mockSocket);
       expect(result).toEqual({ success: true });
     });
 

@@ -8,7 +8,7 @@ import * as crypto from 'crypto';
 import qrcode from 'qrcode-terminal';
 import { verifyFirebaseToken } from '../connection/auth.js';
 import { refreshFirebaseToken } from '../connection/firebase-auth.js';
-import { loadCredentials } from '../config/credentials.js';
+import { loadCredentials, loadGlobalConfig, saveGlobalConfig } from '../config/credentials.js';
 import { ProxySocketWrapper } from './ProxySocketWrapper.js';
 import {
   ServerConfig,
@@ -68,7 +68,7 @@ export class ProxyClient {
   private connectionSettings: ConnectionSettings | null = null;
   private tools: ToolDetectionResult;
   private activeConnections: Map<string, ActiveConnection> = new Map();
-  private knownDeviceIds: Set<string> = new Set(); // Track known device IDs
+  private knownDeviceIds: Set<string> = new Set(loadGlobalConfig().knownDeviceIds); // Track known device IDs
   private firebaseToken: string;
   private userId: string;
   private tokenRefreshAttempted: boolean = false;
@@ -449,6 +449,7 @@ export class ProxyClient {
         console.log(`   ${t('connection.newDeviceWarning')}`);
         console.log(`   ${t('connection.newDeviceCompromised')}\n`);
         this.knownDeviceIds.add(deviceId);
+        saveGlobalConfig({ knownDeviceIds: Array.from(this.knownDeviceIds) });
       }
 
       logConnection('authenticated', deviceId, {

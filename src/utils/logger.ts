@@ -499,6 +499,40 @@ export function logConnection(
   writeToFile(`[${logLevel}] CONN ${event} deviceId=${deviceId || 'unknown'}${metaStr}`);
 }
 
+/**
+ * Log a browser proxy request
+ */
+export function logBrowserProxy(
+  params: {
+    url?: string;
+    method?: string;
+    requestId?: string;
+    [key: string]: any;
+  },
+  uid: string,
+  success: boolean,
+  error?: any,
+  metadata?: Record<string, any>
+): void {
+  const httpMethod = (params.method || 'GET').toUpperCase();
+  const displayUrl = formatPath(params.url, 60);
+  const timestamp = chalk.gray(formatTimeCompact());
+  const uidStr = chalk.gray(formatUid(uid));
+  const statusStr = metadata?.status ? ` ${chalk.gray(String(metadata.status))}` : '';
+  const sizeStr = metadata?.size ? ` ${chalk.gray(metadata.size + 'b')}` : '';
+
+  if (success) {
+    const msg = `${timestamp} ${uidStr} ${chalk.green('✓')} ${chalk.blueBright('BROWSER')} ${chalk.white(httpMethod.padEnd(7))} ${chalk.gray(displayUrl)}${statusStr}${sizeStr}`;
+    console.log(msg);
+    writeToFile(`[INFO] BROWSER PROXY ${httpMethod} ${params.url} uid=${uid} success=true status=${metadata?.status}`);
+  } else {
+    const errMsg = error?.message || String(error);
+    const msg = `${timestamp} ${uidStr} ${chalk.red('✗')} ${chalk.blueBright('BROWSER')} ${chalk.white(httpMethod.padEnd(7))} ${chalk.gray(displayUrl)} ${chalk.red(errMsg)}`;
+    console.log(msg);
+    writeToFile(`[ERROR] BROWSER PROXY ${httpMethod} ${params.url} uid=${uid} success=false error="${errMsg}"`);
+  }
+}
+
 export default {
   logFsRead,
   logFsWrite,
@@ -507,6 +541,7 @@ export default {
   logTerminalRead,
   logTerminalWrite,
   logSearchRead,
+  logBrowserProxy,
   logAuth,
   logConnection,
 };

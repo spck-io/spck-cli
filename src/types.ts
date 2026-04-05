@@ -57,6 +57,11 @@ export interface StoredCredentials {
   proxyServerUrl?: string;
 }
 
+// Global config (persisted to ~/.spck-editor/global.config)
+export interface GlobalConfig {
+  knownDeviceIds: string[];
+}
+
 // Firebase Credentials (runtime - includes ephemeral ID token)
 export interface FirebaseCredentials {
   firebaseToken: string;
@@ -140,6 +145,9 @@ export enum ErrorCode {
   TERMINAL_NOT_FOUND = -32020,
   TERMINAL_LIMIT_EXCEEDED = -32021,
   TERMINAL_PROCESS_EXITED = -32022,
+
+  // Browser Proxy
+  BROWSER_PROXY_REQUEST_FAILED = -32050,
 
   // General
   OPERATION_TIMEOUT = -32030,
