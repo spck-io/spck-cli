@@ -65,7 +65,9 @@
     "userAuthDisabled": "Authentification utilisateur : DÉSACTIVÉE",
     "userAuthDisabledHint1": "Connexions protégées uniquement par clé de signature secrète",
     "userAuthDisabledHint2": "Latence réduite, pas d’authentification Firebase requise",
-    "userAuthDisabledHint3": "Compatible avec Spck Editor Lite"
+    "userAuthDisabledHint3": "Compatible avec Spck Editor Lite",
+    "browserProxyEnabled": "Service proxy navigateur",
+    "browserProxyDisabled": "Service proxy navigateur (désactivé dans la configuration)"
   },
   "server": {
     "selectingBest": "Sélection du meilleur serveur relais...",

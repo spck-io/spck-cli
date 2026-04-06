@@ -65,7 +65,9 @@
     "userAuthDisabled": "ユーザー認証: 無効",
     "userAuthDisabledHint1": "接続はシークレット署名キーのみで保護されます",
     "userAuthDisabledHint2": "低遅延、Firebase 認証は不要です",
-    "userAuthDisabledHint3": "Spck Editor Lite と互換性があります"
+    "userAuthDisabledHint3": "Spck Editor Lite と互換性があります",
+    "browserProxyEnabled": "ブラウザプロキシサービス",
+    "browserProxyDisabled": "ブラウザプロキシサービス（設定で無効）"
   },
   "server": {
     "selectingBest": "最適なリレーサーバーを選択しています...",

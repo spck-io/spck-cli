@@ -65,7 +65,9 @@
     "userAuthDisabled": "사용자 인증: 비활성화",
     "userAuthDisabledHint1": "비밀 서명 키만으로 연결이 보호됩니다",
     "userAuthDisabledHint2": "낮은 지연 시간, Firebase 인증 불필요",
-    "userAuthDisabledHint3": "Spck Editor Lite와 호환됩니다"
+    "userAuthDisabledHint3": "Spck Editor Lite와 호환됩니다",
+    "browserProxyEnabled": "브라우저 프록시 서비스",
+    "browserProxyDisabled": "브라우저 프록시 서비스 (설정에서 비활성화됨)"
   },
   "server": {
     "selectingBest": "최적의 릴레이 서버를 선택하는 중...",

@@ -65,7 +65,9 @@
     "userAuthDisabled": "用户认证: 已禁用",
     "userAuthDisabledHint1": "连接仅通过密钥签名保护",
     "userAuthDisabledHint2": "更低的延迟，不需要 Firebase 认证",
-    "userAuthDisabledHint3": "与 Spck Editor Lite 兼容"
+    "userAuthDisabledHint3": "与 Spck Editor Lite 兼容",
+    "browserProxyEnabled": "浏览器代理服务",
+    "browserProxyDisabled": "浏览器代理服务（已在配置中禁用）"
   },
   "server": {
     "selectingBest": "正在选择最佳中继服务器...",

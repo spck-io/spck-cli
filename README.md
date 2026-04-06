@@ -9,6 +9,7 @@ Connect your local development environment to Spck Editor mobile app and access 
 - 🗂️ **Remote Filesystem** - Access local files from Spck Editor mobile app
 - 🔄 **Git Integration** - Full git operations over the network connection (requires Git 2.20.0+)
 - 💻 **Terminal Access** - Interactive terminal sessions with xterm.js
+- 🌐 **Browser Proxy** - Preview your local server in a browser view inside Spck Editor
 - 🔍 **Fast Search** - Optimized file search with automatic ripgrep detection (100x faster when installed)
 - 🔒 **Secure** - Cryptographically signed requests with optional Firebase authentication
 
@@ -68,6 +69,7 @@ On first run, the CLI will guide you through:
 3. **Git Configuration** (Advanced) - Optionally add `.spck-editor/` to `.gitignore`
 
 The setup wizard will:
+
 - Detect if a `.gitignore` file exists in your project
 - Prompt you to automatically add `.spck-editor/` to prevent committing the symlink
 - Create or update `.gitignore` with proper comments
@@ -89,6 +91,7 @@ Once running, the CLI displays a QR code and connection details.
 **IMPORTANT**: The Spck Editor mobile app must be installed BEFORE scanning the QR code. The QR code contains a custom `spck://` deep link that only works with the app installed.
 
 **On Android:**
+
 1. **Install Spck Editor** from Google Play Store if not already installed
 2. Use your device's **built-in QR scanner**:
    - Open the **Camera app** and point it at the QR code, OR
@@ -98,6 +101,7 @@ Once running, the CLI displays a QR code and connection details.
 5. The app will automatically parse the connection details and connect
 
 **On iOS:**
+
 1. **Install Spck Editor** from the App Store if not already installed
 2. Use your device's **built-in QR scanner**:
    - Open the **Camera app** and point it at the QR code, OR
@@ -190,11 +194,18 @@ The configuration is stored in `.spck-editor/config/spck-cli.config.json` in you
       "**/dist/**",
       "**/build/**"
     ]
+  },
+  "browserProxy": {
+    "enabled": true
   }
 }
 ```
 
 ### Configuration Options
+
+#### Browser Proxy Settings
+
+- **`browserProxy.enabled`** (boolean, default: `true`): Enable/disable the browser proxy feature. Set to `false` to prevent the mobile app from opening browser proxy sessions through the CLI.
 
 #### Terminal Settings
 
@@ -242,10 +253,12 @@ The CLI uses a secure storage system that prevents accidentally committing secre
   - Prevents secrets from being committed to git
 
 **Files stored in the symlinked config directory** (`.spck-editor/config/`):
+
 - `spck-cli.config.json` - Project configuration
 - `connection-settings.json` - Server token, client ID, and secret signing key
 
 **Files stored locally** (`.spck-editor/`):
+
 - `.tmp/` - Temporary files
 - `.trash/` - Deleted files
 - `logs/` - CLI operation logs
@@ -304,17 +317,20 @@ User authentication provides an additional layer of identity verification:
 ```
 
 **When Enabled:**
+
 - You must sign in with your Spck Editor account
 - Connections use Firebase ID tokens that expire after 1 hour
 - Expired tokens are automatically refreshed using secure refresh tokens
 - Adds verification that the connecting user is using the same account as the CLI
 
 **Trade-offs:**
+
 - **Pros**: Adds user identity verification, prevents unauthorized access even if secret is compromised
 - **Cons**: Adds latency to initial connection due to Firebase authentication
 - **Compatibility**: Not supported by Spck Editor Lite
 
 **When Disabled:**
+
 - Requests are still protected by the secret signing key
 - No additional latency from Firebase authentication
 - Compatible with Spck Editor Lite
@@ -347,11 +363,34 @@ Terminal access can be disabled entirely if you only need filesystem and git ope
 ```
 
 When `terminal.enabled` is set to `false`:
+
 - No terminal sessions can be created
 - The CLI will not spawn any shell processes
 - Only filesystem and git operations are available
 
 This reduces the attack surface if you don't need terminal functionality.
+
+### Browser Proxy Access Control
+
+The browser proxy feature allows the mobile app to open a proxy browser view that previews your local server through the CLI. It can be disabled if you don't need it:
+
+**Configuration Option:**
+
+```json
+{
+  "browserProxy": {
+    "enabled": false
+  }
+}
+```
+
+When `browserProxy.enabled` is set to `false`:
+
+- The mobile app cannot open browser proxy sessions through the CLI
+- All browser proxy requests will be rejected with a `FEATURE_DISABLED` error
+- All other features (filesystem, git, terminal) remain available
+
+**Backward Compatibility**: Existing config files that do not have a `browserProxy` section will default to `enabled: true`. The CLI will automatically add the field and re-save the config on the next run.
 
 ### Best Practices
 
@@ -389,6 +428,7 @@ This reduces the attack surface if you don't need terminal functionality.
 ### File Access Permissions
 
 The CLI operates with your local user permissions:
+
 - Files are read/written with your user's file system permissions
 - Terminal sessions run with your user account privileges
 - No privilege escalation occurs
@@ -401,7 +441,6 @@ The CLI only transmits data explicitly requested by Spck Editor app:
 - **Git Operations**: Git metadata and repository data during git commands
 - **Terminal I/O**: Terminal input/output during active sessions
 - **File Watching**: File change notifications (paths only, not contents)
-
 
 ## Troubleshooting
 
@@ -447,17 +486,21 @@ If the CLI cannot connect to the proxy server:
 If git operations (commit, push, pull, etc.) are not working:
 
 1. **Verify Git is installed**:
+
    ```bash
    git --version
    ```
+
    - Required: Git 2.20.0 or higher
    - If not installed, see installation instructions in the [Requirements](#optional-recommended) section
 
 2. **Check repository initialization**:
+
    ```bash
    cd /path/to/project
    git status
    ```
+
    - If not a git repository, initialize it: `git init`
 
 ### Slow Search Performance
@@ -465,6 +508,7 @@ If git operations (commit, push, pull, etc.) are not working:
 If file search is slow:
 
 1. **Install ripgrep for 100x faster search**:
+
    ```bash
    # macOS
    brew install ripgrep
@@ -477,9 +521,11 @@ If file search is slow:
    ```
 
 2. **Verify installation**:
+
    ```bash
    rg --version
    ```
+
    - The CLI will automatically detect and use ripgrep if available
 
 ### Git Ignore Issues
@@ -510,7 +556,6 @@ spck --setup
 ```
 
 The setup wizard will detect your `.gitignore` and offer to add the entry automatically.
-
 
 ## Examples
 

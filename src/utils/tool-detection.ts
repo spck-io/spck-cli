@@ -88,7 +88,8 @@ export async function detectTools(options?: {
 export function displayFeatureSummary(
   tools: ToolDetectionResult,
   terminalEnabled: boolean,
-  userAuthEnabled?: boolean
+  userAuthEnabled?: boolean,
+  browserProxyEnabled?: boolean
 ): void {
   console.log(`\n=== ${t('features.title')} ===\n`);
 
@@ -114,6 +115,12 @@ export function displayFeatureSummary(
     features.push(`✅ ${t('features.terminalEnabled')}`);
   } else {
     features.push(`❌ ${t('features.terminalDisabled')}`);
+  }
+
+  if (browserProxyEnabled !== false) {
+    features.push(`✅ ${t('features.browserProxyEnabled')}`);
+  } else {
+    features.push(`❌ ${t('features.browserProxyDisabled')}`);
   }
 
   features.forEach(feature => console.log(`   ${feature}`));

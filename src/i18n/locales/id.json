@@ -65,7 +65,9 @@
     "userAuthDisabled": "Autentikasi Pengguna: DINONAKTIFKAN",
     "userAuthDisabledHint1": "Koneksi dilindungi hanya dengan kunci penandatanganan rahasia",
     "userAuthDisabledHint2": "Latensi lebih rendah, tidak memerlukan autentikasi Firebase",
-    "userAuthDisabledHint3": "Kompatibel dengan Spck Editor Lite"
+    "userAuthDisabledHint3": "Kompatibel dengan Spck Editor Lite",
+    "browserProxyEnabled": "Layanan proxy browser",
+    "browserProxyDisabled": "Layanan proxy browser (dinonaktifkan di konfigurasi)"
   },
   "server": {
     "selectingBest": "Memilih server relay terbaik...",

@@ -570,6 +570,7 @@ export class ProxyClient {
       terminal: this.config.terminal.enabled,
       git: this.tools.git,
       fastSearch: this.tools.ripgrep,
+      browserProxy: this.config.browserProxy?.enabled ?? true,
     };
 
     this.sendToClient(connectionId, 'handshake', {

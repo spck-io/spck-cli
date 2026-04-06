@@ -38,6 +38,16 @@ export function loadConfig(configPath?: string): ServerConfig {
     // Validate required fields
     validateConfig(config);
 
+    // Backward-compatibility: populate missing optional sections and re-save
+    let needsSave = false;
+    if (!config.browserProxy) {
+      config.browserProxy = { enabled: true };
+      needsSave = true;
+    }
+    if (needsSave) {
+      try { saveConfig(config, configPath); } catch { /* best-effort */ }
+    }
+
     return config;
   } catch (error: any) {
     // JSON parse error or validation error
@@ -165,6 +175,9 @@ export function createDefaultConfig(overrides: Partial<ServerConfig> = {}): Serv
         '**/dist/**',
         '**/build/**'
       ],
+    },
+    browserProxy: {
+      enabled: true,
     },
     ...overrides,
   };

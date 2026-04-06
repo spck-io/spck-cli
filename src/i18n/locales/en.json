@@ -57,6 +57,8 @@
     "searchBasic": "Basic search (ripgrep not installed)",
     "terminalEnabled": "Terminal service",
     "terminalDisabled": "Terminal service (disabled in config)",
+    "browserProxyEnabled": "Browser proxy service",
+    "browserProxyDisabled": "Browser proxy service (disabled in config)",
     "securityTitle": "Security Mode",
     "userAuthEnabled": "User Authentication: ENABLED",
     "userAuthEnabledHint1": "Requires Firebase authentication for all connections",

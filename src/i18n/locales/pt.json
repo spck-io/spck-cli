@@ -65,7 +65,9 @@
     "userAuthDisabled": "Autenticação de usuário: DESATIVADA",
     "userAuthDisabledHint1": "Conexões protegidas apenas por chave de assinatura secreta",
     "userAuthDisabledHint2": "Menor latência, sem necessidade de autenticação Firebase",
-    "userAuthDisabledHint3": "Compatível com Spck Editor Lite"
+    "userAuthDisabledHint3": "Compatível com Spck Editor Lite",
+    "browserProxyEnabled": "Serviço de proxy do navegador",
+    "browserProxyDisabled": "Serviço de proxy do navegador (desativado na configuração)"
   },
   "server": {
     "selectingBest": "Selecionando o melhor servidor de retransmissão...",

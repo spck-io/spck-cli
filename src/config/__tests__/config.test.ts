@@ -42,6 +42,9 @@ describe('config', () => {
       security: {
         userAuthenticationEnabled: false,
       },
+      browserProxy: {
+        enabled: true
+      },
       filesystem: {
         maxFileSize: '100MB',
         watchIgnorePatterns: ['node_modules/**'],

@@ -37,6 +37,10 @@ export interface ServerConfig {
     maxFileSize: string;
     watchIgnorePatterns: string[];
   };
+
+  browserProxy?: {
+    enabled: boolean;
+  };
 }
 
 // Connection Settings (stored in .spck-editor/config/connection-settings.json)

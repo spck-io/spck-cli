@@ -145,7 +145,7 @@ export async function startProxyClient(
     }
 
     // Step 7: Display feature summary
-    displayFeatureSummary(tools, config.terminal.enabled, config.security.userAuthenticationEnabled);
+    displayFeatureSummary(tools, config.terminal.enabled, config.security.userAuthenticationEnabled, config.browserProxy?.enabled ?? true);
 
     // Step 8: Select relay server
     let proxyServerUrl: string;

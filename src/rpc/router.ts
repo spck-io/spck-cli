@@ -18,6 +18,7 @@ export class RPCRouter {
   private static browserProxyService: BrowserProxyService;
   private static rootPath: string;
   private static tools: ToolDetectionResult;
+  private static browserProxyEnabled: boolean;
 
   /**
    * Initialize services
@@ -25,6 +26,7 @@ export class RPCRouter {
   static initialize(rootPath: string, config: any, tools: ToolDetectionResult) {
     this.rootPath = rootPath;
     this.tools = tools;
+    this.browserProxyEnabled = config.browserProxy?.enabled ?? true;
     this.filesystemService = new FilesystemService(rootPath, config.filesystem);
     this.gitService = new GitService(rootPath);
     this.browserProxyService = new BrowserProxyService();
@@ -124,6 +126,12 @@ export class RPCRouter {
           return await terminalService.handle(methodName, params);
 
         case 'browser': {
+          if (!this.browserProxyEnabled) {
+            throw createRPCError(
+              ErrorCode.FEATURE_DISABLED,
+              'Browser proxy is disabled in configuration.'
+            );
+          }
           // methodName is 'proxy.request' — strip the 'proxy.' sub-namespace
           const dotIdx = methodName.indexOf('.');
           const browserMethod = dotIdx !== -1 ? methodName.slice(dotIdx + 1) : methodName;
