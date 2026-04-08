@@ -279,6 +279,9 @@
     "maxBufferPrompt": "Maximum buffer lines (terminal history) [{{default}}]: ",
     "maxBufferHint": "(Larger buffer stores more history but may slow synchronization)",
     "maxTerminalsPrompt": "Maximum terminal processes [{{default}}]: ",
+    "browserProxyConfig": "Browser Proxy Configuration",
+    "browserProxyDescription": "Browser proxy allows Spck Editor to open a live preview of your local dev server inside the browser.",
+    "browserProxyPrompt": "Enable browser proxy service? [Y/n]: ",
     "securityConfig": "Security Configuration",
     "securityDescription1": "Additional user authentication adds an extra security layer",
     "securityDescription2": "by requiring the client to verify their Firebase identity.",
@@ -304,6 +307,7 @@
     "summaryMaxBuffer": "- Max buffer lines: {{value}}",
     "summaryMaxProcesses": "- Max processes: {{value}}",
     "summaryUserAuth": "User authentication: {{status}}",
+    "summaryBrowserProxy": "Browser proxy: {{status}}",
     "received": "Received {{signal}}"
   }
 }

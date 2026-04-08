@@ -117,7 +117,17 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
       }
     }
 
-    // Step 5: Security configuration
+    // Step 5: Browser proxy configuration
+    console.log('\n--- ' + t('setup.browserProxyConfig') + ' ---\n');
+    console.log(t('setup.browserProxyDescription') + '\n');
+
+    const browserProxyEnabled = await questionYesNo(
+      rl,
+      t('setup.browserProxyPrompt'),
+      true
+    );
+
+    // Step 6: Security configuration
     console.log('\n--- ' + t('setup.securityConfig') + ' ---\n');
     console.log(t('setup.securityDescription1'));
     console.log(t('setup.securityDescription2'));
@@ -162,6 +172,9 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
       },
       security: {
         userAuthenticationEnabled: userAuthEnabled
+      },
+      browserProxy: {
+        enabled: browserProxyEnabled
       },
       filesystem: {
         maxFileSize: '10MB',
@@ -224,5 +237,6 @@ function displayConfigSummary(config: ServerConfig): void {
   }
 
   console.log('  ' + t('setup.summaryUserAuth', { status: config.security.userAuthenticationEnabled ? t('setup.summaryEnabled') : t('setup.summaryDisabled') }));
+  console.log('  ' + t('setup.summaryBrowserProxy', { status: config.browserProxy?.enabled !== false ? t('setup.summaryEnabled') : t('setup.summaryDisabled') }));
   console.log('');
 }

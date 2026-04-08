@@ -619,6 +619,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ## Links
 
 - **Website**: [https://spck.io](https://spck.io)
+- **Documentation**: [https://spck.io/docs/cli](https://spck.io/docs/cli)
 - **Download**: [Spck Editor on Google Play](https://play.google.com/store/apps/details?id=io.spck) | [Spck Editor on App Store](https://apps.apple.com/us/app/spck-editor/id1507309511)
 
 ## Support
