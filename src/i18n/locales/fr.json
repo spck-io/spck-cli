@@ -125,7 +125,9 @@
     "connectFailedError": "Erreur : {{message}}",
     "connectFailedCauses": "Causes possibles :",
     "connectFailedCause1": "- Le serveur n’est pas accessible (vérifiez votre connexion internet)",
-    "connectFailedCause2": "- Réseau/pare-feu bloquant la connexion"
+    "connectFailedCause2": "- Réseau/pare-feu bloquant la connexion",
+    "freeTierNotice": "Compte gratuit\u00a0: {{used}}\u00a0/ {{limit}} min utilisés aujourd\u2019hui ({{remaining}} min restants)",
+    "freeTierUpgrade": "Passez à la version premium pour un accès CLI illimité."
   },
   "multipleConnection": {
     "detected": "TENTATIVE DE CONNEXION MULTIPLE DÉTECTÉE !",

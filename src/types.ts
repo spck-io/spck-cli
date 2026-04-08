@@ -241,11 +241,17 @@ export type HandshakeMessage =
   | ConnectedMessage;
 
 // Proxy server events (from server to CLI)
+export interface FreeTierInfo {
+  dailyLimitSeconds: number;
+  usedSeconds: number;
+}
+
 export interface ProxyAuthenticatedEvent {
   token: string;
   clientId: string;
   userId: string;
   expiresAt: number;
+  freeTierInfo?: FreeTierInfo | null;
 }
 
 export interface ProxyClientConnectingEvent {

@@ -125,7 +125,9 @@
     "connectFailedError": "Kesalahan: {{message}}",
     "connectFailedCauses": "Kemungkinan penyebab:",
     "connectFailedCause1": "- Server tidak dapat dijangkau (periksa koneksi internet Anda)",
-    "connectFailedCause2": "- Jaringan/firewall memblokir koneksi"
+    "connectFailedCause2": "- Jaringan/firewall memblokir koneksi",
+    "freeTierNotice": "Akun gratis: {{used}} / {{limit}} menit digunakan hari ini (sisa {{remaining}} menit)",
+    "freeTierUpgrade": "Upgrade untuk akses CLI tanpa batas."
   },
   "multipleConnection": {
     "detected": "PERCOBAAN KONEKSI GANDA TERDETEKSI!",

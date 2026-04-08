@@ -132,7 +132,9 @@
     "rejectingUnauthenticated": "Rejecting {{event}} from unauthenticated connection: {{deviceId}}",
     "rejectingUserVerification": "Rejecting protocol_selected - user verification required but not completed: {{deviceId}}",
     "invalidRpcMessage": "Invalid RPC message from {{deviceId}}",
-    "unhandledError": "Unhandled error in handleError:"
+    "unhandledError": "Unhandled error in handleError:",
+    "freeTierNotice": "Free account: {{used}} / {{limit}} min used today ({{remaining}} min remaining)",
+    "freeTierUpgrade": "Upgrade for unlimited CLI access."
   },
   "multipleConnection": {
     "detected": "MULTIPLE CONNECTION ATTEMPT DETECTED!",

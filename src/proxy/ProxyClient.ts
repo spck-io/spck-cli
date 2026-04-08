@@ -269,6 +269,16 @@ export class ProxyClient {
 
     saveConnectionSettings(this.connectionSettings);
 
+    // Show free tier notice on new sessions
+    if (isNewSession && data.freeTierInfo) {
+      const { dailyLimitSeconds, usedSeconds } = data.freeTierInfo;
+      const limitMinutes = Math.floor(dailyLimitSeconds / 60);
+      const usedMinutes = Math.floor(usedSeconds / 60);
+      const remainingMinutes = Math.max(0, limitMinutes - usedMinutes);
+      console.log(`\nℹ️  ${t('connection.freeTierNotice', { used: usedMinutes, limit: limitMinutes, remaining: remainingMinutes })}`);
+      console.log(`   ${t('connection.freeTierUpgrade')}\n`);
+    }
+
     // Display QR code on new CLI session or if clientId changed (not on automatic reconnections)
     if (isNewSession || this.connectionSettings.clientId !== existingSettings?.clientId) {
       this.displayQRCode();

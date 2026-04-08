@@ -125,7 +125,9 @@
     "connectFailedError": "错误: {{message}}",
     "connectFailedCauses": "可能的原因:",
     "connectFailedCause1": "- 服务器无法访问（请检查您的网络连接）",
-    "connectFailedCause2": "- 网络/防火墙阻止了连接"
+    "connectFailedCause2": "- 网络/防火墙阻止了连接",
+    "freeTierNotice": "免费账号：今日已使用 {{used}} / {{limit}} 分钟（剩余 {{remaining}} 分钟）",
+    "freeTierUpgrade": "升级以获得无限制 CLI 访问权限。"
   },
   "multipleConnection": {
     "detected": "检测到多重连接尝试！",

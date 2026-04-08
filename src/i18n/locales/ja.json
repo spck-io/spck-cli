@@ -125,7 +125,9 @@
     "connectFailedError": "エラー: {{message}}",
     "connectFailedCauses": "考えられる原因:",
     "connectFailedCause1": "- サーバーに到達できません（インターネット接続を確認してください）",
-    "connectFailedCause2": "- ネットワーク/ファイアウォールが接続をブロックしています"
+    "connectFailedCause2": "- ネットワーク/ファイアウォールが接続をブロックしています",
+    "freeTierNotice": "無料アカウント：本日 {{used}} / {{limit}} 分使用済み（残り {{remaining}} 分）",
+    "freeTierUpgrade": "CLIを無制限に使用するにはアップグレードしてください。"
   },
   "multipleConnection": {
     "detected": "複数接続の試行を検出しました！",

@@ -125,7 +125,9 @@
     "connectFailedError": "오류: {{message}}",
     "connectFailedCauses": "가능한 원인:",
     "connectFailedCause1": "- 서버에 연결할 수 없습니다 (인터넷 연결을 확인하세요)",
-    "connectFailedCause2": "- 네트워크/방화벽이 연결을 차단하고 있습니다"
+    "connectFailedCause2": "- 네트워크/방화벽이 연결을 차단하고 있습니다",
+    "freeTierNotice": "무료 계정: 오늘 {{used}} / {{limit}}분 사용됨 ({{remaining}}분 남음)",
+    "freeTierUpgrade": "무제한 CLI 접속을 위해 업그레이드하세요."
   },
   "multipleConnection": {
     "detected": "다중 연결 시도가 감지되었습니다!",

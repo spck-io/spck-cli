@@ -125,7 +125,9 @@
     "connectFailedError": "Error: {{message}}",
     "connectFailedCauses": "Posibles causas:",
     "connectFailedCause1": "- El servidor no es accesible (verifique su conexión a internet)",
-    "connectFailedCause2": "- Red/firewall bloqueando la conexión"
+    "connectFailedCause2": "- Red/firewall bloqueando la conexión",
+    "freeTierNotice": "Cuenta gratuita: {{used}} / {{limit}} min usados hoy ({{remaining}} min restantes)",
+    "freeTierUpgrade": "Mejora tu plan para acceso ilimitado al CLI."
   },
   "multipleConnection": {
     "detected": "¡INTENTO DE CONEXIÓN MÚLTIPLE DETECTADO!",

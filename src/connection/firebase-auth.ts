@@ -17,10 +17,10 @@ import { FirebaseCredentials, StoredCredentials } from '../types.js';
 import { saveCredentials } from '../config/credentials.js';
 import { logAuth } from '../utils/logger.js';
 import { t } from '../i18n/index.js';
+import { fetchServerList, selectBestServer } from '../config/server-selection.js';
 
 const AUTH_TIMEOUT = 10 * 60 * 1000; // 10 minutes
 const FIREBASE_AUTH_BASE_URL = 'https://spck.io/auth';
-const FIREBASE_API_BASE_URL = 'https://spck.io/api/auth';
 
 // Module-level references to allow aborting auth from outside (e.g., SIGINT handler)
 let _authAbortController: AbortController | null = null;
@@ -63,37 +63,42 @@ interface TokenResult {
 }
 
 /**
- * Poll server API for token (manual flow)
+ * Long-poll proxy server for token (manual flow).
+ * The server holds the connection open until the browser posts the token (up to 30s),
+ * then returns 202 on timeout so we reconnect immediately — minimal round-trips.
  */
-async function pollServerForToken(code: string, signal: AbortSignal): Promise<TokenResult | null> {
-  const pollInterval = 3000; // Poll every 3 seconds
-
+async function pollServerForToken(serverUrl: string, code: string, signal: AbortSignal): Promise<TokenResult | null> {
   while (!signal.aborted) {
     try {
-      const response = await fetch(`${FIREBASE_API_BASE_URL}/token?code=${code}`, {
+      const response = await fetch(`https://${serverUrl}/api/auth/token/poll`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
         signal
       });
 
+      if (response.status === 202) {
+        // Server hold timed out — reconnect immediately (no sleep needed)
+        continue;
+      }
+
       if (!response.ok) {
-        throw new Error(`Server returned ${response.status}`);
+        // Brief pause on unexpected errors before retrying
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        continue;
       }
 
       const result = await response.json();
-
-      if (result.token && result.refreshToken) {
-        return { token: result.token, refreshToken: result.refreshToken };
-      } else if (result.error === 'expired') {
-        throw new Error('Authentication code expired');
+      if (result.idToken && result.refreshToken) {
+        return { token: result.idToken, refreshToken: result.refreshToken };
       }
 
-      // Still pending, wait and retry
-      await new Promise(resolve => setTimeout(resolve, pollInterval));
+      // Unexpected successful response without tokens — brief pause
+      await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (error: any) {
-      if (error.name === 'AbortError') {
-        return null; // Polling cancelled
-      }
-      // Continue polling on network errors
-      await new Promise(resolve => setTimeout(resolve, pollInterval));
+      if (error.name === 'AbortError') return null;
+      // Network error — wait before retrying
+      await new Promise(resolve => setTimeout(resolve, 3000));
     }
   }
 
@@ -134,7 +139,12 @@ function parsePostBody(req: http.IncomingMessage): Promise<Record<string, string
 export async function authenticateWithFirebase(): Promise<FirebaseCredentials> {
   console.log('\n=== ' + t('auth.title') + ' ===\n');
 
-  // 1. Start local HTTP server
+  // 1. Select best proxy server
+  const servers = await fetchServerList();
+  const { server: selectedServer } = await selectBestServer(servers);
+  const proxyServerUrl = selectedServer.url;
+
+  // 2. Start local HTTP server
   const port = await getAvailablePort();
   console.log(t('auth.startingCallback', { port: String(port) }));
 
@@ -146,20 +156,21 @@ export async function authenticateWithFirebase(): Promise<FirebaseCredentials> {
 
   const redirectUrl = `http://localhost:${port}/callback`;
 
-  // 2. Generate code for both browser and manual flows
+  // 3. Generate code for both browser and manual flows
   const code = crypto.randomBytes(32).toString('hex');
 
-  // 3. Build auth URLs
+  // 4. Build auth URLs
   // Browser flow: localhost callback
   const browserUrl = new URL(FIREBASE_AUTH_BASE_URL);
   browserUrl.searchParams.set('redirect', redirectUrl);
   browserUrl.searchParams.set('state', code);
 
-  // Manual flow: server API caching
+  // Manual flow: proxy server relay (server param is hostname only, https:// is assumed)
   const manualUrl = new URL(FIREBASE_AUTH_BASE_URL);
   manualUrl.searchParams.set('code', code);
+  manualUrl.searchParams.set('server', proxyServerUrl);
 
-  // 4. Open browser (primary method)
+  // 5. Open browser (primary method)
   console.log(t('auth.openingBrowser') + '\n');
 
   try {
@@ -168,7 +179,7 @@ export async function authenticateWithFirebase(): Promise<FirebaseCredentials> {
     console.warn('⚠️  ' + t('auth.couldNotOpenBrowser', { message: error.message }) + '\n');
   }
 
-  // 5. Display fallback method
+  // 6. Display fallback method
   console.log(t('auth.manualAuthHint') + '\n');
 
   // Display QR code
@@ -177,7 +188,7 @@ export async function authenticateWithFirebase(): Promise<FirebaseCredentials> {
   console.log('\n' + t('auth.visitUrl', { url: manualUrl.toString() }) + '\n');
   console.log(t('auth.waiting') + '\n');
 
-  // 6. Wait for authentication from either source (browser or manual)
+  // 7. Wait for authentication from either source (browser or manual)
   const abortController = new AbortController();
   _authAbortController = abortController;
   _authCallbackServer = callbackServer;
@@ -190,7 +201,7 @@ export async function authenticateWithFirebase(): Promise<FirebaseCredentials> {
     }, AUTH_TIMEOUT);
 
     // Start polling server API (manual flow)
-    const serverPolling = pollServerForToken(code, abortController.signal).then(token => {
+    const serverPolling = pollServerForToken(proxyServerUrl, code, abortController.signal).then(token => {
       if (token) {
         abortController.abort();
         callbackServer.close();
@@ -369,12 +380,12 @@ export async function authenticateWithFirebase(): Promise<FirebaseCredentials> {
     });
   });
 
-  // 6. Close server and clear module-level references
+  // 8. Close server and clear module-level references
   callbackServer.close();
   _authAbortController = null;
   _authCallbackServer = null;
 
-  // 7. Save credentials
+  // 9. Save credentials
   saveCredentials(result);
 
   logAuth('firebase_auth_success', {
