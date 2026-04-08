@@ -35,6 +35,18 @@ import { validateHandshakeTimestamp } from './handshake-validation.js';
 import { requireValidHMAC } from '../connection/hmac.js';
 import { needsChunking, chunkMessage } from './chunking.js';
 
+function formatTimeUntilReset(resetTime?: number): string {
+  const now = Date.now();
+  const target = resetTime ?? Date.UTC(
+    new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1
+  );
+  const msLeft = Math.max(0, target - now);
+  const h = Math.floor(msLeft / 3600000);
+  const m = Math.floor((msLeft % 3600000) / 60000);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
 const KILL_TIMEOUT = 5000; // 5 seconds
 const SECRET_LENGTH = 33;
 // No default URL - proxyServerUrl must always be provided via options
@@ -772,6 +784,7 @@ export class ProxyClient {
 
     if (data.reason === 'daily_limit_exceeded') {
       console.warn(`\n⚠️  ${t('proxyError.dailyLimitExceeded')}`);
+      console.warn(`${t('proxyError.dailyLimitReset', { time: formatTimeUntilReset(data.resetTime) })}`);
       console.warn(`${t('proxyError.dailyLimitExceededHint')}\n`);
     }
 
@@ -841,6 +854,7 @@ export class ProxyClient {
 
       case 'daily_limit_exceeded':
         console.error(`\n⚠️  ${t('proxyError.dailyLimitExceeded')}`);
+        console.error(`${t('proxyError.dailyLimitReset', { time: formatTimeUntilReset(error.resetTime) })}`);
         console.error(`${t('proxyError.dailyLimitExceededHint')}\n`);
         break;
 

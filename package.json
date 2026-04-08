@@ -8,7 +8,7 @@
     "spck": "./bin/cli.js"
   },
   "scripts": {
-    "build": "tsc && cp -r src/i18n/locales dist/i18n/locales",
+    "build": "tsc && cp src/i18n/locales/*.json dist/i18n/locales/",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "watch": "tsc --watch",

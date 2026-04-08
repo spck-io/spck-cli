@@ -39,6 +39,14 @@ const DEFAULT_SERVERS: CLIServer[] = [
 ];
 
 /**
+ * Validate that a server URL belongs to spck.io (any subdomain).
+ * Rejects bare IPs, other domains, and URLs with protocols.
+ */
+export function isValidDomain(url: string): boolean {
+  return /^([a-zA-Z0-9-]+\.)*spck\.io$/.test(url);
+}
+
+/**
  * Get the hardcoded default server list
  */
 export function getDefaultServerList(): CLIServer[] {
@@ -58,7 +66,9 @@ export async function fetchServerList(): Promise<CLIServer[]> {
           signal: AbortSignal.timeout(5000),
         });
         if (!response.ok) throw new Error(`${response.status}`);
-        return response.json() as Promise<CLIServer[]>;
+        const list = await response.json() as CLIServer[];
+        // Reject any server whose URL is not a *.spck.io domain
+        return list.filter(s => isValidDomain(s.url));
       })
     );
   } catch {

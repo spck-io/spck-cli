@@ -155,7 +155,7 @@
     "subscriptionCheckFailed": "Impossible de vérifier l’état de l’abonnement.",
     "subscriptionCheckFailedHint": "Cela peut être un problème temporaire. Veuillez réessayer plus tard.",
     "subscriptionRequired": "Cette fonctionnalité nécessite un abonnement payant.",
-    "subscriptionRequiredHint": "Visitez https://spck.io/subscription pour mettre à niveau.",
+    "subscriptionRequiredHint": "Ouvrez l'application Spck Editor pour passer à Supporter ou Gold.",
     "maxConnections": "Maximum de {{max}} connexions CLI atteint.",
     "maxConnectionsHint": "Fermez les autres instances du CLI et réessayez.",
     "duplicateClientId": "Un CLI avec cet ID client est déjà connecté.",
@@ -176,7 +176,8 @@
     "firebaseTokenExpiring": "Le jeton Firebase a expiré. Tentative de rafraîchissement...",
     "tokenRefreshFailed": "Échec du rafraîchissement du jeton : {{message}}",
     "dailyLimitExceeded": "La limite quotidienne gratuite de 30 minutes a été atteinte.",
-    "dailyLimitExceededHint": "Passez à Supporter ou Gold pour un accès CLI illimité : https://spck.io/subscription",
+    "dailyLimitReset": "La limite sera réinitialisée dans {{time}}.",
+    "dailyLimitExceededHint": "Ouvrez l'application Spck Editor pour passer à Supporter ou Gold et bénéficier d'un accès CLI illimité.",
     "defaultError": "Un problème est survenu lors de la vérification de votre abonnement."
   },
   "errors": {

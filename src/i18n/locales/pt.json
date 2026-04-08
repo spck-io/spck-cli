@@ -155,7 +155,7 @@
     "subscriptionCheckFailed": "Não foi possível verificar o status da assinatura.",
     "subscriptionCheckFailedHint": "Isso pode ser um problema temporário. Tente novamente mais tarde.",
     "subscriptionRequired": "Este recurso requer uma assinatura paga.",
-    "subscriptionRequiredHint": "Acesse https://spck.io/subscription para fazer upgrade.",
+    "subscriptionRequiredHint": "Abra o aplicativo Spck Editor para fazer upgrade para Supporter ou Gold.",
     "maxConnections": "Máximo de {{max}} conexões CLI atingido.",
     "maxConnectionsHint": "Feche outras instâncias do CLI e tente novamente.",
     "duplicateClientId": "Um CLI com este ID de cliente já está conectado.",
@@ -176,7 +176,8 @@
     "firebaseTokenExpiring": "O token do Firebase expirou. Tentando atualizar...",
     "tokenRefreshFailed": "Falha na atualização do token: {{message}}",
     "dailyLimitExceeded": "O limite diário gratuito de 30 minutos foi atingido.",
-    "dailyLimitExceededHint": "Atualize para Supporter ou Gold para acesso CLI ilimitado: https://spck.io/subscription",
+    "dailyLimitReset": "O limite será redefinido em {{time}}.",
+    "dailyLimitExceededHint": "Abra o aplicativo Spck Editor para fazer upgrade para Supporter ou Gold e ter acesso CLI ilimitado.",
     "defaultError": "Ocorreu um problema ao verificar sua assinatura."
   },
   "errors": {

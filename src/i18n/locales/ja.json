@@ -155,7 +155,7 @@
     "subscriptionCheckFailed": "サブスクリプションの状態を確認できません。",
     "subscriptionCheckFailedHint": "一時的な問題の可能性があります。しばらくしてから再度お試しください。",
     "subscriptionRequired": "この機能には有料サブスクリプションが必要です。",
-    "subscriptionRequiredHint": "アップグレードするには https://spck.io/subscription にアクセスしてください。",
+    "subscriptionRequiredHint": "Spck EditorアプリでSupporterまたはGoldにアップグレードしてください。",
     "maxConnections": "CLI 接続の最大数 {{max}} に達しました。",
     "maxConnectionsHint": "他の CLI インスタンスを閉じて再度お試しください。",
     "duplicateClientId": "このクライアントIDの CLI は既に接続されています。",
@@ -176,7 +176,8 @@
     "firebaseTokenExpiring": "Firebase トークンが期限切れです。更新を試みています...",
     "tokenRefreshFailed": "トークンの更新に失敗しました: {{message}}",
     "dailyLimitExceeded": "1日30分の無料利用制限に達しました。",
-    "dailyLimitExceededHint": "無制限のCLIアクセスのためにSupporterまたはGoldにアップグレードしてください: https://spck.io/subscription",
+    "dailyLimitReset": "制限は{{time}}後にリセットされます。",
+    "dailyLimitExceededHint": "無制限のCLIアクセスのためにSpck EditorアプリでSupporterまたはGoldにアップグレードしてください。",
     "defaultError": "サブスクリプションの確認中に問題が発生しました。"
   },
   "errors": {

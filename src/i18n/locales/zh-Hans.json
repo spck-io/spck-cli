@@ -155,7 +155,7 @@
     "subscriptionCheckFailed": "无法验证订阅状态。",
     "subscriptionCheckFailedHint": "这可能是临时问题。请稍后重试。",
     "subscriptionRequired": "此功能需要付费订阅。",
-    "subscriptionRequiredHint": "请访问 https://spck.io/subscription 进行升级。",
+    "subscriptionRequiredHint": "请在Spck Editor应用内升级到Supporter或Gold。",
     "maxConnections": "已达到最大 CLI 连接数 {{max}}。",
     "maxConnectionsHint": "请关闭其他 CLI 实例后重试。",
     "duplicateClientId": "具有此客户端 ID 的 CLI 已经连接。",
@@ -176,7 +176,8 @@
     "firebaseTokenExpiring": "Firebase 令牌已过期。正在尝试刷新...",
     "tokenRefreshFailed": "令牌刷新失败: {{message}}",
     "dailyLimitExceeded": "已达到每日30分钟的免费使用限额。",
-    "dailyLimitExceededHint": "升级到Supporter或Gold以获得无限CLI访问: https://spck.io/subscription",
+    "dailyLimitReset": "限额将在{{time}}后重置。",
+    "dailyLimitExceededHint": "请在Spck Editor应用内升级到Supporter或Gold以获得无限CLI访问。",
     "defaultError": "验证订阅时出现问题。"
   },
   "errors": {

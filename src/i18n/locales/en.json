@@ -162,7 +162,7 @@
     "subscriptionCheckFailed": "Unable to verify subscription status.",
     "subscriptionCheckFailedHint": "This may be a temporary issue. Please try again later.",
     "subscriptionRequired": "This feature requires a paid subscription.",
-    "subscriptionRequiredHint": "Visit https://spck.io/subscription to upgrade.",
+    "subscriptionRequiredHint": "Open the Spck Editor app to upgrade to Supporter or Gold.",
     "maxConnections": "Maximum of {{max}} CLI connections reached.",
     "maxConnectionsHint": "Close other CLI instances and try again.",
     "duplicateClientId": "A CLI with this client ID is already connected.",
@@ -183,7 +183,8 @@
     "firebaseTokenExpiring": "Firebase token expired. Attempting to refresh...",
     "tokenRefreshFailed": "Token refresh failed: {{message}}",
     "dailyLimitExceeded": "Daily free tier limit of 30 minutes has been reached.",
-    "dailyLimitExceededHint": "Upgrade to Supporter or Gold for unlimited CLI access: https://spck.io/subscription",
+    "dailyLimitReset": "Limit resets in {{time}}.",
+    "dailyLimitExceededHint": "Open the Spck Editor app to upgrade to Supporter or Gold for unlimited CLI access.",
     "defaultError": "A problem occurred when verifying your subscription."
   },
   "errors": {

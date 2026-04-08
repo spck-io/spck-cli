@@ -17,7 +17,7 @@ import { FirebaseCredentials, StoredCredentials } from '../types.js';
 import { saveCredentials } from '../config/credentials.js';
 import { logAuth } from '../utils/logger.js';
 import { t } from '../i18n/index.js';
-import { fetchServerList, selectBestServer } from '../config/server-selection.js';
+import { fetchServerList, selectBestServer, isValidDomain } from '../config/server-selection.js';
 
 const AUTH_TIMEOUT = 10 * 60 * 1000; // 10 minutes
 const FIREBASE_AUTH_BASE_URL = 'https://spck.io/auth';
@@ -143,6 +143,10 @@ export async function authenticateWithFirebase(): Promise<FirebaseCredentials> {
   const servers = await fetchServerList();
   const { server: selectedServer } = await selectBestServer(servers);
   const proxyServerUrl = selectedServer.url;
+
+  if (!isValidDomain(proxyServerUrl)) {
+    throw new Error(`Untrusted proxy server domain: ${proxyServerUrl}`);
+  }
 
   // 2. Start local HTTP server
   const port = await getAvailablePort();

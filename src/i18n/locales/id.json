@@ -155,7 +155,7 @@
     "subscriptionCheckFailed": "Tidak dapat memverifikasi status langganan.",
     "subscriptionCheckFailedHint": "Ini mungkin masalah sementara. Silakan coba lagi nanti.",
     "subscriptionRequired": "Fitur ini memerlukan langganan berbayar.",
-    "subscriptionRequiredHint": "Kunjungi https://spck.io/subscription untuk meningkatkan.",
+    "subscriptionRequiredHint": "Buka aplikasi Spck Editor untuk upgrade ke Supporter atau Gold.",
     "maxConnections": "Batas maksimum {{max}} koneksi CLI tercapai.",
     "maxConnectionsHint": "Tutup instansi CLI lain dan coba lagi.",
     "duplicateClientId": "CLI dengan ID klien ini sudah terhubung.",
@@ -176,7 +176,8 @@
     "firebaseTokenExpiring": "Token Firebase kedaluwarsa. Mencoba memperbarui...",
     "tokenRefreshFailed": "Pembaruan token gagal: {{message}}",
     "dailyLimitExceeded": "Batas harian gratis 30 menit telah tercapai.",
-    "dailyLimitExceededHint": "Upgrade ke Supporter atau Gold untuk akses CLI tanpa batas: https://spck.io/subscription",
+    "dailyLimitReset": "Batas akan direset dalam {{time}}.",
+    "dailyLimitExceededHint": "Buka aplikasi Spck Editor untuk upgrade ke Supporter atau Gold dan dapatkan akses CLI tanpa batas.",
     "defaultError": "Terjadi masalah saat memverifikasi langganan Anda."
   },
   "errors": {
