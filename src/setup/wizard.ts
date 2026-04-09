@@ -10,7 +10,7 @@ import { ensureProjectDir } from '../utils/project-dir.js';
 import { gitignoreExists, isSpckEditorIgnored, addSpckEditorToGitignore } from '../utils/gitignore.js';
 import { t } from '../i18n/index.js';
 
-const USER_AUTH_DOCS_URL = 'https://docs.spck.io/networking/user-auth';
+const USER_AUTH_DOCS_URL = 'https://spck.io/docs/cli#user-authentication';
 
 /**
  * Create readline interface
