@@ -18,6 +18,7 @@ export class RPCRouter {
   private static browserProxyService: BrowserProxyService;
   private static rootPath: string;
   private static tools: ToolDetectionResult;
+  private static terminalEnabled: boolean;
   private static browserProxyEnabled: boolean;
 
   /**
@@ -26,6 +27,7 @@ export class RPCRouter {
   static initialize(rootPath: string, config: any, tools: ToolDetectionResult) {
     this.rootPath = rootPath;
     this.tools = tools;
+    this.terminalEnabled = config.terminal?.enabled ?? true;
     this.browserProxyEnabled = config.browserProxy?.enabled ?? true;
     this.filesystemService = new FilesystemService(rootPath, config.filesystem);
     this.gitService = new GitService(rootPath);
@@ -122,6 +124,12 @@ export class RPCRouter {
           return await this.searchService.handle(methodName, params, socket);
 
         case 'terminal':
+          if (!this.terminalEnabled) {
+            throw createRPCError(
+              ErrorCode.FEATURE_DISABLED,
+              'Terminal is disabled in configuration.'
+            );
+          }
           const terminalService = this.getTerminalService(socket);
           return await terminalService.handle(methodName, params);
 
