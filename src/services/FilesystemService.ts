@@ -60,6 +60,14 @@ export class FilesystemService {
           result = await this.stat(safePath!);
           logFsRead(method, params, deviceId, true, undefined, { size: result.size });
           return result;
+        case 'readFileBinary':
+          result = await this.readFileBinary(safePath!, params);
+          logFsRead(method, params, deviceId, true, undefined, { size: result.size, totalChunks: result.totalChunks });
+          return result;
+        case 'writeBinary':
+          result = await this.writeBinary(safePath!, params);
+          logFsWrite(method, params, deviceId, true, undefined, { size: result.size });
+          return result;
         case 'write':
           result = await this.write(safePath!, params);
           logFsWrite(method, params, deviceId, true, undefined, { size: result.size });
@@ -275,6 +283,58 @@ export class FilesystemService {
     }
   }
 
+  /**
+   * Binary read — returns an async iterable of Buffer chunks.
+   * ProxyClient detects the iterable and streams chunks to the client via __binaryChunk protocol.
+   * File handle is opened once and held for the full iteration (atomic w.r.t. the file descriptor).
+   */
+  private async readFileBinary(safePath: string, params: any): Promise<any> {
+    const CHUNK_SIZE = params.chunkSize || 750 * 1024;
+
+    let stats: any;
+    try {
+      stats = await fs.stat(safePath);
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        throw createRPCError(ErrorCode.FILE_NOT_FOUND, `File not found: ${safePath}`);
+      }
+      throw error;
+    }
+
+    const totalSize = stats.size;
+    const totalChunks = Math.max(1, Math.ceil(totalSize / CHUNK_SIZE));
+
+    // Return an async iterable. ProxyClient will detect [Symbol.asyncIterator] and stream chunks.
+    const iterable = {
+      totalChunks,
+      size: totalSize,
+      async *[Symbol.asyncIterator]() {
+        const fh = await fs.open(safePath, 'r');
+        try {
+          for (let i = 0; i < totalChunks; i++) {
+            const offset = i * CHUNK_SIZE;
+            const length = Math.min(CHUNK_SIZE, totalSize - offset);
+            const buf = Buffer.alloc(length);
+            if (length > 0) await fh.read(buf, 0, length, offset);
+            yield buf;
+          }
+        } finally {
+          await fh.close();
+        }
+      }
+    };
+    return iterable;
+  }
+
+  /**
+   * Binary write — receives the full buffer as a Socket.IO binary attachment.
+   * No accumulation needed; ProxyClient routes directly once Socket.IO reassembles the binary.
+   */
+  private async writeBinary(safePath: string, params: any): Promise<any> {
+    const buffer = Buffer.isBuffer(params.data) ? params.data : Buffer.alloc(0);
+    return this.write(safePath, { ...params, contents: buffer, encoding: 'binary' });
+  }
+
   private async readFile(safePath: string, params: any): Promise<any> {
     try {
       const stats = await fs.stat(safePath);
@@ -369,25 +429,9 @@ export class FilesystemService {
 
     // Write file (atomic or regular)
     if (atomic) {
-      // Use write-file-atomic for atomic writes
-      if (encoding === 'binary') {
-        const buffer = typeof params.contents === 'string'
-          ? Buffer.from(params.contents, 'base64')
-          : Buffer.from(params.contents || Buffer.alloc(0));
-        await writeFileAtomic(safePath, buffer);
-      } else {
-        await writeFileAtomic(safePath, params.contents, { encoding });
-      }
+      await writeFileAtomic(safePath, params.contents, { encoding });
     } else {
-      // Regular write
-      if (encoding === 'binary') {
-        const buffer = typeof params.contents === 'string'
-          ? Buffer.from(params.contents, 'base64')
-          : Buffer.from(params.contents || Buffer.alloc(0));
-        await fs.writeFile(safePath, buffer);
-      } else {
-        await fs.writeFile(safePath, params.contents, encoding);
-      }
+      await fs.writeFile(safePath, params.contents, encoding);
     }
 
     // Set executable if requested

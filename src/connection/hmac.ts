@@ -55,10 +55,23 @@ export function validateHMAC(message: JSONRPCRequest, signingKey: string): boole
   // Reconstruct the message that was signed (must match client's _computeHMAC)
   // Client uses: const { timestamp, hmac, ...rest } = request
   // So we need to include all fields except timestamp and hmac
+  // Strip any Buffer values from params before JSON.stringify,
+  // since they serialize inconsistently across environments. Both sides must do this.
+  let params = message.params;
+  if (params && typeof params === 'object') {
+    const cleanParams: any = {};
+    for (const [k, v] of Object.entries(params)) {
+      if (!Buffer.isBuffer(v)) {
+        cleanParams[k] = v;
+      }
+    }
+    params = cleanParams;
+  }
+
   const payload: any = {
     jsonrpc: message.jsonrpc,
     method: message.method,
-    params: message.params,
+    params,
     id: message.id,
     nonce: message.nonce
   };

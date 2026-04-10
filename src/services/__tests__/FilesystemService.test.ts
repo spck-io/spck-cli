@@ -283,13 +283,12 @@ describe('FilesystemService', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should write binary file from base64-encoded string', async () => {
+    it('should write binary file via writeBinary (Buffer, single chunk)', async () => {
       const bytes = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]); // PNG header
-      const base64 = bytes.toString('base64');
 
       const result = await service.handle(
-        'write',
-        { path: '/image.png', contents: base64, encoding: 'binary' },
+        'writeBinary',
+        { path: '/image.png', uploadId: 'upload-1', chunk: 0, totalChunks: 1, data: bytes },
         mockSocket
       );
 
@@ -300,13 +299,12 @@ describe('FilesystemService', () => {
       expect(written).toEqual(bytes);
     });
 
-    it('should write binary file atomically from base64-encoded string', async () => {
+    it('should write binary file atomically via writeBinary', async () => {
       const bytes = Buffer.from([0x00, 0x01, 0x02, 0x03, 0xFF, 0xFE, 0xFD]);
-      const base64 = bytes.toString('base64');
 
       const result = await service.handle(
-        'write',
-        { path: '/data.bin', contents: base64, encoding: 'binary', atomic: true },
+        'writeBinary',
+        { path: '/data.bin', uploadId: 'upload-2', chunk: 0, totalChunks: 1, data: bytes, atomic: true },
         mockSocket
       );
 
@@ -329,14 +327,13 @@ describe('FilesystemService', () => {
       expect(written.length).toBe(0);
     });
 
-    it('should preserve all byte values when writing binary via base64', async () => {
+    it('should preserve all byte values when writing binary via writeBinary', async () => {
       // Full range of byte values 0x00–0xFF
       const bytes = Buffer.from(Array.from({ length: 256 }, (_, i) => i));
-      const base64 = bytes.toString('base64');
 
       await service.handle(
-        'write',
-        { path: '/allbytes.bin', contents: base64, encoding: 'binary' },
+        'writeBinary',
+        { path: '/allbytes.bin', uploadId: 'upload-3', chunk: 0, totalChunks: 1, data: bytes },
         mockSocket
       );
 
@@ -1138,6 +1135,170 @@ describe('FilesystemService', () => {
       await expect(
         service.handle('readFile', { path: '/missing.bin', offset: 0, length: 10 }, mockSocket)
       ).rejects.toMatchObject({ code: ErrorCode.FILE_NOT_FOUND });
+    });
+  });
+
+  async function collectBinary(iterable: AsyncIterable<Buffer>): Promise<Buffer> {
+    const parts: Buffer[] = [];
+    for await (const chunk of iterable) parts.push(chunk);
+    return Buffer.concat(parts);
+  }
+
+  describe('File Operations - readFileBinary (async iterable)', () => {
+    it('should return async iterable with correct metadata for small file', async () => {
+      const content = Buffer.from([0x89, 0x50, 0x4E, 0x47]); // PNG header
+      await fs.writeFile(path.join(testRoot, 'small.png'), content);
+
+      const result = await service.handle('readFileBinary', { path: '/small.png' }, mockSocket);
+
+      expect(result.totalChunks).toBe(1);
+      expect(result.size).toBe(4);
+      expect(typeof result[Symbol.asyncIterator]).toBe('function');
+      expect(await collectBinary(result)).toEqual(content);
+    });
+
+    it('should stream multi-chunk file with correct chunk sizes', async () => {
+      const CHUNK = 512;
+      const content = Buffer.from(Array.from({ length: 1500 }, (_, i) => i % 256));
+      await fs.writeFile(path.join(testRoot, 'multi.bin'), content);
+
+      const result = await service.handle('readFileBinary', { path: '/multi.bin', chunkSize: CHUNK }, mockSocket);
+      expect(result.totalChunks).toBe(3);
+      expect(result.size).toBe(1500);
+
+      const chunks: Buffer[] = [];
+      for await (const chunk of result) {
+        expect(Buffer.isBuffer(chunk)).toBe(true);
+        chunks.push(chunk);
+      }
+      expect(chunks.length).toBe(3);
+      expect(Buffer.concat(chunks)).toEqual(content);
+    });
+
+    it('should reassemble to exact original bytes', async () => {
+      const content = Buffer.from(Array.from({ length: 256 }, (_, i) => i));
+      await fs.writeFile(path.join(testRoot, 'allbytes2.bin'), content);
+
+      const result = await service.handle('readFileBinary', { path: '/allbytes2.bin', chunkSize: 100 }, mockSocket);
+      expect(await collectBinary(result)).toEqual(content);
+    });
+
+    it('should handle empty file', async () => {
+      await fs.writeFile(path.join(testRoot, 'empty2.bin'), Buffer.alloc(0));
+      const result = await service.handle('readFileBinary', { path: '/empty2.bin' }, mockSocket);
+      expect(result.size).toBe(0);
+      expect(result.totalChunks).toBe(1);
+      expect((await collectBinary(result)).length).toBe(0);
+    });
+
+    it('should throw FILE_NOT_FOUND for missing file', async () => {
+      await expect(
+        service.handle('readFileBinary', { path: '/missing.bin' }, mockSocket)
+      ).rejects.toMatchObject({ code: ErrorCode.FILE_NOT_FOUND });
+    });
+
+    it('should support concurrent reads of the same file without interference', async () => {
+      const content = Buffer.from(Array.from({ length: 300 }, (_, i) => i % 256));
+      await fs.writeFile(path.join(testRoot, 'concurrent.bin'), content);
+
+      // Start two reads concurrently
+      const [r1, r2] = await Promise.all([
+        service.handle('readFileBinary', { path: '/concurrent.bin', chunkSize: 100 }, mockSocket),
+        service.handle('readFileBinary', { path: '/concurrent.bin', chunkSize: 150 }, mockSocket),
+      ]);
+
+      const [buf1, buf2] = await Promise.all([collectBinary(r1), collectBinary(r2)]);
+      expect(buf1).toEqual(content);
+      expect(buf2).toEqual(content);
+    });
+
+    it('should return sha256-verifiable content matching the written file', async () => {
+      const content = Buffer.from('binary content for hash check');
+      await fs.writeFile(path.join(testRoot, 'hashcheck.bin'), content);
+      const expected = crypto.createHash('sha256').update(content).digest('hex');
+
+      const result = await service.handle('readFileBinary', { path: '/hashcheck.bin' }, mockSocket);
+      const assembled = await collectBinary(result);
+      const actual = crypto.createHash('sha256').update(assembled).digest('hex');
+      expect(actual).toBe(expected);
+    });
+  });
+
+  describe('File Operations - writeBinary', () => {
+    it('should write binary Buffer directly', async () => {
+      const bytes = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+      const result = await service.handle('writeBinary',
+        { path: '/out.png', data: bytes },
+        mockSocket
+      );
+      expect(result.success).toBe(true);
+      expect(result.sha256).toBeTruthy();
+      expect(await fs.readFile(path.join(testRoot, 'out.png'))).toEqual(bytes);
+    });
+
+    it('should write all byte values correctly', async () => {
+      const bytes = Buffer.from(Array.from({ length: 256 }, (_, i) => i));
+      await service.handle('writeBinary', { path: '/allbytes3.bin', data: bytes }, mockSocket);
+      expect(await fs.readFile(path.join(testRoot, 'allbytes3.bin'))).toEqual(bytes);
+    });
+
+    it('should write atomically when requested', async () => {
+      const bytes = Buffer.from([0x00, 0x01, 0x02, 0x03, 0xFF]);
+      const result = await service.handle('writeBinary',
+        { path: '/atomic.bin', data: bytes, atomic: true },
+        mockSocket
+      );
+      expect(result.success).toBe(true);
+      expect(await fs.readFile(path.join(testRoot, 'atomic.bin'))).toEqual(bytes);
+    });
+
+    it('should return sha256 of written content', async () => {
+      const bytes = Buffer.from([0x01, 0x02, 0x03, 0x04]);
+      const expected = crypto.createHash('sha256').update(bytes).digest('hex');
+      const result = await service.handle('writeBinary', { path: '/sha.bin', data: bytes }, mockSocket);
+      expect(result.sha256).toBe(expected);
+    });
+
+    it('should overwrite existing file', async () => {
+      await fs.writeFile(path.join(testRoot, 'overwrite.bin'), Buffer.from([0xFF, 0xFF]));
+      const newBytes = Buffer.from([0x01, 0x02, 0x03]);
+      await service.handle('writeBinary', { path: '/overwrite.bin', data: newBytes }, mockSocket);
+      expect(await fs.readFile(path.join(testRoot, 'overwrite.bin'))).toEqual(newBytes);
+    });
+
+    it('should detect write conflict when expectedHash does not match', async () => {
+      const original = Buffer.from([0xAA, 0xBB]);
+      await fs.writeFile(path.join(testRoot, 'conflict.bin'), original);
+
+      await expect(
+        service.handle('writeBinary', {
+          path: '/conflict.bin',
+          data: Buffer.from([0x01]),
+          expectedHash: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+        }, mockSocket)
+      ).rejects.toMatchObject({ code: ErrorCode.WRITE_CONFLICT });
+    });
+
+    it('should write when expectedHash matches current file', async () => {
+      const original = Buffer.from([0xAA, 0xBB, 0xCC]);
+      await fs.writeFile(path.join(testRoot, 'match.bin'), original);
+      const correctHash = crypto.createHash('sha256').update(original).digest('hex');
+
+      const result = await service.handle('writeBinary', {
+        path: '/match.bin',
+        data: Buffer.from([0x11, 0x22]),
+        expectedHash: correctHash,
+      }, mockSocket);
+      expect(result.success).toBe(true);
+    });
+
+    it('round-trip: writeBinary then readFileBinary returns identical bytes', async () => {
+      const bytes = Buffer.from(Array.from({ length: 512 }, (_, i) => (i * 7 + 13) % 256));
+      await service.handle('writeBinary', { path: '/roundtrip.bin', data: bytes }, mockSocket);
+
+      const iterable = await service.handle('readFileBinary', { path: '/roundtrip.bin', chunkSize: 200 }, mockSocket);
+      const readBack = await collectBinary(iterable);
+      expect(readBack).toEqual(bytes);
     });
   });
 

@@ -704,6 +704,12 @@ export class ProxyClient {
       // Route to appropriate service with socket wrapper
       const result = await RPCRouter.route(message as JSONRPCRequest, connection.socketWrapper as any);
 
+      // If result is an async iterable, stream it as binary chunks (__binaryChunk protocol)
+      if (result != null && typeof result[Symbol.asyncIterator] === 'function') {
+        await this.sendBinaryChunked(connectionId, message.id || null, result);
+        return;
+      }
+
       // Send response
       const response: JSONRPCResponse = {
         jsonrpc: '2.0',
@@ -725,6 +731,50 @@ export class ProxyClient {
       };
 
       this.sendToClient(connectionId, 'rpc', response);
+    }
+  }
+
+  /**
+   * Stream an async iterable of Buffers to the client using the __binaryChunk protocol.
+   * Each chunk is sent as a Socket.IO binary attachment (no base64).
+   * The client assembles chunks and resolves the pending RPC request.
+   */
+  private async sendBinaryChunked(
+    connectionId: string,
+    requestId: number | string | null,
+    iterable: any
+  ): Promise<void> {
+    if (!this.socket) return;
+    const chunkId = crypto.randomBytes(8).toString('hex');
+    const total: number = iterable.totalChunks;
+
+    try {
+      let index = 0;
+      for await (const chunk of iterable) {
+        // Emit directly (bypass sendToClient/needsChunking) — Socket.IO handles Buffer natively
+        this.socket.emit('rpc', {
+          connectionId,
+          data: {
+            __binaryChunk: true,
+            chunkId,
+            requestId,
+            index,
+            total,
+            data: chunk, // Buffer — Socket.IO sends as binary attachment
+          },
+        });
+        index++;
+      }
+    } catch (error: any) {
+      // Stream error — send a normal RPC error so the client rejects the pending request
+      this.socket.emit('rpc', {
+        connectionId,
+        data: {
+          jsonrpc: '2.0',
+          id: requestId,
+          error: createRPCError(ErrorCode.INTERNAL_ERROR, error.message || 'Binary stream error'),
+        },
+      });
     }
   }
 
