@@ -327,14 +327,20 @@ export class FilesystemService {
     if (atomic) {
       // Use write-file-atomic for atomic writes
       if (encoding === 'binary') {
-        await writeFileAtomic(safePath, params.contents || Buffer.alloc(0));
+        const buffer = typeof params.contents === 'string'
+          ? Buffer.from(params.contents, 'base64')
+          : Buffer.from(params.contents || Buffer.alloc(0));
+        await writeFileAtomic(safePath, buffer);
       } else {
         await writeFileAtomic(safePath, params.contents, { encoding });
       }
     } else {
       // Regular write
       if (encoding === 'binary') {
-        await fs.writeFile(safePath, params.contents || Buffer.alloc(0));
+        const buffer = typeof params.contents === 'string'
+          ? Buffer.from(params.contents, 'base64')
+          : Buffer.from(params.contents || Buffer.alloc(0));
+        await fs.writeFile(safePath, buffer);
       } else {
         await fs.writeFile(safePath, params.contents, encoding);
       }

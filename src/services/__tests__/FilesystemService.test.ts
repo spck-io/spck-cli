@@ -259,6 +259,67 @@ describe('FilesystemService', () => {
       expect(result.success).toBe(true);
     });
 
+    it('should write binary file from base64-encoded string', async () => {
+      const bytes = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]); // PNG header
+      const base64 = bytes.toString('base64');
+
+      const result = await service.handle(
+        'write',
+        { path: '/image.png', contents: base64, encoding: 'binary' },
+        mockSocket
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.sha256).toBeTruthy();
+
+      const written = await fs.readFile(path.join(testRoot, 'image.png'));
+      expect(written).toEqual(bytes);
+    });
+
+    it('should write binary file atomically from base64-encoded string', async () => {
+      const bytes = Buffer.from([0x00, 0x01, 0x02, 0x03, 0xFF, 0xFE, 0xFD]);
+      const base64 = bytes.toString('base64');
+
+      const result = await service.handle(
+        'write',
+        { path: '/data.bin', contents: base64, encoding: 'binary', atomic: true },
+        mockSocket
+      );
+
+      expect(result.success).toBe(true);
+
+      const written = await fs.readFile(path.join(testRoot, 'data.bin'));
+      expect(written).toEqual(bytes);
+    });
+
+    it('should write empty binary file', async () => {
+      const result = await service.handle(
+        'write',
+        { path: '/empty.bin', contents: '', encoding: 'binary' },
+        mockSocket
+      );
+
+      expect(result.success).toBe(true);
+
+      const written = await fs.readFile(path.join(testRoot, 'empty.bin'));
+      expect(written.length).toBe(0);
+    });
+
+    it('should preserve all byte values when writing binary via base64', async () => {
+      // Full range of byte values 0x00–0xFF
+      const bytes = Buffer.from(Array.from({ length: 256 }, (_, i) => i));
+      const base64 = bytes.toString('base64');
+
+      await service.handle(
+        'write',
+        { path: '/allbytes.bin', contents: base64, encoding: 'binary' },
+        mockSocket
+      );
+
+      const written = await fs.readFile(path.join(testRoot, 'allbytes.bin'));
+      expect(written).toEqual(bytes);
+    });
+
     it('should set executable permission when requested', async () => {
       await service.handle(
         'write',
