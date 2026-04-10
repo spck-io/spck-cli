@@ -56,6 +56,10 @@ export class FilesystemService {
           result = await this.readFile(safePath!, params);
           logFsRead(method, params, deviceId, true, undefined, { size: result.size, encoding: result.encoding });
           return result;
+        case 'stat':
+          result = await this.stat(safePath!);
+          logFsRead(method, params, deviceId, true, undefined, { size: result.size });
+          return result;
         case 'write':
           result = await this.write(safePath!, params);
           logFsWrite(method, params, deviceId, true, undefined, { size: result.size });
@@ -114,7 +118,7 @@ export class FilesystemService {
     } catch (err) {
       error = err;
       // Determine if this was a read or write operation for logging
-      const readOps = ['exists', 'readFile', 'getFileHash', 'readdir', 'readdirDeep', 'bulkExists', 'lstat'];
+      const readOps = ['exists', 'readFile', 'getFileHash', 'readdir', 'readdirDeep', 'bulkExists', 'lstat', 'stat'];
       if (readOps.includes(method)) {
         logFsRead(method, params, deviceId, false, error);
       } else {
@@ -129,8 +133,11 @@ export class FilesystemService {
    * Prevents directory traversal and symlink escape attacks
    */
   private async validatePath(userPath: string): Promise<string> {
+    // Strip query string and fragment (cache-busters sent by the browser)
+    const cleanPath = userPath.split('?')[0].split('#')[0];
+
     // Normalize path
-    const normalized = path.normalize(userPath);
+    const normalized = path.normalize(cleanPath);
 
     // Prevent directory traversal
     if (normalized.includes('..')) {
@@ -251,11 +258,50 @@ export class FilesystemService {
   /**
    * Read file contents
    */
+  private async stat(safePath: string): Promise<any> {
+    try {
+      const stats = await fs.stat(safePath);
+      return {
+        size: stats.size,
+        mtime: stats.mtimeMs,
+        isFile: stats.isFile(),
+        isDirectory: stats.isDirectory(),
+      };
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        throw createRPCError(ErrorCode.FILE_NOT_FOUND, `File not found: ${safePath}`);
+      }
+      throw error;
+    }
+  }
+
   private async readFile(safePath: string, params: any): Promise<any> {
     try {
       const stats = await fs.stat(safePath);
 
-      // Check file size limit
+      const encoding = params.encoding || 'utf8';
+
+      // Range read: bypass maxFileSize limit since we only read a small chunk
+      if (params.offset !== undefined) {
+        const offset = params.offset as number;
+        const length = Math.min(
+          params.length !== undefined ? (params.length as number) : (stats.size - offset),
+          stats.size - offset
+        );
+        if (offset < 0 || length <= 0) {
+          throw createRPCError(ErrorCode.INVALID_PARAMS, 'Invalid range parameters');
+        }
+        const fh = await fs.open(safePath, 'r');
+        try {
+          const buf = Buffer.alloc(length);
+          await fh.read(buf, 0, length, offset);
+          return { buffer: buf, size: stats.size, offset, length, encoding: 'binary' };
+        } finally {
+          await fh.close();
+        }
+      }
+
+      // Check file size limit for full reads
       const maxSize = parseFileSize(this.config.maxFileSize);
       if (stats.size > maxSize) {
         throw createRPCError(
@@ -264,8 +310,6 @@ export class FilesystemService {
           { size: stats.size, maxSize }
         );
       }
-
-      const encoding = params.encoding || 'utf8';
 
       if (encoding === 'binary') {
         // Binary file - return buffer directly in response

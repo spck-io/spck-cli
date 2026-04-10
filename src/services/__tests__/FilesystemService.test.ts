@@ -82,6 +82,30 @@ describe('FilesystemService', () => {
 
       expect(result.exists).toBe(true);
     });
+
+    it('should strip query strings from paths (cache-busters)', async () => {
+      await fs.writeFile(path.join(testRoot, 'logo.png'), 'data');
+
+      const result = await service.handle(
+        'exists',
+        { path: '/logo.png?b=1775829760178' },
+        mockSocket
+      );
+
+      expect(result.exists).toBe(true);
+    });
+
+    it('should strip URL fragments from paths', async () => {
+      await fs.writeFile(path.join(testRoot, 'page.html'), '<html/>');
+
+      const result = await service.handle(
+        'exists',
+        { path: '/page.html#section' },
+        mockSocket
+      );
+
+      expect(result.exists).toBe(true);
+    });
   });
 
   describe('File Operations - exists', () => {
@@ -986,6 +1010,134 @@ describe('FilesystemService', () => {
         code: ErrorCode.INVALID_PARAMS,
         message: expect.stringContaining('paths must be an array'),
       });
+    });
+  });
+
+  describe('File Operations - stat', () => {
+    it('should return size, mtime, isFile, isDirectory for a file', async () => {
+      const content = 'hello stat';
+      await fs.writeFile(path.join(testRoot, 'stat-file.txt'), content);
+
+      const result = await service.handle('stat', { path: '/stat-file.txt' }, mockSocket);
+
+      expect(result.size).toBe(Buffer.byteLength(content));
+      expect(result.mtime).toBeGreaterThan(0);
+      expect(result.isFile).toBe(true);
+      expect(result.isDirectory).toBe(false);
+    });
+
+    it('should report isDirectory for a directory', async () => {
+      await fs.mkdir(path.join(testRoot, 'statdir'));
+
+      const result = await service.handle('stat', { path: '/statdir' }, mockSocket);
+
+      expect(result.isDirectory).toBe(true);
+      expect(result.isFile).toBe(false);
+    });
+
+    it('should throw FILE_NOT_FOUND for missing path', async () => {
+      await expect(
+        service.handle('stat', { path: '/no-such-file.txt' }, mockSocket)
+      ).rejects.toMatchObject({ code: ErrorCode.FILE_NOT_FOUND });
+    });
+  });
+
+  describe('File Operations - readFile (range read)', () => {
+    let fileContent: Buffer;
+    const FILE = '/range.bin';
+
+    beforeEach(async () => {
+      // 100-byte file: byte value equals its index
+      fileContent = Buffer.from(Array.from({ length: 100 }, (_, i) => i));
+      await fs.writeFile(path.join(testRoot, 'range.bin'), fileContent);
+    });
+
+    it('should read a byte range from the middle of the file', async () => {
+      const result = await service.handle(
+        'readFile',
+        { path: FILE, offset: 10, length: 20 },
+        mockSocket
+      );
+
+      expect(result.buffer).toEqual(fileContent.subarray(10, 30));
+      expect(result.offset).toBe(10);
+      expect(result.length).toBe(20);
+      expect(result.size).toBe(100);
+      expect(result.encoding).toBe('binary');
+    });
+
+    it('should read from offset 0', async () => {
+      const result = await service.handle(
+        'readFile',
+        { path: FILE, offset: 0, length: 5 },
+        mockSocket
+      );
+
+      expect(result.buffer).toEqual(fileContent.subarray(0, 5));
+    });
+
+    it('should read to end of file when length reaches past EOF', async () => {
+      // Request 50 bytes starting at offset 80 — only 20 bytes remain
+      const result = await service.handle(
+        'readFile',
+        { path: FILE, offset: 80, length: 50 },
+        mockSocket
+      );
+
+      expect(result.buffer).toEqual(fileContent.subarray(80, 100));
+      expect(result.length).toBe(20);
+    });
+
+    it('should use remaining bytes when length is omitted', async () => {
+      const result = await service.handle(
+        'readFile',
+        { path: FILE, offset: 90 },
+        mockSocket
+      );
+
+      expect(result.buffer).toEqual(fileContent.subarray(90));
+      expect(result.length).toBe(10);
+    });
+
+    it('should bypass the maxFileSize limit for range reads', async () => {
+      // Create a file larger than the 10 MB limit
+      const bigPath = path.join(testRoot, 'big.bin');
+      const bigBuf = Buffer.alloc(11 * 1024 * 1024, 0xab);
+      await fs.writeFile(bigPath, bigBuf);
+
+      // Full read should fail with FILE_TOO_LARGE
+      await expect(
+        service.handle('readFile', { path: '/big.bin' }, mockSocket)
+      ).rejects.toMatchObject({ code: ErrorCode.FILE_TOO_LARGE });
+
+      // Range read of the same file must succeed
+      const result = await service.handle(
+        'readFile',
+        { path: '/big.bin', offset: 0, length: 64 },
+        mockSocket
+      );
+
+      expect(result.buffer.length).toBe(64);
+      expect(result.size).toBe(bigBuf.length);
+    });
+
+    it('should throw INVALID_PARAMS when offset is negative', async () => {
+      await expect(
+        service.handle('readFile', { path: FILE, offset: -1, length: 10 }, mockSocket)
+      ).rejects.toMatchObject({ code: ErrorCode.INVALID_PARAMS });
+    });
+
+    it('should throw INVALID_PARAMS when range produces zero length', async () => {
+      // offset at end-of-file → length clamps to 0
+      await expect(
+        service.handle('readFile', { path: FILE, offset: 100, length: 10 }, mockSocket)
+      ).rejects.toMatchObject({ code: ErrorCode.INVALID_PARAMS });
+    });
+
+    it('should throw FILE_NOT_FOUND for range read on missing file', async () => {
+      await expect(
+        service.handle('readFile', { path: '/missing.bin', offset: 0, length: 10 }, mockSocket)
+      ).rejects.toMatchObject({ code: ErrorCode.FILE_NOT_FOUND });
     });
   });
 
