@@ -550,6 +550,9 @@ export class FilesystemService {
    */
   private async getFileHash(safePath: string): Promise<any> {
     const hash = await this.getFileHashValue(safePath);
+    if (hash === null) {
+      return { hash: null, size: 0, mtime: 0 };
+    }
     const stats = await fs.stat(safePath);
 
     return {

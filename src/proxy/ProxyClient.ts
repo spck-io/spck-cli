@@ -706,7 +706,7 @@ export class ProxyClient {
 
       // If result is an async iterable, stream it as binary chunks (__binaryChunk protocol)
       if (result != null && typeof result[Symbol.asyncIterator] === 'function') {
-        await this.sendBinaryChunked(connectionId, message.id || null, result);
+        await this.sendBinaryChunked(connectionId, message.id ?? null, result);
         return;
       }
 
@@ -714,7 +714,7 @@ export class ProxyClient {
       const response: JSONRPCResponse = {
         jsonrpc: '2.0',
         result,
-        id: message.id || null,
+        id: message.id ?? null,
       };
 
       this.sendToClient(connectionId, 'rpc', response);
@@ -727,7 +727,7 @@ export class ProxyClient {
           ErrorCode.INTERNAL_ERROR,
           error.message || 'Internal error'
         ),
-        id: message.id || null,
+        id: message.id ?? null,
       };
 
       this.sendToClient(connectionId, 'rpc', response);
@@ -747,6 +747,8 @@ export class ProxyClient {
     if (!this.socket) return;
     const chunkId = crypto.randomBytes(8).toString('hex');
     const total: number = iterable.totalChunks;
+    const sizeMB = iterable.size ? `~${Math.round(iterable.size / 1024 / 1024 * 10) / 10}MB` : '?';
+    console.log(`📦 Binary streaming: ${total} chunks (${sizeMB}) for request ${requestId}`);
 
     try {
       let index = 0;

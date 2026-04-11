@@ -447,6 +447,31 @@ describe('FilesystemService', () => {
       expect(result.size).toBe(Buffer.from(content).length);
       expect(result.mtime).toBeGreaterThan(0);
     });
+
+    it('should return null hash when file does not exist', async () => {
+      const result = await service.handle('getFileHash', { path: '/nonexistent.txt' }, mockSocket);
+
+      expect(result.hash).toBeNull();
+      expect(result.size).toBe(0);
+      expect(result.mtime).toBe(0);
+    });
+
+    it('should return null hash after file is deleted', async () => {
+      await fs.writeFile(path.join(testRoot, 'deleted.txt'), 'some content');
+
+      // Verify hash exists before deletion
+      const before = await service.handle('getFileHash', { path: '/deleted.txt' }, mockSocket);
+      expect(before.hash).not.toBeNull();
+
+      // Delete the file
+      await fs.unlink(path.join(testRoot, 'deleted.txt'));
+
+      // Should gracefully return null hash instead of throwing ENOENT
+      const after = await service.handle('getFileHash', { path: '/deleted.txt' }, mockSocket);
+      expect(after.hash).toBeNull();
+      expect(after.size).toBe(0);
+      expect(after.mtime).toBe(0);
+    });
   });
 
   describe('File Operations - remove', () => {
