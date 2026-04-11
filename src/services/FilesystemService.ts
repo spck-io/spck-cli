@@ -62,7 +62,11 @@ export class FilesystemService {
           return result;
         case 'readFileBinary':
           result = await this.readFileBinary(safePath!, params);
-          logFsRead(method, params, deviceId, true, undefined, { size: result.size, totalChunks: result.totalChunks });
+          logFsRead(method, params, deviceId, true, undefined,
+            result.rangeLength !== undefined
+              ? { size: result.size, offset: result.rangeOffset, length: result.rangeLength }
+              : { size: result.size, totalChunks: result.totalChunks }
+          );
           return result;
         case 'writeBinary':
           result = await this.writeBinary(safePath!, params);
@@ -302,6 +306,36 @@ export class FilesystemService {
     }
 
     const totalSize = stats.size;
+
+    // Range read: single-chunk iterable for a specific byte range (used by video streaming)
+    if (params.offset !== undefined) {
+      const offset = params.offset as number;
+      const rangeLength = Math.min(
+        params.length !== undefined ? (params.length as number) : (totalSize - offset),
+        totalSize - offset
+      );
+      if (offset < 0 || rangeLength < 0) {
+        throw createRPCError(ErrorCode.INVALID_PARAMS, 'Invalid range parameters');
+      }
+      const iterable = {
+        totalChunks: 1,
+        size: totalSize,
+        rangeOffset: offset,
+        rangeLength,
+        async *[Symbol.asyncIterator]() {
+          const fh = await fs.open(safePath, 'r');
+          try {
+            const buf = Buffer.alloc(rangeLength);
+            if (rangeLength > 0) await fh.read(buf, 0, rangeLength, offset);
+            yield buf;
+          } finally {
+            await fh.close();
+          }
+        }
+      };
+      return iterable;
+    }
+
     const totalChunks = Math.max(1, Math.ceil(totalSize / CHUNK_SIZE));
 
     // Return an async iterable. ProxyClient will detect [Symbol.asyncIterator] and stream chunks.
