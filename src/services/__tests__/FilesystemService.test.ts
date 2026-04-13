@@ -1247,6 +1247,83 @@ describe('FilesystemService', () => {
       const actual = crypto.createHash('sha256').update(assembled).digest('hex');
       expect(actual).toBe(expected);
     });
+
+    describe('range reads (offset + length)', () => {
+      it('should return correct metadata for a small range (single chunk)', async () => {
+        const content = Buffer.from(Array.from({ length: 200 }, (_, i) => i % 256));
+        await fs.writeFile(path.join(testRoot, 'range-small.bin'), content);
+
+        const result = await service.handle(
+          'readFileBinary',
+          { path: '/range-small.bin', offset: 10, length: 50 },
+          mockSocket
+        );
+
+        expect(result.totalChunks).toBe(1);
+        expect(result.size).toBe(200);       // total file size
+        expect(result.rangeOffset).toBe(10);
+        expect(result.rangeLength).toBe(50);
+        expect(await collectBinary(result)).toEqual(content.slice(10, 60));
+      });
+
+      it('should chunk a large range rather than sending it as one message', async () => {
+        // Use a chunkSize of 500 bytes so we can trigger multi-chunk with a small file
+        const CHUNK = 500;
+        const content = Buffer.from(Array.from({ length: 1600 }, (_, i) => i % 256));
+        await fs.writeFile(path.join(testRoot, 'range-large.bin'), content);
+
+        // Request the full file via offset/length — this was the disconnect-triggering path
+        const result = await service.handle(
+          'readFileBinary',
+          { path: '/range-large.bin', offset: 0, length: 1600, chunkSize: CHUNK },
+          mockSocket
+        );
+
+        // Should produce 4 chunks of ≤500 bytes each, not 1 chunk of 1600 bytes
+        expect(result.totalChunks).toBe(4);
+        expect(result.rangeOffset).toBe(0);
+        expect(result.rangeLength).toBe(1600);
+
+        const chunks: Buffer[] = [];
+        for await (const chunk of result) {
+          expect(chunk.length).toBeLessThanOrEqual(CHUNK);
+          chunks.push(chunk);
+        }
+        expect(chunks.length).toBe(4);
+        expect(Buffer.concat(chunks)).toEqual(content);
+      });
+
+      it('should return correct bytes for a mid-file range split across chunks', async () => {
+        const CHUNK = 300;
+        const content = Buffer.from(Array.from({ length: 1000 }, (_, i) => (i * 3 + 7) % 256));
+        await fs.writeFile(path.join(testRoot, 'range-mid.bin'), content);
+
+        // Request bytes 100–799 (700 bytes → 3 chunks of ≤300)
+        const result = await service.handle(
+          'readFileBinary',
+          { path: '/range-mid.bin', offset: 100, length: 700, chunkSize: CHUNK },
+          mockSocket
+        );
+
+        expect(result.totalChunks).toBe(3);
+        expect(await collectBinary(result)).toEqual(content.slice(100, 800));
+      });
+
+      it('should clamp length to remaining file size when length exceeds file bounds', async () => {
+        const content = Buffer.from(Array.from({ length: 100 }, (_, i) => i));
+        await fs.writeFile(path.join(testRoot, 'range-clamp.bin'), content);
+
+        const result = await service.handle(
+          'readFileBinary',
+          { path: '/range-clamp.bin', offset: 80, length: 999 },
+          mockSocket
+        );
+
+        // Should clamp to the 20 remaining bytes
+        expect(result.rangeLength).toBe(20);
+        expect(await collectBinary(result)).toEqual(content.slice(80));
+      });
+    });
   });
 
   describe('File Operations - writeBinary', () => {

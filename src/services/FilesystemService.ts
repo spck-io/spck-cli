@@ -15,6 +15,8 @@ import { logFsRead, logFsWrite } from '../utils/logger.js';
 export class FilesystemService {
   private resolvedRootPath: string;
   private realRootPath: string | null = null;
+  // Per-device upload chunk buffers: deviceId -> chunkId -> Map(index -> Buffer)
+  private uploadChunks: Map<string, Map<string, Map<number, Buffer>>> = new Map();
 
   constructor(
     private rootPath: string,
@@ -68,8 +70,11 @@ export class FilesystemService {
               : { size: result.size, totalChunks: result.totalChunks }
           );
           return result;
+        case 'writeBinaryChunk':
+          result = await this.storeUploadChunk(params, deviceId);
+          return result;
         case 'writeBinary':
-          result = await this.writeBinary(safePath!, params);
+          result = await this.writeBinary(safePath!, params, deviceId);
           logFsWrite(method, params, deviceId, true, undefined, { size: result.size });
           return result;
         case 'write':
@@ -307,7 +312,8 @@ export class FilesystemService {
 
     const totalSize = stats.size;
 
-    // Range read: single-chunk iterable for a specific byte range (used by video streaming)
+    // Range read: iterable for a specific byte range (used by video streaming).
+    // Chunked like the full-file path so no single message exceeds the relay limit.
     if (params.offset !== undefined) {
       const offset = params.offset as number;
       const rangeLength = Math.min(
@@ -317,17 +323,22 @@ export class FilesystemService {
       if (offset < 0 || rangeLength < 0) {
         throw createRPCError(ErrorCode.INVALID_PARAMS, 'Invalid range parameters');
       }
+      const totalChunks = Math.max(1, Math.ceil(rangeLength / CHUNK_SIZE));
       const iterable = {
-        totalChunks: 1,
+        totalChunks,
         size: totalSize,
         rangeOffset: offset,
         rangeLength,
         async *[Symbol.asyncIterator]() {
           const fh = await fs.open(safePath, 'r');
           try {
-            const buf = Buffer.alloc(rangeLength);
-            if (rangeLength > 0) await fh.read(buf, 0, rangeLength, offset);
-            yield buf;
+            for (let i = 0; i < totalChunks; i++) {
+              const chunkOffset = offset + i * CHUNK_SIZE;
+              const chunkLength = Math.min(CHUNK_SIZE, rangeLength - i * CHUNK_SIZE);
+              const buf = Buffer.alloc(chunkLength);
+              if (chunkLength > 0) await fh.read(buf, 0, chunkLength, chunkOffset);
+              yield buf;
+            }
           } finally {
             await fh.close();
           }
@@ -361,11 +372,56 @@ export class FilesystemService {
   }
 
   /**
-   * Binary write — receives the full buffer as a Socket.IO binary attachment.
-   * No accumulation needed; ProxyClient routes directly once Socket.IO reassembles the binary.
+   * Store a single upload chunk from the client (chunked binary upload protocol).
+   * Returns { received: index, total } so the client can confirm receipt.
    */
-  private async writeBinary(safePath: string, params: any): Promise<any> {
-    const buffer = Buffer.isBuffer(params.data) ? params.data : Buffer.alloc(0);
+  private async storeUploadChunk(params: any, deviceId: string): Promise<any> {
+    const { chunkId, index, total, data } = params;
+    if (!chunkId || index === undefined || !total) {
+      throw createRPCError(ErrorCode.INVALID_REQUEST, 'writeBinaryChunk: missing chunkId, index, or total');
+    }
+    if (!this.uploadChunks.has(deviceId)) {
+      this.uploadChunks.set(deviceId, new Map());
+    }
+    const deviceMap = this.uploadChunks.get(deviceId)!;
+    if (!deviceMap.has(chunkId)) {
+      console.log(`📦 Binary upload: receiving ${total} chunks for chunkId ${chunkId}`);
+      deviceMap.set(chunkId, new Map());
+    }
+    const chunk = Buffer.isBuffer(data) ? data : Buffer.from(data);
+    deviceMap.get(chunkId)!.set(index, chunk);
+    return { received: index, total };
+  }
+
+  /**
+   * Binary write — receives either:
+   * - A full buffer in params.data (small files, single Socket.IO binary attachment), or
+   * - A chunkId referencing previously uploaded chunks (large files, chunked upload protocol).
+   */
+  private async writeBinary(safePath: string, params: any, deviceId: string): Promise<any> {
+    let buffer: Buffer;
+    if (params.chunkId) {
+      // Assemble from uploaded chunks
+      const deviceMap = this.uploadChunks.get(deviceId);
+      const chunkMap = deviceMap?.get(params.chunkId);
+      if (!chunkMap) {
+        throw createRPCError(ErrorCode.INVALID_REQUEST, `writeBinary: no uploaded chunks found for chunkId ${params.chunkId}`);
+      }
+      const total = chunkMap.size;
+      const parts: Buffer[] = [];
+      for (let i = 0; i < total; i++) {
+        const part = chunkMap.get(i);
+        if (!part) {
+          throw createRPCError(ErrorCode.INVALID_REQUEST, `writeBinary: missing chunk ${i} for chunkId ${params.chunkId}`);
+        }
+        parts.push(part);
+      }
+      buffer = Buffer.concat(parts);
+      deviceMap!.delete(params.chunkId);
+      console.log(`✅ Binary upload assembled: ${buffer.length} bytes from ${total} chunks`);
+    } else {
+      buffer = Buffer.isBuffer(params.data) ? params.data : Buffer.alloc(0);
+    }
     return this.write(safePath, { ...params, contents: buffer, encoding: 'binary' });
   }
 
