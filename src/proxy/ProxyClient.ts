@@ -83,7 +83,7 @@ export class ProxyClient {
   private knownDeviceIds: Set<string> = new Set(loadGlobalConfig().knownDeviceIds); // Track known device IDs
   private firebaseToken: string;
   private userId: string;
-  private tokenRefreshAttempted: boolean = false;
+  private tokenRefreshState: 'idle' | 'refreshing' | 'failed' = 'idle';
 
   constructor(private options: ProxyClientOptions) {
     this.config = options.config;
@@ -115,7 +115,7 @@ export class ProxyClient {
         serverToken: existingToken,
       },
       reconnection: true,
-      reconnectionAttempts: 10,
+      reconnectionAttempts: 35,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 10000,
       timeout: 25000,
@@ -250,6 +250,8 @@ export class ProxyClient {
    */
   private handleAuthenticated(data: ProxyAuthenticatedEvent): void {
     logAuth('proxy_authenticated', { userId: data.userId, clientId: data.clientId });
+
+    this.tokenRefreshState = 'idle';
 
     // Track if this is a new CLI session (vs automatic reconnection in same session)
     const isNewSession = this.connectionSettings === null;
@@ -848,18 +850,25 @@ export class ProxyClient {
    * Handle proxy error
    */
   private async handleError(error: ProxyErrorEvent): Promise<void> {
-    // Special handling for expired_firebase_token - attempt refresh before giving up
-    if (error.code === 'expired_firebase_token' && !this.tokenRefreshAttempted) {
-      console.warn(`\n⚠️  ${t('proxyError.firebaseTokenExpiring')}`);
-      this.tokenRefreshAttempted = true;
-
-      try {
-        await this.refreshTokenAndReconnect();
-        // If successful, the connection will be re-established
+    // The server can emit multiple expired_firebase_token events during a reconnect
+    // cycle; guard so only one refresh runs and duplicates are silently dropped.
+    if (error.code === 'expired_firebase_token') {
+      if (this.tokenRefreshState === 'refreshing') {
         return;
-      } catch (refreshError: any) {
-        console.error(`\n❌ ${t('proxyError.tokenRefreshFailed', { message: refreshError.message })}`);
-        // Fall through to regular error handling
+      }
+      if (this.tokenRefreshState === 'idle') {
+        console.warn(`\n⚠️  ${t('proxyError.firebaseTokenExpiring')}`);
+        this.tokenRefreshState = 'refreshing';
+
+        try {
+          await this.refreshTokenAndReconnect();
+          // handleAuthenticated already reset state to 'idle'
+          return;
+        } catch (refreshError: any) {
+          this.tokenRefreshState = 'failed';
+          console.error(`\n❌ ${t('proxyError.tokenRefreshFailed', { message: refreshError.message })}`);
+          // Fall through to regular error handling
+        }
       }
     }
 
@@ -929,7 +938,7 @@ export class ProxyClient {
         break;
 
       case 'expired_firebase_token':
-        if (this.tokenRefreshAttempted) {
+        if (this.tokenRefreshState === 'failed') {
           console.error(`\n⚠️  ${t('proxyError.firebaseExpiredRefreshFailed')}`);
           console.error(`${t('proxyError.firebaseExpiredRefreshFailedHint')}\n`);
         } else {

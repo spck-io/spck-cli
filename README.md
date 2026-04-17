@@ -19,7 +19,7 @@ Connect your local development environment to Spck Editor mobile app and access 
 
 - **Node.js**: 18.0.0 or higher
 - **Operating System**: Linux, macOS, or Windows
-- **Spck Editor Account**: Premium subscription required
+- **Spck Editor Account**: Free account (30 min/day) or Premium subscription (unlimited)
 - **Spck Editor Mobile App**: Required for QR code connection (Android/iOS)
 
 ### Optional (Recommended)
@@ -619,7 +619,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ## Links
 
 - **Website**: [https://spck.io](https://spck.io)
-- **Documentation**: [https://spck.io/docs/cli](https://spck.io/docs/cli)
+- **Documentation**: [https://docs.spck.io/en/cli-start](https://docs.spck.io/en/cli-start)
 - **Download**: [Spck Editor on Google Play](https://play.google.com/store/apps/details?id=io.spck) | [Spck Editor on App Store](https://apps.apple.com/us/app/spck-editor/id1507309511)
 
 ## Support
