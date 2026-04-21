@@ -844,9 +844,6 @@ describe('FilesystemService', () => {
         mtimeMs: expect.any(Number),
         ctimeMs: expect.any(Number),
         atimeMs: expect.any(Number),
-        isFile: true,
-        isDirectory: false,
-        isSymbolicLink: false,
       });
     });
 
@@ -855,8 +852,8 @@ describe('FilesystemService', () => {
 
       const result = await service.handle('lstat', { path: '/statdir' }, mockSocket);
 
-      expect(result.isFile).toBe(false);
-      expect(result.isDirectory).toBe(true);
+      expect(result.mode).toEqual(expect.any(Number));
+      expect(result.size).toEqual(expect.any(Number));
     });
   });
 
@@ -1044,17 +1041,15 @@ describe('FilesystemService', () => {
 
       expect(result.size).toBe(Buffer.byteLength(content));
       expect(result.mtime).toBeGreaterThan(0);
-      expect(result.isFile).toBe(true);
-      expect(result.isDirectory).toBe(false);
     });
 
-    it('should report isDirectory for a directory', async () => {
+    it('should return metadata for a directory', async () => {
       await fs.mkdir(path.join(testRoot, 'statdir'));
 
       const result = await service.handle('stat', { path: '/statdir' }, mockSocket);
 
-      expect(result.isDirectory).toBe(true);
-      expect(result.isFile).toBe(false);
+      expect(result.mode).toEqual(expect.any(Number));
+      expect(result.size).toEqual(expect.any(Number));
     });
 
     it('should throw FILE_NOT_FOUND for missing path', async () => {

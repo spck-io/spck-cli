@@ -279,10 +279,11 @@ export class FilesystemService {
     try {
       const stats = await fs.stat(safePath);
       return {
+        mode: stats.mode,
         size: stats.size,
         mtime: stats.mtimeMs,
-        isFile: stats.isFile(),
-        isDirectory: stats.isDirectory(),
+        ctime: stats.ctimeMs,
+        atimeMs: stats.atimeMs,
       };
     } catch (error: any) {
       if (error.code === 'ENOENT') {
@@ -881,9 +882,6 @@ export class FilesystemService {
         mtimeMs: stats.mtimeMs,
         ctimeMs: stats.ctimeMs,
         atimeMs: stats.atimeMs,
-        isFile: stats.isFile(),
-        isDirectory: stats.isDirectory(),
-        isSymbolicLink: stats.isSymbolicLink(),
       };
     } catch (error: any) {
       if (error.code === 'ENOENT') {
