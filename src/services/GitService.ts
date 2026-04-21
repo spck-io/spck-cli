@@ -95,7 +95,7 @@ export class GitService {
                      'listRemotes', 'isIgnored', 'bulkIsIgnored', 'isInitialized', 'listSubmodules', 'requestAuth',
                      'getDefaultAuthor'];
     const writeOps = ['add', 'remove', 'resetIndex', 'commit', 'setConfig', 'checkout', 'init',
-                      'addRemote', 'deleteRemote', 'clearIndex', 'push', 'pull', 'fetch', 'clone'];
+                      'addRemote', 'deleteRemote', 'clearIndex', 'push', 'pull', 'fetch', 'clone', 'resetHead'];
 
     try {
       switch (method) {
@@ -231,6 +231,10 @@ export class GitService {
         case 'clone':
           result = await this.clone(gitCwd, params, socket);
           logGitWrite(method, params, deviceId, true, undefined, { url: params.url });
+          return result;
+        case 'resetHead':
+          result = await this.resetHead(gitCwd, params, socket);
+          logGitWrite(method, params, deviceId, true, undefined, { branch: params.branch, oid: params.oid });
           return result;
         default:
           throw createRPCError(ErrorCode.METHOD_NOT_FOUND, `Method not found: git.${method}`);
@@ -1133,6 +1137,23 @@ export class GitService {
       // If no files in index, this is fine
       return { success: true };
     }
+  }
+
+  /**
+   * Reset a branch HEAD to the given commit OID (git update-ref)
+   */
+  private async resetHead(dir: string, params: any, socket: AuthenticatedSocket): Promise<{ success: boolean }> {
+    const { branch, oid } = params;
+    const sanitizedBranch = this.sanitizeRef(branch);
+    await this.execGit(['update-ref', `refs/heads/${sanitizedBranch}`, oid], { cwd: dir });
+
+    socket.broadcast.emit('rpc', {
+      jsonrpc: '2.0',
+      method: 'git.changed',
+      params: { dir },
+    });
+
+    return { success: true };
   }
 
   /**
