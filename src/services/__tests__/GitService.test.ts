@@ -473,6 +473,71 @@ describe('GitService', () => {
     });
   });
 
+  describe('Git Operations - branch', () => {
+    beforeEach(async () => {
+      await execGit(['init'], repoPath);
+      await execGit(['config', 'user.email', 'test@example.com'], repoPath);
+      await execGit(['config', 'user.name', 'Test User'], repoPath);
+      await fs.writeFile(path.join(repoPath, 'file.txt'), 'content');
+      await execGit(['add', '.'], repoPath);
+      await execGit(['commit', '-m', 'Initial'], repoPath);
+    });
+
+    it('should create a new branch', async () => {
+      const result = await service.handle(
+        'branch',
+        { dir: '/repo', ref: 'feature' },
+        mockSocket
+      );
+
+      expect(result.success).toBe(true);
+      const branches = await execGit(['branch', '--list', 'feature'], repoPath);
+      expect(branches.trim()).toContain('feature');
+    });
+
+    it('should create and checkout a branch when checkout is true', async () => {
+      const result = await service.handle(
+        'branch',
+        { dir: '/repo', ref: 'new-feature', checkout: true },
+        mockSocket
+      );
+
+      expect(result.success).toBe(true);
+      const currentBranch = await execGit(['symbolic-ref', '--short', 'HEAD'], repoPath);
+      expect(currentBranch).toBe('new-feature');
+    });
+  });
+
+  describe('Git Operations - deleteBranch', () => {
+    beforeEach(async () => {
+      await execGit(['init'], repoPath);
+      await execGit(['config', 'user.email', 'test@example.com'], repoPath);
+      await execGit(['config', 'user.name', 'Test User'], repoPath);
+      await fs.writeFile(path.join(repoPath, 'file.txt'), 'content');
+      await execGit(['add', '.'], repoPath);
+      await execGit(['commit', '-m', 'Initial'], repoPath);
+      await execGit(['branch', 'to-delete'], repoPath);
+    });
+
+    it('should delete a branch', async () => {
+      const result = await service.handle(
+        'deleteBranch',
+        { dir: '/repo', ref: 'to-delete' },
+        mockSocket
+      );
+
+      expect(result.success).toBe(true);
+      const branches = await execGit(['branch', '--list', 'to-delete'], repoPath);
+      expect(branches.trim()).toBe('');
+    });
+
+    it('should throw when deleting non-existent branch', async () => {
+      await expect(
+        service.handle('deleteBranch', { dir: '/repo', ref: 'no-such-branch' }, mockSocket)
+      ).rejects.toThrow();
+    });
+  });
+
   describe('Git Operations - requestAuth', () => {
     it('should request authentication from client', async () => {
       const mockResponse = {
@@ -1049,6 +1114,106 @@ describe('GitService', () => {
       );
 
       expect(result.oid).toBe(expected);
+    });
+  });
+
+  describe('Git Operations - listCommitsAndTags', () => {
+    let commit1: string;
+    let commit2: string;
+
+    beforeEach(async () => {
+      await execGit(['init'], repoPath);
+      await execGit(['config', 'user.email', 'test@example.com'], repoPath);
+      await execGit(['config', 'user.name', 'Test User'], repoPath);
+      await fs.writeFile(path.join(repoPath, 'a.txt'), 'a');
+      await execGit(['add', '.'], repoPath);
+      await execGit(['commit', '-m', 'First'], repoPath);
+      commit1 = (await execGit(['rev-parse', 'HEAD'], repoPath)).trim();
+      await fs.writeFile(path.join(repoPath, 'b.txt'), 'b');
+      await execGit(['add', '.'], repoPath);
+      await execGit(['commit', '-m', 'Second'], repoPath);
+      commit2 = (await execGit(['rev-parse', 'HEAD'], repoPath)).trim();
+    });
+
+    it('should return all commits when finish is empty', async () => {
+      const result = await service.handle(
+        'listCommitsAndTags',
+        { dir: '/repo', start: [commit2], finish: [] },
+        mockSocket
+      );
+
+      expect(result).toContain(commit2);
+      expect(result).toContain(commit1);
+    });
+
+    it('should exclude commits reachable from finish', async () => {
+      const result = await service.handle(
+        'listCommitsAndTags',
+        { dir: '/repo', start: [commit2], finish: [commit1] },
+        mockSocket
+      );
+
+      expect(result).toContain(commit2);
+      expect(result).not.toContain(commit1);
+    });
+
+    it('should return empty array when start is empty', async () => {
+      const result = await service.handle(
+        'listCommitsAndTags',
+        { dir: '/repo', start: [], finish: [] },
+        mockSocket
+      );
+
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe('Git Operations - findMergeBase', () => {
+    let base: string;
+
+    beforeEach(async () => {
+      await execGit(['init'], repoPath);
+      await execGit(['config', 'user.email', 'test@example.com'], repoPath);
+      await execGit(['config', 'user.name', 'Test User'], repoPath);
+      await fs.writeFile(path.join(repoPath, 'base.txt'), 'base');
+      await execGit(['add', '.'], repoPath);
+      await execGit(['commit', '-m', 'Base'], repoPath);
+      base = (await execGit(['rev-parse', 'HEAD'], repoPath)).trim();
+
+      // Create branch A
+      await execGit(['checkout', '-b', 'branchA'], repoPath);
+      await fs.writeFile(path.join(repoPath, 'a.txt'), 'a');
+      await execGit(['add', '.'], repoPath);
+      await execGit(['commit', '-m', 'A'], repoPath);
+
+      // Create branch B from base
+      await execGit(['checkout', '-b', 'branchB', base], repoPath);
+      await fs.writeFile(path.join(repoPath, 'b.txt'), 'b');
+      await execGit(['add', '.'], repoPath);
+      await execGit(['commit', '-m', 'B'], repoPath);
+    });
+
+    it('should find common ancestor of two branches', async () => {
+      const commitA = (await execGit(['rev-parse', 'branchA'], repoPath)).trim();
+      const commitB = (await execGit(['rev-parse', 'branchB'], repoPath)).trim();
+
+      const result = await service.handle(
+        'findMergeBase',
+        { dir: '/repo', oids: [commitA, commitB] },
+        mockSocket
+      );
+
+      expect(result).toContain(base);
+    });
+
+    it('should return empty array for empty oids', async () => {
+      const result = await service.handle(
+        'findMergeBase',
+        { dir: '/repo', oids: [] },
+        mockSocket
+      );
+
+      expect(result).toEqual([]);
     });
   });
 

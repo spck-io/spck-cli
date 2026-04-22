@@ -93,9 +93,10 @@ export class GitService {
     const readOps = ['readCommit', 'readObject', 'getHeadTree', 'getOidAtPath', 'listFiles', 'resolveRef',
                      'currentBranch', 'log', 'status', 'statusCounts', 'getConfig', 'listBranches',
                      'listRemotes', 'isIgnored', 'bulkIsIgnored', 'isInitialized', 'listSubmodules', 'requestAuth',
-                     'getDefaultAuthor'];
+                     'getDefaultAuthor', 'listCommitsAndTags', 'findMergeBase'];
     const writeOps = ['add', 'remove', 'resetIndex', 'commit', 'setConfig', 'checkout', 'init',
-                      'addRemote', 'deleteRemote', 'clearIndex', 'push', 'pull', 'fetch', 'clone', 'resetHead'];
+                      'addRemote', 'deleteRemote', 'clearIndex', 'push', 'pull', 'fetch', 'clone', 'resetHead',
+                      'branch', 'deleteBranch'];
 
     try {
       switch (method) {
@@ -216,6 +217,14 @@ export class GitService {
           result = await this.getDefaultAuthor(gitCwd);
           logGitRead(method, params, deviceId, true, undefined, result);
           return result;
+        case 'listCommitsAndTags':
+          result = await this.listCommitsAndTags(gitCwd, params);
+          logGitRead(method, params, deviceId, true, undefined, { count: result.length });
+          return result;
+        case 'findMergeBase':
+          result = await this.findMergeBase(gitCwd, params);
+          logGitRead(method, params, deviceId, true, undefined, { count: result.length });
+          return result;
         case 'push':
           result = await this.push(gitCwd, params, socket);
           logGitWrite(method, params, deviceId, true, undefined, { remote: params.remote });
@@ -235,6 +244,14 @@ export class GitService {
         case 'resetHead':
           result = await this.resetHead(gitCwd, params, socket);
           logGitWrite(method, params, deviceId, true, undefined, { branch: params.branch, oid: params.oid });
+          return result;
+        case 'branch':
+          result = await this.branch(gitCwd, params);
+          logGitWrite(method, params, deviceId, true, undefined, { ref: params.ref, checkout: params.checkout });
+          return result;
+        case 'deleteBranch':
+          result = await this.deleteBranch(gitCwd, params);
+          logGitWrite(method, params, deviceId, true, undefined, { ref: params.ref });
           return result;
         default:
           throw createRPCError(ErrorCode.METHOD_NOT_FOUND, `Method not found: git.${method}`);
@@ -1156,6 +1173,19 @@ export class GitService {
     return { success: true };
   }
 
+  private async branch(dir: string, params: any): Promise<{ success: boolean }> {
+    const ref = this.sanitizeRef(params.ref);
+    const args = params.checkout ? ['checkout', '-b', ref] : ['branch', ref];
+    await this.execGit(args, { cwd: dir });
+    return { success: true };
+  }
+
+  private async deleteBranch(dir: string, params: any): Promise<{ success: boolean }> {
+    const ref = this.sanitizeRef(params.ref);
+    await this.execGit(['branch', '-D', ref], { cwd: dir });
+    return { success: true };
+  }
+
   /**
    * Find which submodule a filepath belongs to (if any).
    * Returns the submodule path and the filepath relative to the submodule root.
@@ -1299,6 +1329,41 @@ export class GitService {
     } catch (error) {
       // Exit code 128 means not a git repository
       return false;
+    }
+  }
+
+  private async listCommitsAndTags(dir: string, params: any): Promise<string[]> {
+    const start: string[] = params.start || [];
+    const finish: string[] = params.finish || [];
+
+    if (start.length === 0) return [];
+
+    const args = [
+      'rev-list',
+      ...start.map(r => this.sanitizeRef(r)),
+      ...finish.map(r => `^${this.sanitizeRef(r)}`),
+    ];
+
+    try {
+      const { stdout } = await this.execGit(args, { cwd: dir });
+      return stdout.split('\n').filter(l => l.trim());
+    } catch {
+      return [];
+    }
+  }
+
+  private async findMergeBase(dir: string, params: any): Promise<string[]> {
+    const oids: string[] = params.oids || [];
+    if (oids.length === 0) return [];
+
+    try {
+      const { stdout } = await this.execGit(
+        ['merge-base', '--all', '--octopus', ...oids.map(o => this.sanitizeRef(o))],
+        { cwd: dir }
+      );
+      return stdout.split('\n').filter(l => l.trim());
+    } catch {
+      return [];
     }
   }
 
