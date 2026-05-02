@@ -4,6 +4,13 @@ CLI tool for [Spck Editor](https://spck.io) - provides remote filesystem, git, a
 
 Connect your local development environment to Spck Editor mobile app and access local files, git operations, and terminal sessions remotely.
 
+## Links
+
+- **Website**: [https://spck.io](https://spck.io)
+- **Documentation**: [https://docs.spck.io/en/cli-start](https://docs.spck.io/en/cli-start)
+- **Changelog**: [https://docs.spck.io/en/changelog-cli](https://docs.spck.io/en/changelog-cli)
+- **Download**: [Spck Editor on Google Play](https://play.google.com/store/apps/details?id=io.spck) | [Spck Editor on App Store](https://apps.apple.com/us/app/spck-editor/id1507309511)
+
 ## Features
 
 - 🗂️ **Remote Filesystem** - Access local files from Spck Editor mobile app
@@ -594,6 +601,78 @@ spck --config ~/my-custom-config.json
 spck --root ~/projects/myapp
 ```
 
+### Wireless File Transfer Between Desktop and Mobile
+
+Spck CLI doubles as a wireless file transfer tool between your desktop and mobile device — no Airdrop, Bluetooth, USB cable, or third-party cloud service required. As long as both devices are on the same Wi-Fi network (or the CLI is reachable over the internet via the relay server), you can copy files in either direction directly from the Spck Editor file manager.
+
+#### How It Works
+
+When you connect Spck Editor on your phone to the CLI running on your desktop, your local desktop files appear as a remote project (`nw:/`) in the Spck Editor file manager alongside any projects stored on the phone. You can then use the standard copy/paste commands to transfer files or entire folders between them.
+
+#### Desktop → Mobile (Download files from your computer)
+
+1. **Start the CLI on your desktop** pointing at the folder you want to share:
+
+   ```bash
+   spck --root ~/Downloads
+   ```
+
+2. **Scan the QR code** with your phone's camera and open Spck Editor.
+
+3. In Spck Editor, your desktop folder appears as a remote project in the file manager.
+
+4. **Long-press any file or folder** in the remote project → **Copy**.
+
+5. **Navigate to a local project** on your phone (or create a new one).
+
+6. **Long-press the destination folder** → **Paste**.
+
+The file is transferred over the encrypted WebSocket connection and saved to your phone's local storage.
+
+#### Mobile → Desktop (Upload files from your phone)
+
+1. **Start the CLI on your desktop** pointing at where you want to receive files:
+
+   ```bash
+   spck --root ~/Desktop/from-phone
+   ```
+
+2. **Connect your phone** by scanning the QR code.
+
+3. In Spck Editor, open a local project that contains the files you want to send.
+
+4. **Long-press a file or folder** → **Copy**.
+
+5. **Navigate to the remote desktop project** in the file manager.
+
+6. **Long-press the destination folder** → **Paste**.
+
+The file is read from your phone's local storage and written to your desktop via the CLI.
+
+#### Transferring Multiple Files or a Whole Project
+
+You can select multiple items or an entire project folder and paste them in one operation. Directories are transferred recursively — all files inside are copied, with intermediate directories created automatically on the destination.
+
+```
+Phone local storage          Desktop (via CLI)
+──────────────────           ──────────────────
+my-project/              →   ~/Desktop/from-phone/my-project/
+  ├── index.html                 ├── index.html
+  ├── style.css                  ├── style.css
+  └── assets/                    └── assets/
+      └── logo.png                   └── logo.png
+```
+
+#### Tips
+
+- **Speed**: Transfer speed depends on your local Wi-Fi. For large files the CLI uses chunked binary uploads to keep memory usage low.
+- **No size limit by default**: The default `filesystem.maxFileSize` is `10MB` per file. For larger files (videos, archives) increase this in your config:
+  ```json
+  { "filesystem": { "maxFileSize": "200MB" } }
+  ```
+- **Security**: All transfers are encrypted over WSS and signed with your per-session secret key. No data passes through third-party servers unencrypted.
+- **Works without internet**: If both devices are on the same local network, the relay server is only used for signalling — file data stays on your LAN.
+
 ## Development
 
 ### Building from Source
@@ -615,13 +694,6 @@ npm run test:coverage
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
-
-## Links
-
-- **Website**: [https://spck.io](https://spck.io)
-- **Documentation**: [https://docs.spck.io/en/cli-start](https://docs.spck.io/en/cli-start)
-- **Changelog**: [https://docs.spck.io/en/changelog-cli](https://docs.spck.io/en/changelog-cli)
-- **Download**: [Spck Editor on Google Play](https://play.google.com/store/apps/details?id=io.spck) | [Spck Editor on App Store](https://apps.apple.com/us/app/spck-editor/id1507309511)
 
 ## Support
 
