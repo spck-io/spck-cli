@@ -17,6 +17,7 @@ Connect your local development environment to Spck Editor mobile app and access 
 - 🔄 **Git Integration** - Full git operations over the network connection (requires Git 2.20.0+)
 - 💻 **Terminal Access** - Interactive terminal sessions with xterm.js
 - 🌐 **Browser Proxy** - Preview your local server in a browser view inside Spck Editor
+- 🧠 **Language Server** - Full LSP bridge for TypeScript, JavaScript, Python, HTML, CSS, and SCSS with project-wide intelligence
 - 🔍 **Fast Search** - Optimized file search with automatic ripgrep detection (100x faster when installed)
 - 🔒 **Secure** - Cryptographically signed requests with optional Firebase authentication
 
@@ -231,6 +232,35 @@ The configuration is stored in `.spck-editor/config/spck-cli.config.json` in you
   - When `false`: Requests still protected by secret signing key (lower latency, compatible with Spck Editor Lite)
   - **Note**: All requests are always cryptographically signed regardless of this setting
 
+#### Language Server Settings
+
+- **`languageServer.enabled`** (boolean, default: `true`): Master switch for all remote language servers. Set to `false` to disable the feature entirely.
+- **`languageServer.typescript.enabled`** (boolean, default: `true`): Enable the TypeScript/JavaScript language server.
+- **`languageServer.python.enabled`** (boolean, default: `true`): Enable the Python language server (powered by bundled Pyright — no additional installation required).
+
+**Example — disable language server entirely:**
+
+```json
+{
+  "languageServer": {
+    "enabled": false
+  }
+}
+```
+
+**Example — disable Python only:**
+
+```json
+{
+  "languageServer": {
+    "enabled": true,
+    "python": {
+      "enabled": false
+    }
+  }
+}
+```
+
 #### Filesystem Settings
 
 - **`filesystem.maxFileSize`** (string): Maximum file size for read/write operations
@@ -269,6 +299,77 @@ The CLI uses a secure storage system that prevents accidentally committing secre
 - `.tmp/` - Temporary files
 - `.trash/` - Deleted files
 - `logs/` - CLI operation logs
+
+## Language Server
+
+When Spck Editor connects to a CLI session it automatically uses the CLI's remote language server instead of the built-in client-based one. The CLI runs a full [Language Server Protocol (LSP)](https://microsoft.github.io/language-server-protocol/) bridge alongside your project, providing project-wide code intelligence directly in the mobile editor.
+
+For full details see the [CLI Language Server documentation](https://docs.spck.io/en/cli-language-server).
+
+### Supported Languages
+
+| Language          | Completions | Hover | Signatures | Diagnostics |
+| ----------------- | ----------- | ----- | ---------- | ----------- |
+| TypeScript / TSX  | ✓           | ✓     | ✓          | ✓           |
+| JavaScript / JSX  | ✓           | ✓     | ✓          | ✓           |
+| Python            | ✓           | ✓     | ✓          | ✓           |
+| HTML              | ✓           | ✓     | —          | ✓           |
+| CSS / SCSS / Less | ✓           | ✓     | —          | ✓           |
+
+### Advantages over the Built-in Mobile Language Server
+
+The CLI language server has several advantages over the in-browser language server that Spck Editor uses when no CLI is connected:
+
+| Capability                        | CLI Language Server | Mobile Built-in |
+| --------------------------------- | ------------------- | --------------- |
+| Full project file access          | ✓                   | —               |
+| `tsconfig.json` / `jsconfig.json` | ✓                   | —               |
+| `node_modules` type resolution    | ✓                   | —               |
+| Cross-file go to definition       | ✓                   | Limited         |
+| Cross-file find references        | ✓                   | —               |
+| Rename symbol                     | ✓                   | —               |
+| Python support                    | ✓                   | —               |
+| Works offline (no CLI)            | —                   | ✓               |
+
+**No file transmission**: The CLI reads project files directly from disk. With the mobile built-in server, files must be sent to the device before they can be analyzed, adding latency and bandwidth overhead.
+
+**Full project awareness**: The CLI has access to your entire project tree — every file, `node_modules/`, and auto-discovered `tsconfig.json` — so go-to-definition and find-references work across the whole codebase, not just open files.
+
+**Proper `tsconfig.json` handling**: Path aliases, compiler options, project references, and monorepo layouts defined in `tsconfig.json` or `jsconfig.json` are respected automatically.
+
+**Persistent process**: The language server stays alive for the duration of the CLI session and keeps a warm in-memory index of your project, so responses remain fast after the initial startup.
+
+### Enabling and Disabling
+
+The language server is **enabled by default**. Control it in `.spck-editor/config/spck-cli.config.json`:
+
+**Disable the language server entirely:**
+
+```json
+{
+  "languageServer": {
+    "enabled": false
+  }
+}
+```
+
+**Disable a specific language server only:**
+
+```json
+{
+  "languageServer": {
+    "enabled": true,
+    "python": {
+      "enabled": false
+    }
+  }
+}
+```
+
+### Requirements
+
+- **TypeScript / JavaScript / HTML / CSS / SCSS**: Bundled with the CLI — no extra installation needed.
+- **Python**: Bundled with the CLI via Pyright — no additional installation required.
 
 ## Connection Limits
 

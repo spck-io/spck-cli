@@ -2,6 +2,7 @@
  * JSON-RPC 2.0 request router
  */
 
+import * as path from 'path';
 import { AuthenticatedSocket, JSONRPCRequest, ErrorCode, createRPCError, ToolDetectionResult } from '../types.js';
 import { FilesystemService } from '../services/FilesystemService.js';
 import { GitService } from '../services/GitService.js';
@@ -9,6 +10,7 @@ import { TerminalService } from '../services/TerminalService.js';
 import { SearchService } from '../services/SearchService.js';
 import { BrowserProxyService } from '../services/BrowserProxyService.js';
 import { LanguageServerService } from '../services/LanguageServerService.js';
+import { FileWatcher } from '../watcher/FileWatcher.js';
 
 export class RPCRouter {
   private static filesystemService: FilesystemService;
@@ -23,6 +25,8 @@ export class RPCRouter {
   private static terminalEnabled: boolean;
   private static browserProxyEnabled: boolean;
   private static languageServerEnabled: boolean;
+  private static fileWatcher: FileWatcher | null = null;
+  private static broadcastCallback: ((method: string, params: any) => void) | null = null;
 
   /**
    * Initialize services
@@ -45,6 +49,56 @@ export class RPCRouter {
     // Parse maxFileSize from config
     const maxFileSizeBytes = this.parseFileSize(config.filesystem.maxFileSize);
     this.searchService = new SearchService(rootPath, maxFileSizeBytes, 64 * 1024, tools.ripgrep);
+
+    this.startFileWatcher(rootPath);
+  }
+
+  /**
+   * Register a callback that broadcasts JSON-RPC notifications to all connected clients.
+   * Called by ProxyClient once it is ready to accept connections.
+   */
+  static setBroadcastCallback(fn: (method: string, params: any) => void): void {
+    this.broadcastCallback = fn;
+  }
+
+  /**
+   * Shut down the file watcher. Called on graceful disconnect.
+   */
+  static cleanup(): void {
+    if (this.fileWatcher) {
+      this.fileWatcher.close();
+      this.fileWatcher = null;
+    }
+    this.broadcastCallback = null;
+  }
+
+  private static startFileWatcher(rootPath: string): void {
+    this.fileWatcher = new FileWatcher(rootPath, [
+      '**/.git/**',
+      '**/.spck-editor/**',
+      '**/node_modules/**',
+    ]);
+
+    this.fileWatcher.on('change', (filePath: string) => {
+      const rel = '/' + path.relative(rootPath, filePath);
+      this.broadcastFileChange(rel, 'write');
+    });
+
+    this.fileWatcher.on('added', (filePath: string) => {
+      const rel = '/' + path.relative(rootPath, filePath);
+      this.broadcastFileChange(rel, 'write');
+    });
+
+    this.fileWatcher.on('removed', (filePath: string) => {
+      const rel = '/' + path.relative(rootPath, filePath);
+      this.broadcastFileChange(rel, 'remove');
+    });
+  }
+
+  private static broadcastFileChange(filePath: string, action: string): void {
+    if (this.broadcastCallback) {
+      this.broadcastCallback('fs.change', { path: filePath, action });
+    }
   }
 
   /**

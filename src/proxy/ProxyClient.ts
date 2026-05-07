@@ -90,6 +90,14 @@ export class ProxyClient {
     this.tools = options.tools;
     this.firebaseToken = options.firebaseToken;
     this.userId = options.userId;
+
+    RPCRouter.setBroadcastCallback((method: string, params: any) => {
+      for (const [connectionId, connection] of this.activeConnections) {
+        if (connection.handshakeComplete) {
+          this.sendToClient(connectionId, 'rpc', { jsonrpc: '2.0', method, params });
+        }
+      }
+    });
   }
 
   /**
@@ -1007,6 +1015,7 @@ export class ProxyClient {
   async disconnect(): Promise<void> {
     if (!this.socket) return;
 
+    RPCRouter.cleanup();
     console.log(`\n🛑 ${t('connection.shuttingDown')}`);
 
     return new Promise((resolve) => {
