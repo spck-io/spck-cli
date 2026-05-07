@@ -67,7 +67,9 @@
     "userAuthDisabledHint2": "낮은 지연 시간, Firebase 인증 불필요",
     "userAuthDisabledHint3": "Spck Editor Lite와 호환됩니다",
     "browserProxyEnabled": "브라우저 프록시 서비스",
-    "browserProxyDisabled": "브라우저 프록시 서비스 (설정에서 비활성화됨)"
+    "browserProxyDisabled": "브라우저 프록시 서비스 (설정에서 비활성화됨)",
+    "lspEnabled": "언어 서버 (TypeScript/Python)",
+    "lspDisabled": "언어 서버 (비활성화됨)"
   },
   "server": {
     "selectingBest": "최적의 릴레이 서버를 선택하는 중...",

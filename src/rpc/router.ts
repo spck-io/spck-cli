@@ -8,6 +8,7 @@ import { GitService } from '../services/GitService.js';
 import { TerminalService } from '../services/TerminalService.js';
 import { SearchService } from '../services/SearchService.js';
 import { BrowserProxyService } from '../services/BrowserProxyService.js';
+import { LanguageServerService } from '../services/LanguageServerService.js';
 
 export class RPCRouter {
   private static filesystemService: FilesystemService;
@@ -16,10 +17,12 @@ export class RPCRouter {
   private static terminalServices: Map<string, TerminalService> = new Map();
   private static currentSockets: Map<string, AuthenticatedSocket> = new Map();
   private static browserProxyService: BrowserProxyService;
+  private static languageServerService: LanguageServerService;
   private static rootPath: string;
   private static tools: ToolDetectionResult;
   private static terminalEnabled: boolean;
   private static browserProxyEnabled: boolean;
+  private static languageServerEnabled: boolean;
 
   /**
    * Initialize services
@@ -29,9 +32,15 @@ export class RPCRouter {
     this.tools = tools;
     this.terminalEnabled = config.terminal?.enabled ?? true;
     this.browserProxyEnabled = config.browserProxy?.enabled ?? true;
+    this.languageServerEnabled = config.languageServer?.enabled ?? true;
     this.filesystemService = new FilesystemService(rootPath, config.filesystem);
     this.gitService = new GitService(rootPath);
     this.browserProxyService = new BrowserProxyService();
+    this.languageServerService = new LanguageServerService(rootPath, {
+      enabled: this.languageServerEnabled,
+      typescript: config.languageServer?.typescript,
+      python: config.languageServer?.python,
+    });
 
     // Parse maxFileSize from config
     const maxFileSizeBytes = this.parseFileSize(config.filesystem.maxFileSize);
@@ -132,6 +141,11 @@ export class RPCRouter {
           }
           const terminalService = this.getTerminalService(socket);
           return await terminalService.handle(methodName, params);
+
+        case 'lsp':
+          // Service handles its own enabled-gating so `lsp.capabilities` can
+          // always answer (client uses it to decide whether to fall back).
+          return await this.languageServerService.handle(methodName, params, socket);
 
         case 'browser': {
           if (!this.browserProxyEnabled) {

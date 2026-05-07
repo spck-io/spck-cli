@@ -89,7 +89,8 @@ export function displayFeatureSummary(
   tools: ToolDetectionResult,
   terminalEnabled: boolean,
   userAuthEnabled?: boolean,
-  browserProxyEnabled?: boolean
+  browserProxyEnabled?: boolean,
+  languageServerEnabled?: boolean
 ): void {
   console.log(`\n=== ${t('features.title')} ===\n`);
 
@@ -121,6 +122,12 @@ export function displayFeatureSummary(
     features.push(`✅ ${t('features.browserProxyEnabled')}`);
   } else {
     features.push(`❌ ${t('features.browserProxyDisabled')}`);
+  }
+
+  if (languageServerEnabled !== false) {
+    features.push(`✅ ${t('features.lspEnabled')}`);
+  } else {
+    features.push(`❌ ${t('features.lspDisabled')}`);
   }
 
   features.forEach(feature => console.log(`   ${feature}`));

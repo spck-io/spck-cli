@@ -67,7 +67,9 @@
     "userAuthDisabledHint2": "Menor latencia, no requiere autenticación Firebase",
     "userAuthDisabledHint3": "Compatible con Spck Editor Lite",
     "browserProxyEnabled": "Servicio de proxy del navegador",
-    "browserProxyDisabled": "Servicio de proxy del navegador (desactivado en la configuración)"
+    "browserProxyDisabled": "Servicio de proxy del navegador (desactivado en la configuración)",
+    "lspEnabled": "Servidor de lenguaje (TypeScript/Python)",
+    "lspDisabled": "Servidor de lenguaje (desactivado)"
   },
   "server": {
     "selectingBest": "Seleccionando el mejor servidor de retransmisión...",

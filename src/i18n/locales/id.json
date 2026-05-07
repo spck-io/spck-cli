@@ -67,7 +67,9 @@
     "userAuthDisabledHint2": "Latensi lebih rendah, tidak memerlukan autentikasi Firebase",
     "userAuthDisabledHint3": "Kompatibel dengan Spck Editor Lite",
     "browserProxyEnabled": "Layanan proxy browser",
-    "browserProxyDisabled": "Layanan proxy browser (dinonaktifkan di konfigurasi)"
+    "browserProxyDisabled": "Layanan proxy browser (dinonaktifkan di konfigurasi)",
+    "lspEnabled": "Server bahasa (TypeScript/Python)",
+    "lspDisabled": "Server bahasa (dinonaktifkan)"
   },
   "server": {
     "selectingBest": "Memilih server relay terbaik...",

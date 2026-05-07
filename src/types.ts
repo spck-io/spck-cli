@@ -41,6 +41,12 @@ export interface ServerConfig {
   browserProxy?: {
     enabled: boolean;
   };
+
+  languageServer?: {
+    enabled: boolean;
+    typescript?: boolean;
+    python?: boolean;
+  };
 }
 
 // Connection Settings (stored in .spck-editor/config/connection-settings.json)

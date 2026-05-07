@@ -437,6 +437,40 @@ export function logSearchRead(
 }
 
 /**
+ * Log an LSP operation
+ */
+export function logLsp(
+  method: string,
+  params: {
+    name?: string;
+    type?: string;
+    types?: string[];
+    [key: string]: any;
+  },
+  uid: string,
+  success: boolean,
+  error?: any,
+  metadata?: Record<string, any>
+): void {
+  const filepath = formatPath(params.name);
+  const types = params.types?.length ? params.types.join('+') : (params.type || method);
+  const metaStr = metadata ? ` ${chalk.gray(JSON.stringify(metadata))}` : '';
+  const timestamp = chalk.gray(formatTimeCompact());
+  const uidStr = chalk.gray(formatUid(uid));
+
+  if (success) {
+    const msg = `${timestamp} ${uidStr} ${chalk.green('✓')} ${chalk.cyan('LSP')} ${chalk.white(types.padEnd(12))} ${chalk.gray(filepath)}${metaStr}`;
+    console.log(msg);
+    writeToFile(`[INFO] LSP ${types} ${params.name || ''} uid=${uid} success=true${metaStr}`);
+  } else {
+    const errMsg = error?.message || String(error);
+    const msg = `${timestamp} ${uidStr} ${chalk.red('✗')} ${chalk.cyan('LSP')} ${chalk.white(types.padEnd(12))} ${chalk.gray(filepath)} ${chalk.red(errMsg)}`;
+    console.log(msg);
+    writeToFile(`[ERROR] LSP ${types} ${params.name || ''} uid=${uid} success=false error="${errMsg}"`);
+  }
+}
+
+/**
  * Log an authentication event
  */
 export function logAuth(
@@ -572,6 +606,7 @@ export default {
   logTerminalRead,
   logTerminalWrite,
   logSearchRead,
+  logLsp,
   logBrowserProxy,
   logAuth,
   logConnection,

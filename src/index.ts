@@ -39,6 +39,7 @@ export async function startProxyClient(
   options?: {
     disableGit?: boolean;
     disableRipgrep?: boolean;
+    disableLanguageServer?: boolean;
     serverOverride?: string;
   }
 ): Promise<void> {
@@ -111,6 +112,11 @@ export async function startProxyClient(
       disableRipgrep: options?.disableRipgrep,
     });
 
+    // Apply --no-language-server flag (overrides config)
+    if (options?.disableLanguageServer) {
+      config.languageServer = { ...(config.languageServer || { enabled: true }), enabled: false };
+    }
+
     // Step 5: Initialize RPC Router
     RPCRouter.initialize(config.root, config, tools);
 
@@ -145,7 +151,7 @@ export async function startProxyClient(
     }
 
     // Step 7: Display feature summary
-    displayFeatureSummary(tools, config.terminal.enabled, config.security.userAuthenticationEnabled, config.browserProxy?.enabled ?? true);
+    displayFeatureSummary(tools, config.terminal.enabled, config.security.userAuthenticationEnabled, config.browserProxy?.enabled ?? true, config.languageServer?.enabled ?? true);
 
     // Step 8: Select relay server
     let proxyServerUrl: string;
@@ -486,6 +492,11 @@ export async function main(): Promise<void> {
       hidden: true,
       default: false,
     })
+    .option('language-server', {
+      type: 'boolean',
+      description: 'Enable the remote language server (TypeScript / Python). Use --no-language-server to disable.',
+      default: true,
+    })
     .help()
     .alias('help', 'h')
     .version()
@@ -528,6 +539,7 @@ export async function main(): Promise<void> {
     await startProxyClient(argv.config as string | undefined, {
       disableGit: argv.__internal_disable_git as boolean | undefined,
       disableRipgrep: argv.__internal_disable_ripgrep as boolean | undefined,
+      disableLanguageServer: argv['language-server'] === false ? true : undefined,
       serverOverride: argv.server as string | undefined,
     });
   }

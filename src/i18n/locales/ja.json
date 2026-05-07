@@ -67,7 +67,9 @@
     "userAuthDisabledHint2": "低遅延、Firebase 認証は不要です",
     "userAuthDisabledHint3": "Spck Editor Lite と互換性があります",
     "browserProxyEnabled": "ブラウザプロキシサービス",
-    "browserProxyDisabled": "ブラウザプロキシサービス（設定で無効）"
+    "browserProxyDisabled": "ブラウザプロキシサービス（設定で無効）",
+    "lspEnabled": "言語サーバー (TypeScript/Python)",
+    "lspDisabled": "言語サーバー (無効)"
   },
   "server": {
     "selectingBest": "最適なリレーサーバーを選択しています...",

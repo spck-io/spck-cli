@@ -67,7 +67,9 @@
     "userAuthDisabled": "User Authentication: DISABLED",
     "userAuthDisabledHint1": "Connections protected by secret signing key only",
     "userAuthDisabledHint2": "Lower latency, no Firebase auth required",
-    "userAuthDisabledHint3": "Compatible with Spck Editor Lite"
+    "userAuthDisabledHint3": "Compatible with Spck Editor Lite",
+    "lspEnabled": "Language server (TypeScript/Python)",
+    "lspDisabled": "Language server (disabled)"
   },
   "server": {
     "selectingBest": "Selecting best relay server...",

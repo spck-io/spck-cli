@@ -11,7 +11,7 @@ import {
   isSpckEditorIgnored,
   addSpckEditorToGitignore,
   getGitignorePath,
-} from '../gitignore';
+} from '../gitignore.js';
 
 describe('gitignore utilities', () => {
   let tempDir: string;

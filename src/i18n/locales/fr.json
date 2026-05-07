@@ -67,7 +67,9 @@
     "userAuthDisabledHint2": "Latence réduite, pas d’authentification Firebase requise",
     "userAuthDisabledHint3": "Compatible avec Spck Editor Lite",
     "browserProxyEnabled": "Service proxy navigateur",
-    "browserProxyDisabled": "Service proxy navigateur (désactivé dans la configuration)"
+    "browserProxyDisabled": "Service proxy navigateur (désactivé dans la configuration)",
+    "lspEnabled": "Serveur de langage (TypeScript/Python)",
+    "lspDisabled": "Serveur de langage (désactivé)"
   },
   "server": {
     "selectingBest": "Sélection du meilleur serveur relais...",
@@ -126,7 +128,7 @@
     "connectFailedCauses": "Causes possibles :",
     "connectFailedCause1": "- Le serveur n’est pas accessible (vérifiez votre connexion internet)",
     "connectFailedCause2": "- Réseau/pare-feu bloquant la connexion",
-    "freeTierNotice": "Compte gratuit\u00a0: {{used}}\u00a0/ {{limit}} min utilisés aujourd\u2019hui ({{remaining}} min restants)",
+    "freeTierNotice": "Compte gratuit : {{used}} / {{limit}} min utilisés aujourd’hui ({{remaining}} min restants)",
     "freeTierUpgrade": "Passez à la version premium pour un accès CLI illimité."
   },
   "multipleConnection": {
