@@ -143,20 +143,42 @@ export class LspProcess {
       console.error(`[lsp:${this.label}] failed to parse message:`, err);
       return;
     }
-    if (typeof msg.id === 'number' && (msg.result !== undefined || msg.error !== undefined)) {
+    if (typeof msg.method === 'string') {
+      // Server->client requests have an id; pyright blocks initialization
+      // until they're answered, so reply with safe defaults instead of
+      // dropping them.
+      if (msg.id != null) {
+        this.respondToServerRequest(msg);
+        return;
+      }
+      for (const h of this.notificationHandlers) {
+        try { h(msg.method, msg.params); } catch (err) {
+          console.error(`[lsp:${this.label}] notification handler error:`, err);
+        }
+      }
+      return;
+    }
+    if (typeof msg.id === 'number') {
       const p = this.pending.get(msg.id);
       if (!p) return;
       this.pending.delete(msg.id);
       clearTimeout(p.timer);
       if (msg.error) p.reject(new Error(msg.error.message || 'LSP error'));
       else p.resolve(msg.result);
-    } else if (msg.method) {
-      // Notification (or server->client request — we don't service those)
-      for (const h of this.notificationHandlers) {
-        try { h(msg.method, msg.params); } catch (err) {
-          console.error(`[lsp:${this.label}] notification handler error:`, err);
-        }
-      }
     }
+  }
+
+  private respondToServerRequest(msg: any): void {
+    let result: any = null;
+    // workspace/configuration must return one entry per requested item;
+    // null tells the server to use its own defaults.
+    if (msg.method === 'workspace/configuration') {
+      const items = Array.isArray(msg.params?.items) ? msg.params.items : [];
+      result = items.map(() => null);
+    } else if (msg.method === 'workspace/applyEdit') {
+      // Spec requires { applied: boolean }; we don't apply edits server-side.
+      result = { applied: false };
+    }
+    this.write({ jsonrpc: '2.0', id: msg.id, result });
   }
 }

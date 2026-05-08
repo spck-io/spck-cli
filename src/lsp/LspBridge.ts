@@ -93,6 +93,9 @@ export class LspBridge {
         workspaceFolders: [{ uri: rootUri, name: path.basename(this.rootPath) }],
       }, 30000);
       this.proc.notify('initialized', {});
+      // Pyright won't start analysis until it receives didChangeConfiguration;
+      // empty settings let it use its own defaults and is a no-op for tsserver.
+      this.proc.notify('workspace/didChangeConfiguration', { settings: {} });
       this.initialized = true;
     })();
     return this.initPromise;
@@ -185,7 +188,11 @@ export class LspBridge {
         rename: { prepareSupport: true },
         publishDiagnostics: {},
       },
-      workspace: { configuration: false, workspaceFolders: true },
+      workspace: {
+        configuration: true,
+        workspaceFolders: true,
+      },
+      window: { workDoneProgress: true },
     };
   }
 
