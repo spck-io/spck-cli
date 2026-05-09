@@ -27,6 +27,8 @@ interface ExecGitResult {
 export class GitService {
   private submoduleCache: Map<string, { submodules: Array<{ name: string; path: string }>; timestamp: number }> = new Map();
   private static SUBMODULE_CACHE_TTL = 30000; // 30 seconds
+  private gitRepoCache: Map<string, { isRepo: boolean; timestamp: number }> = new Map();
+  private static GIT_REPO_CACHE_TTL = 30000; // 30 seconds
   private _hasCurl: boolean | null = null;
 
   constructor(private rootPath: string) {}
@@ -44,6 +46,23 @@ export class GitService {
       }
     }
     return this._hasCurl;
+  }
+
+  /**
+   * Check whether `dir` is inside a git working tree, with a short-lived cache.
+   * Uses `acceptExitCodes: [128]` because for `rev-parse --is-inside-work-tree`
+   * exit 128 unambiguously means "not in a git repo" — this is a pure query
+   * with no other realistic 128 failure mode (no refs, no index, no lock).
+   */
+  private async isGitRepo(dir: string): Promise<boolean> {
+    const cached = this.gitRepoCache.get(dir);
+    if (cached && Date.now() - cached.timestamp < GitService.GIT_REPO_CACHE_TTL) {
+      return cached.isRepo;
+    }
+    const result = await this.execGit(['rev-parse', '--is-inside-work-tree'], { cwd: dir, acceptExitCodes: [128] });
+    const isRepo = result.code === 0 && result.stdout.trim() === 'true';
+    this.gitRepoCache.set(dir, { isRepo, timestamp: Date.now() });
+    return isRepo;
   }
 
   /**
@@ -1210,6 +1229,8 @@ export class GitService {
   private async isIgnored(dir: string, params: any): Promise<boolean> {
     const { filepath } = params;
 
+    if (!(await this.isGitRepo(dir))) return false;
+
     // Check if filepath is inside a submodule
     const submodules = await this.getCachedSubmodules(dir);
     if (submodules.length > 0) {
@@ -1233,6 +1254,7 @@ export class GitService {
    */
   private async checkIgnorePaths(cwd: string, filepaths: string[]): Promise<Set<string>> {
     if (filepaths.length === 0) return new Set();
+    if (!(await this.isGitRepo(cwd))) return new Set();
     // Exit code 1 means none are ignored - this is expected
     const result = await this.execGit(['check-ignore', '--stdin', '-z'], {
       cwd,
@@ -1322,14 +1344,7 @@ export class GitService {
    * Uses git rev-parse --is-inside-work-tree
    */
   private async isInitialized(dir: string, _params: any): Promise<boolean> {
-    try {
-      const { stdout } = await this.execGit(['rev-parse', '--is-inside-work-tree'], { cwd: dir });
-      // Exit code 0 and stdout "true" means it's a git repository
-      return stdout.trim() === 'true';
-    } catch (error) {
-      // Exit code 128 means not a git repository
-      return false;
-    }
+    return this.isGitRepo(dir);
   }
 
   private async listCommitsAndTags(dir: string, params: any): Promise<string[]> {
@@ -1373,6 +1388,9 @@ export class GitService {
    * Note: always runs from the main repo dir (not gitCwd)
    */
   private async listSubmodules(dir: string): Promise<{ submodules: Array<{ name: string; path: string }> }> {
+    if (!(await this.isGitRepo(dir))) {
+      return { submodules: [] };
+    }
     try {
       const { stdout } = await this.execGit(['submodule', 'status'], { cwd: dir });
       const submodules: Array<{ name: string; path: string }> = [];
