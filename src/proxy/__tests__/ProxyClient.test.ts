@@ -38,6 +38,7 @@ vi.mock('../../rpc/router.js', () => ({
     initialize: vi.fn(),
     route: vi.fn(),
     cleanup: vi.fn(),
+    setBroadcastCallback: vi.fn(),
   },
 }));
 
