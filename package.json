@@ -1,6 +1,6 @@
 {
   "name": "spck",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "description": "CLI tool for Spck Editor - provides remote filesystem, git, browser proxing, and terminal access",
   "type": "module",
   "main": "dist/index.js",
