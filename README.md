@@ -66,6 +66,12 @@ npm install -g spck
 spck
 ```
 
+## Demo
+
+See Remote Project features in action in Spck Editor:
+
+![Remote Project features in Spck Editor](https://docs.spck.io/assets/gifs/remote-cli-preview.gif)
+
 ## Getting Started
 
 ### 1. First Run
@@ -328,7 +334,6 @@ The CLI language server has several advantages over the in-browser language serv
 | Cross-file go to definition       | ✓                   | Limited         |
 | Cross-file find references        | ✓                   | —               |
 | Rename symbol                     | ✓                   | —               |
-| Python support                    | ✓                   | —               |
 | Works offline (no CLI)            | —                   | ✓               |
 
 **No file transmission**: The CLI reads project files directly from disk. With the mobile built-in server, files must be sent to the device before they can be analyzed, adding latency and bandwidth overhead.
