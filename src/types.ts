@@ -283,6 +283,8 @@ export interface ProxyClientDisconnectedEvent {
 export interface ProxyErrorEvent {
   code: string;
   message: string;
+  // Seconds to wait before retrying. Sent by the server with code === 'rate_limited'.
+  retryAfter?: number;
   [key: string]: any;
 }
 

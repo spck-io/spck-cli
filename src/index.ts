@@ -175,30 +175,55 @@ export async function startProxyClient(
     let lastError: Error | null = null;
     let connected = false;
 
+    const RATE_LIMIT_MAX_RETRIES = 3;
+    const RATE_LIMIT_WAIT_CAP_SECONDS = 120;
+
     const tryConnect = async (url: string, useExistingToken: boolean): Promise<boolean> => {
       tried.add(url);
       console.log(`🌐 ${t('server.attempting', { url })}`);
 
-      proxyClient = new ProxyClient({
-        config,
-        firebaseToken: credentials.firebaseToken,
-        userId: credentials.userId,
-        tools,
-        existingConnectionSettings: useExistingToken ? (connectionSettings || undefined) : undefined,
-        proxyServerUrl: url,
-      });
+      for (let attempt = 0; attempt <= RATE_LIMIT_MAX_RETRIES; attempt++) {
+        proxyClient = new ProxyClient({
+          config,
+          firebaseToken: credentials.firebaseToken,
+          userId: credentials.userId,
+          tools,
+          existingConnectionSettings: useExistingToken ? (connectionSettings || undefined) : undefined,
+          proxyServerUrl: url,
+        });
 
-      try {
-        await proxyClient.connect();
-        saveServerPreference(url);
-        return true;
-      } catch (error: any) {
-        lastError = error;
-        console.warn(`⚠️  ${t('server.relayFailed', { url, message: error.message })}\n`);
-        proxyClient.forceCleanup();
-        proxyClient = null;
-        return false;
+        try {
+          await proxyClient.connect();
+          saveServerPreference(url);
+          return true;
+        } catch (error: any) {
+          lastError = error;
+          proxyClient.forceCleanup();
+          proxyClient = null;
+
+          // 'rate_limited' is an upstream signal (subscription API throttled us);
+          // a different relay will hit the same upstream, so retry the same URL
+          // after the server-advised wait instead of falling through to fallbacks.
+          if (error?.code === 'rate_limited' && attempt < RATE_LIMIT_MAX_RETRIES) {
+            const waitSeconds = Math.min(
+              typeof error.retryAfter === 'number' && error.retryAfter > 0 ? error.retryAfter : 60,
+              RATE_LIMIT_WAIT_CAP_SECONDS
+            );
+            console.warn(`⏳ ${t('server.rateLimitedRetrying', { url, seconds: waitSeconds })}\n`);
+            await new Promise(r => setTimeout(r, waitSeconds * 1000));
+            continue;
+          }
+
+          if (error?.code === 'rate_limited') {
+            console.warn(`⚠️  ${t('server.rateLimitedGivingUp', { url, attempts: RATE_LIMIT_MAX_RETRIES + 1 })}\n`);
+          } else {
+            console.warn(`⚠️  ${t('server.relayFailed', { url, message: error.message })}\n`);
+          }
+          return false;
+        }
       }
+
+      return false;
     };
 
     // First attempt: override or saved server, with stored serverToken

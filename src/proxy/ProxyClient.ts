@@ -84,6 +84,10 @@ export class ProxyClient {
   private firebaseToken: string;
   private userId: string;
   private tokenRefreshState: 'idle' | 'refreshing' | 'failed' = 'idle';
+  // Set when the server emits a 'rate_limited' error. Suppresses the
+  // process.exit() that handleDisconnect would otherwise do on
+  // 'io server disconnect', so the outer connect loop can wait + retry.
+  private suppressServerDisconnectExit = false;
 
   constructor(private options: ProxyClientOptions) {
     this.config = options.config;
@@ -228,11 +232,15 @@ export class ProxyClient {
 
       this.socket.once('error', (error: any) => {
         clearTimeout(timeout);
-        const enhancedError = new Error(
+        const enhancedError: Error & { code?: string; retryAfter?: number } = new Error(
           `${t('connection.connectError', { message: error.message || error.toString() })}\n` +
           `  ${t('connection.connectErrorNamespace')}\n` +
           `  ${t('connection.connectErrorType', { type: error.type || 'unknown' })}`
         );
+        // Forward code + retryAfter so the outer connect loop can branch on them
+        // (e.g. wait + retry for rate_limited instead of falling to a different relay).
+        enhancedError.code = error?.code;
+        enhancedError.retryAfter = error?.retryAfter;
         reject(enhancedError);
       });
 
@@ -916,6 +924,17 @@ export class ProxyClient {
         console.error(`${t('proxyError.subscriptionCheckFailedHint')}\n`);
         break;
 
+      case 'rate_limited': {
+        // Don't exit — the outer connect loop will wait and retry.
+        const retryAfter = typeof error.retryAfter === 'number' && error.retryAfter > 0
+          ? error.retryAfter
+          : 60;
+        this.suppressServerDisconnectExit = true;
+        console.warn(`\n⏳ ${t('proxyError.rateLimited')}`);
+        console.warn(`${t('proxyError.rateLimitedHint', { seconds: retryAfter })}\n`);
+        return;
+      }
+
       case 'subscription_required':
         console.error(`\n⚠️  ${t('proxyError.subscriptionRequired')}`);
         console.error(`${t('proxyError.subscriptionRequiredHint')}\n`);
@@ -974,6 +993,12 @@ export class ProxyClient {
    * Handle disconnect from proxy
    */
   private handleDisconnect(reason: string): void {
+    // Suppress the disconnect noise when we know we're about to retry — the
+    // rate_limited branch in handleError already logged the useful info.
+    if (this.suppressServerDisconnectExit && reason === 'io server disconnect') {
+      return;
+    }
+
     console.warn(`\n⚠️  ${t('connection.disconnectedFromProxy', { reason })}`);
 
     if (reason === 'io server disconnect') {

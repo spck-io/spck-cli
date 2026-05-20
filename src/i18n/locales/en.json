@@ -84,7 +84,9 @@
     "attempting": "Attempting relay: {{url}}",
     "relayFailed": "Relay {{url}} failed: {{message}}",
     "selectingFallback": "Finding fallback relay servers...",
-    "allRelaysFailed": "All relay servers failed to connect."
+    "allRelaysFailed": "All relay servers failed to connect.",
+    "rateLimitedRetrying": "Relay {{url}} is rate-limited; waiting {{seconds}}s before retry...",
+    "rateLimitedGivingUp": "Relay {{url}} is still rate-limited after {{attempts}} attempts."
   },
   "connection": {
     "title": "Connecting to Relay Server",
@@ -167,6 +169,8 @@
     "accountBannedHint2": "Terms of Service agreement.",
     "subscriptionCheckFailed": "Unable to verify subscription status.",
     "subscriptionCheckFailedHint": "This may be a temporary issue. Please try again later.",
+    "rateLimited": "Subscription service is rate-limited right now.",
+    "rateLimitedHint": "Will retry automatically in {{seconds}}s.",
     "subscriptionRequired": "This feature requires a paid subscription.",
     "subscriptionRequiredHint": "Open the Spck Editor app to upgrade to Supporter or Gold.",
     "maxConnections": "Maximum of {{max}} CLI connections reached.",
