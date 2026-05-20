@@ -19,7 +19,7 @@ import {
   loadServerPreference,
   saveServerPreference,
 } from './config/credentials.js';
-import { fetchServerList, selectBestServer, displayServerPings, getDefaultServerList } from './config/server-selection.js';
+import { fetchServerList, displayServerPings, getDefaultServerList } from './config/server-selection.js';
 import { authenticateWithFirebase, getValidFirebaseToken, abortCurrentAuth } from './connection/firebase-auth.js';
 import { runSetup } from './setup/wizard.js';
 import { detectTools, displayFeatureSummary } from './utils/tool-detection.js';
@@ -153,57 +153,92 @@ export async function startProxyClient(
     // Step 7: Display feature summary
     displayFeatureSummary(tools, config.terminal.enabled, config.security.userAuthenticationEnabled, config.browserProxy?.enabled ?? true, config.languageServer?.enabled ?? true);
 
-    // Step 8: Select relay server
-    let proxyServerUrl: string;
+    // Step 8: Pick the first relay to try (override > saved > ping-best)
+    let initialServer: string | null = null;
 
     if (options?.serverOverride) {
-      // CLI --server flag overrides everything
-      proxyServerUrl = options.serverOverride;
-      saveServerPreference(proxyServerUrl);
-      console.log(`✅ ${t('server.usingOverride', { url: proxyServerUrl })}\n`);
+      initialServer = options.serverOverride;
+      saveServerPreference(initialServer);
+      console.log(`✅ ${t('server.usingOverride', { url: initialServer })}\n`);
     } else {
-      // Check saved preference
       const savedServer = loadServerPreference();
       if (savedServer) {
-        proxyServerUrl = savedServer;
-        console.log(`✅ ${t('server.usingSaved', { url: proxyServerUrl })}\n`);
-      } else {
-        // Auto-select best server by ping
-        try {
-          console.log('🌐 ' + t('server.selectingBest'));
-          const servers = await fetchServerList();
-          await displayServerPings(servers);
-          const best = await selectBestServer(servers);
-          if (best.ping !== Infinity) {
-            proxyServerUrl = best.server.url;
-            saveServerPreference(proxyServerUrl);
-            const label = best.server.label.en || best.server.url;
-            console.log(`✅ ${t('server.selected', { label, url: proxyServerUrl, ping: best.ping })}\n`);
-          } else {
-            // All servers unreachable — use first server from hardcoded list
-            proxyServerUrl = getDefaultServerList()[0].url;
-            console.warn(`⚠️  ${t('server.allUnreachable', { url: proxyServerUrl })}\n`);
-          }
-        } catch (error: any) {
-          // Fetch/ping failed — use first server from hardcoded list
-          proxyServerUrl = getDefaultServerList()[0].url;
-          console.warn(`⚠️  ${t('server.failedSelect', { message: error.message })}`);
-          console.warn(`   ${t('server.usingDefault', { url: proxyServerUrl })}\n`);
+        initialServer = savedServer;
+        console.log(`✅ ${t('server.usingSaved', { url: savedServer })}\n`);
+      }
+    }
+
+    // Step 9: Connect with ping-ordered fallback.
+    // A /health ping succeeding doesn't guarantee the websocket proxy works,
+    // so we treat any candidate as provisional until connect() actually returns.
+    const tried = new Set<string>();
+    let lastError: Error | null = null;
+    let connected = false;
+
+    const tryConnect = async (url: string, useExistingToken: boolean): Promise<boolean> => {
+      tried.add(url);
+      console.log(`🌐 ${t('server.attempting', { url })}`);
+
+      proxyClient = new ProxyClient({
+        config,
+        firebaseToken: credentials.firebaseToken,
+        userId: credentials.userId,
+        tools,
+        existingConnectionSettings: useExistingToken ? (connectionSettings || undefined) : undefined,
+        proxyServerUrl: url,
+      });
+
+      try {
+        await proxyClient.connect();
+        saveServerPreference(url);
+        return true;
+      } catch (error: any) {
+        lastError = error;
+        console.warn(`⚠️  ${t('server.relayFailed', { url, message: error.message })}\n`);
+        proxyClient.forceCleanup();
+        proxyClient = null;
+        return false;
+      }
+    };
+
+    // First attempt: override or saved server, with stored serverToken
+    if (initialServer) {
+      if (await tryConnect(initialServer, true)) {
+        connected = true;
+      }
+    }
+
+    // Fallback: ping all servers and try the rest in ping order.
+    // Stale serverToken won't be valid against a different relay, so drop it.
+    if (!connected) {
+      let fallbackUrls: string[] = [];
+      try {
+        console.log('🌐 ' + (initialServer ? t('server.selectingFallback') : t('server.selectingBest')));
+        const servers = await fetchServerList();
+        const pingResults = await displayServerPings(servers);
+        fallbackUrls = servers
+          .map(s => ({ url: s.url, ping: pingResults.get(s.url) ?? Infinity }))
+          .filter(r => r.ping !== Infinity && !tried.has(r.url))
+          .sort((a, b) => a.ping - b.ping)
+          .map(r => r.url);
+      } catch (error: any) {
+        console.warn(`⚠️  ${t('server.failedSelect', { message: error.message })}`);
+        fallbackUrls = getDefaultServerList()
+          .map(s => s.url)
+          .filter(u => !tried.has(u));
+      }
+
+      for (const url of fallbackUrls) {
+        if (await tryConnect(url, false)) {
+          connected = true;
+          break;
         }
       }
     }
 
-    // Step 9: Create and connect ProxyClient
-    proxyClient = new ProxyClient({
-      config,
-      firebaseToken: credentials.firebaseToken,
-      userId: credentials.userId,
-      tools,
-      existingConnectionSettings: connectionSettings || undefined,
-      proxyServerUrl,
-    });
-
-    await proxyClient.connect();
+    if (!connected) {
+      throw lastError ?? new Error(t('server.allRelaysFailed'));
+    }
 
   } catch (error: any) {
     // Handle specific error cases with helpful messages

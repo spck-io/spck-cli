@@ -80,7 +80,11 @@
     "usingSaved": "Using saved server: {{url}}",
     "failedSelect": "Failed to select relay server: {{message}}",
     "usingDefault": "Using default: {{url}}",
-    "unreachable": "unreachable"
+    "unreachable": "unreachable",
+    "attempting": "Attempting relay: {{url}}",
+    "relayFailed": "Relay {{url}} failed: {{message}}",
+    "selectingFallback": "Finding fallback relay servers...",
+    "allRelaysFailed": "All relay servers failed to connect."
   },
   "connection": {
     "title": "Connecting to Relay Server",

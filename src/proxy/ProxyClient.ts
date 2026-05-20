@@ -1010,6 +1010,19 @@ export class ProxyClient {
   }
 
   /**
+   * Tear down the socket immediately without the graceful kill handshake.
+   * Used to clean up after a failed initial connect attempt so we can retry
+   * against a different relay without leaving a reconnecting socket behind.
+   */
+  forceCleanup(): void {
+    if (!this.socket) return;
+    this.socket.removeAllListeners();
+    this.socket.disconnect();
+    this.socket = null;
+    this.activeConnections.clear();
+  }
+
+  /**
    * Graceful disconnect from proxy
    */
   async disconnect(): Promise<void> {
