@@ -292,4 +292,10 @@ export interface ProxyErrorEvent {
 export interface ToolDetectionResult {
   git: boolean;
   ripgrep: boolean;
+  // ACP-capable agents detected on PATH. The actual capability (model list)
+  // is discovered on-demand via acp.capabilities; these flags only confirm
+  // the binary exists.
+  claude: boolean;
+  codex: boolean;
+  gemini: boolean;
 }

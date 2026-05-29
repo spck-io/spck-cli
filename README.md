@@ -19,6 +19,7 @@ Connect your local development environment to Spck Editor mobile app and access 
 - 🌐 **Browser Proxy** - Preview your local server in a browser view inside Spck Editor
 - 🧠 **Language Server** - Full LSP bridge for TypeScript, JavaScript, Python, HTML, CSS, and SCSS with project-wide intelligence
 - 🔍 **Fast Search** - Optimized file search with automatic ripgrep detection (100x faster when installed)
+- 🤖 **Local AI Agents (ACP)** - Bridge Spck Editor to locally installed agent CLIs (Claude Code, Codex, Gemini CLI) via the [Agent Client Protocol](https://agentclientprotocol.com/)
 - 🔒 **Secure** - Cryptographically signed requests with optional Firebase authentication
 
 ## Requirements
@@ -46,6 +47,12 @@ Connect your local development environment to Spck Editor mobile app and access 
     - **Ubuntu/Debian**: `sudo apt-get install ripgrep`
     - **Windows**: `choco install ripgrep` (via Chocolatey) or download from [GitHub releases](https://github.com/BurntSushi/ripgrep/releases)
   - **Note**: The CLI will automatically detect and use ripgrep if available, falling back to Node.js search if not installed
+
+- **AI Agent CLIs (ACP)**: Any one or more of the supported agent CLIs enables in-editor chat with a local AI coding agent. Each is auto-detected on startup; install only the ones you want to use.
+  - **Claude Code** (binary: `claude`) — Anthropic's official CLI. Install: `npm install -g @anthropic-ai/claude-code`. Authenticate with `claude` once before connecting. See [Claude Code docs](https://docs.claude.com/en/docs/claude-code/overview).
+  - **Codex (via codex-acp)** (binary: `codex-acp`) — community ACP wrapper around OpenAI's [Codex CLI](https://github.com/openai/codex). Install: `npm install -g @zed-industries/codex-acp` (requires the Codex CLI itself to be authenticated separately).
+  - **Gemini CLI** (binary: `gemini`) — Google's official CLI with built-in ACP mode. Install: `npm install -g @google/gemini-cli`. Authenticate with `gemini` once before connecting. See [Gemini CLI repo](https://github.com/google-gemini/gemini-cli).
+  - **Note**: ACP is optional. When no agent binaries are on `PATH`, Spck Editor falls back to its built-in server-routed agents.
 
 ## Installation
 
@@ -375,6 +382,61 @@ The language server is **enabled by default**. Control it in `.spck-editor/confi
 
 - **TypeScript / JavaScript / HTML / CSS / SCSS**: Bundled with the CLI — no extra installation needed.
 - **Python**: Bundled with the CLI via Pyright — no additional installation required.
+
+## Local AI Coding Agents (ACP)
+
+The CLI can bridge Spck Editor to AI coding agents running on your machine using the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) — an open standard from Zed Industries for IDE ↔ agent communication. When the CLI starts, it probes your `PATH` for supported agent binaries and exposes any it finds to the connected Spck Editor app, which uses your local subscription/API key and runs the agent on your hardware.
+
+### Supported Agents
+
+| Agent             | Binary       | ACP launch      | Install                                                |
+| ----------------- | ------------ | --------------- | ------------------------------------------------------ |
+| Claude Code       | `claude`     | `claude acp`    | `npm install -g @anthropic-ai/claude-code`             |
+| Codex (codex-acp) | `codex-acp`  | `codex-acp`     | `npm install -g @zed-industries/codex-acp`             |
+| Gemini CLI        | `gemini`     | `gemini --acp`  | `npm install -g @google/gemini-cli`                    |
+
+Each agent is independently optional. Install only the ones you want; the CLI will auto-detect them on startup.
+
+### Detection Output
+
+On startup the CLI prints which agents it found, for example:
+
+```
+--- ACP Agents (local AI coding agents) ---
+✅ Claude Code detected: 1.0.0 (ACP transport available)
+⚪ Codex (codex-acp) not detected (binary: codex-acp)
+✅ Gemini CLI detected (ACP transport available)
+```
+
+The feature summary that follows also lists the active agents (`✅ ACP agents: Claude Code, Gemini CLI`). If no agents are detected, the CLI prints `No local ACP agents found on PATH — will use server-routed agents instead.`
+
+### How It Works
+
+- **Local execution**: When Spck Editor sends an `acp.newSession`, the CLI spawns the matching agent CLI as a child process and pipes ACP JSON-RPC messages between the editor and the agent over the existing encrypted WebSocket connection.
+- **Local credentials**: The agent uses whatever authentication you've already configured for that CLI (Claude Code login, OpenAI API key, Gemini account, etc.) — Spck Editor never sees or transmits those credentials.
+- **Local files**: Agents read and write files directly on your machine, scoped to the CLI's configured root directory.
+- **Permission prompts**: Tool-use permission requests from the agent are forwarded to Spck Editor so you can approve or deny each action from the mobile app.
+
+### Authentication
+
+Each agent manages its own login outside of Spck. Before connecting from Spck Editor:
+
+```bash
+# Claude Code
+claude            # follow the auth prompt on first run
+
+# Codex (codex-acp wraps the Codex CLI, which uses its own login)
+codex login
+
+# Gemini CLI
+gemini            # follow the auth prompt on first run
+```
+
+If an agent isn't authenticated, the CLI surfaces an error like `ACP agent requires authentication; run \`<binary> login\` and retry` when Spck Editor tries to start a session.
+
+### Disabling
+
+ACP detection is silent and non-blocking — there is no opt-out flag because the only "cost" is detecting whether the binaries exist on `PATH`. To prevent a particular agent from being offered, simply don't install it (or remove it from `PATH`).
 
 ## Connection Limits
 

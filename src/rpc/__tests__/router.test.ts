@@ -122,6 +122,9 @@ describe('RPCRouter', () => {
     }, {
       git: true,
       ripgrep: true,
+      claude: false,
+      codex: false,
+      gemini: false,
     });
   });
 

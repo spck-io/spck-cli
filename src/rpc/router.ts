@@ -10,6 +10,7 @@ import { TerminalService } from '../services/TerminalService.js';
 import { SearchService } from '../services/SearchService.js';
 import { BrowserProxyService } from '../services/BrowserProxyService.js';
 import { LanguageServerService } from '../services/LanguageServerService.js';
+import { AcpService } from '../services/AcpService.js';
 import { FileWatcher } from '../watcher/FileWatcher.js';
 
 export class RPCRouter {
@@ -20,6 +21,7 @@ export class RPCRouter {
   private static currentSockets: Map<string, AuthenticatedSocket> = new Map();
   private static browserProxyService: BrowserProxyService;
   private static languageServerService: LanguageServerService;
+  private static acpService: AcpService;
   private static rootPath: string;
   private static tools: ToolDetectionResult;
   private static terminalEnabled: boolean;
@@ -45,6 +47,7 @@ export class RPCRouter {
       typescript: config.languageServer?.typescript,
       python: config.languageServer?.python,
     });
+    this.acpService = new AcpService({ rootPath });
 
     // Parse maxFileSize from config
     const maxFileSizeBytes = this.parseFileSize(config.filesystem.maxFileSize);
@@ -59,6 +62,9 @@ export class RPCRouter {
    */
   static setBroadcastCallback(fn: (method: string, params: any) => void): void {
     this.broadcastCallback = fn;
+    // AcpService streams session/update notifications back through the same
+    // broadcast channel as fs.change events.
+    this.acpService?.setBroadcast(fn);
   }
 
   /**
@@ -70,6 +76,7 @@ export class RPCRouter {
       this.fileWatcher = null;
     }
     this.broadcastCallback = null;
+    this.acpService?.cleanup().catch(() => null);
   }
 
   private static startFileWatcher(rootPath: string): void {
@@ -214,6 +221,12 @@ export class RPCRouter {
           return await this.browserProxyService.handle(browserMethod, params, socket);
         }
 
+        case 'acp':
+          // Service handles its own availability gating so `acp.capabilities`
+          // always answers and the client uses it to decide whether to expose
+          // the transport switcher.
+          return await this.acpService.handle(methodName, params, socket);
+
         default:
           throw createRPCError(
             ErrorCode.METHOD_NOT_FOUND,
@@ -247,5 +260,13 @@ export class RPCRouter {
       this.terminalServices.delete(deviceId);
       this.currentSockets.delete(deviceId);
     }
+  }
+
+  /**
+   * Kill any ACP subprocesses owned by this socket. Called from the same
+   * disconnect path as cleanupTerminalService.
+   */
+  static cleanupAcpSessions(socket: AuthenticatedSocket): void {
+    this.acpService?.cleanupSocket(socket).catch(() => null);
   }
 }
