@@ -174,12 +174,18 @@ export class AcpProcess {
       }
       return;
     }
-    // Response to one of our outgoing requests.
+    // Response to one of our outgoing requests. We always send numeric ids
+    // (this.nextId++), but agents are free to echo them back as strings; try
+    // both lookups before giving up, otherwise a string-echoed id would
+    // silently drop the response and — combined with timeoutMs=0 on
+    // session/prompt — leave the promise hung forever.
     if (msg.id != null) {
-      const numericId = typeof msg.id === 'number' ? msg.id : Number(msg.id);
-      const p = this.pending.get(numericId);
+      const rawId = msg.id;
+      const numericId = typeof rawId === 'number' ? rawId : Number(rawId);
+      const p = this.pending.get(rawId as any) || (Number.isFinite(numericId) ? this.pending.get(numericId) : undefined);
       if (!p) return;
-      this.pending.delete(numericId);
+      this.pending.delete(rawId as any);
+      if (Number.isFinite(numericId)) this.pending.delete(numericId);
       if (p.timer) clearTimeout(p.timer);
       if (msg.error) {
         const err: Error & { code?: number; data?: unknown } = new Error(

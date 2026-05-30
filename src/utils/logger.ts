@@ -186,39 +186,64 @@ function flushBrowserProxyLog(): void {
   _browserDebounceTimer = null;
 }
 
+// Shared core for RPC-style log lines. Every per-service helper below has the
+// same structural shape: `<timestamp> <uid> <✓/✗> <CATEGORY> <method col> <detail>
+// [extra tokens] [metadata]` on the console, and `[LEVEL] <FILE_TAG> <file body>
+// uid=<uid> success=<bool> [extra tokens] [metadata]` to the file log. The
+// per-service knobs (category label + color, how to pick `detail`, the inline
+// `extraTokens`, the file tag + body) are captured in this options object; the
+// helpers below assemble those before delegating.
+interface RpcLogOpts {
+  category: string;                       // e.g. 'FS', 'GIT', 'ACP'
+  color: (s: string) => string;           // chalk color for the category label
+  methodLabel: string;                    // middle column text (often `method`)
+  detail: string;                         // gray right-of-method text
+  extraTokens?: string[];                 // inline gray tokens (msg=…, files=…)
+  uid: string;
+  success: boolean;
+  error?: any;
+  metadata?: Record<string, any>;
+  fileTag: string;                        // 'FS READ', 'GIT WRITE', 'SEARCH'…
+  fileBody: string;                       // text between the tag and `uid=`
+  methodPad?: number;                     // padding for the middle column; default 12
+}
+
+function logRpc(opts: RpcLogOpts): void {
+  const extraStr = opts.extraTokens?.length ? ` ${chalk.gray(opts.extraTokens.join(' '))}` : '';
+  const metaStr = opts.metadata ? ` ${chalk.gray(JSON.stringify(opts.metadata))}` : '';
+  const ts = chalk.gray(formatTimeCompact());
+  const uidStr = chalk.gray(formatUid(opts.uid));
+  const categoryCol = opts.color(opts.category);
+  const methodCol = chalk.white(opts.methodLabel.padEnd(opts.methodPad ?? 12));
+
+  if (opts.success) {
+    console.log(`${ts} ${uidStr} ${chalk.green('✓')} ${categoryCol} ${methodCol} ${chalk.gray(opts.detail)}${extraStr}${metaStr}`);
+    writeToFile(`[INFO] ${opts.fileTag} ${opts.fileBody} uid=${opts.uid} success=true${extraStr}${metaStr}`);
+  } else {
+    const errMsg = opts.error?.message || String(opts.error);
+    console.log(`${ts} ${uidStr} ${chalk.red('✗')} ${categoryCol} ${methodCol} ${chalk.gray(opts.detail)} ${chalk.red(errMsg)}`);
+    writeToFile(`[ERROR] ${opts.fileTag} ${opts.fileBody} uid=${opts.uid} success=false error="${errMsg}"`);
+  }
+}
+
 /**
  * Log a filesystem read operation
  */
 export function logFsRead(
   method: string,
-  params: {
-    path?: string;
-    src?: string;
-    target?: string;
-    oldpath?: string;
-    [key: string]: any;
-  },
+  params: { path?: string; src?: string; target?: string; oldpath?: string; [key: string]: any },
   uid: string,
   success: boolean,
   error?: any,
   metadata?: Record<string, any>
 ): void {
   const filepath = params.path || params.src || params.oldpath;
-  const displayPath = formatPath(filepath);
-  const metaStr = metadata ? ` ${chalk.gray(JSON.stringify(metadata))}` : '';
-  const timestamp = chalk.gray(formatTimeCompact());
-  const uidStr = chalk.gray(formatUid(uid));
-
-  if (success) {
-    const msg = `${timestamp} ${uidStr} ${chalk.green('✓')} ${chalk.cyan('FS')} ${chalk.white(method.padEnd(12))} ${chalk.gray(displayPath)}${metaStr}`;
-    console.log(msg);
-    writeToFile(`[INFO] FS READ ${method} ${filepath} uid=${uid} success=true${metaStr}`);
-  } else {
-    const errMsg = error?.message || String(error);
-    const msg = `${timestamp} ${uidStr} ${chalk.red('✗')} ${chalk.cyan('FS')} ${chalk.white(method.padEnd(12))} ${chalk.gray(displayPath)} ${chalk.red(errMsg)}`;
-    console.log(msg);
-    writeToFile(`[ERROR] FS READ ${method} ${filepath} uid=${uid} success=false error="${errMsg}"`);
-  }
+  logRpc({
+    category: 'FS', color: chalk.cyan, methodLabel: method,
+    detail: formatPath(filepath),
+    uid, success, error, metadata,
+    fileTag: 'FS READ', fileBody: `${method} ${filepath}`,
+  });
 }
 
 /**
@@ -226,37 +251,23 @@ export function logFsRead(
  */
 export function logFsWrite(
   method: string,
-  params: {
-    path?: string;
-    src?: string;
-    target?: string;
-    oldpath?: string;
-    [key: string]: any;
-  },
+  params: { path?: string; src?: string; target?: string; oldpath?: string; [key: string]: any },
   uid: string,
   success: boolean,
   error?: any,
   metadata?: Record<string, any>
 ): void {
   const filepath = params.path || params.src || params.target || params.oldpath;
-  const displayPath = formatPath(filepath);
-  const srcTarget = params.src && params.target
+  // src→target rendering for move/copy ops; falls back to the single path.
+  const detail = params.src && params.target
     ? `${formatPath(params.src, 25)} → ${formatPath(params.target, 25)}`
-    : displayPath;
-  const metaStr = metadata ? ` ${chalk.gray(JSON.stringify(metadata))}` : '';
-  const timestamp = chalk.gray(formatTimeCompact());
-  const uidStr = chalk.gray(formatUid(uid));
-
-  if (success) {
-    const msg = `${timestamp} ${uidStr} ${chalk.green('✓')} ${chalk.yellow('FS')} ${chalk.white(method.padEnd(12))} ${chalk.gray(srcTarget)}${metaStr}`;
-    console.log(msg);
-    writeToFile(`[INFO] FS WRITE ${method} ${filepath} uid=${uid} success=true${metaStr}`);
-  } else {
-    const errMsg = error?.message || String(error);
-    const msg = `${timestamp} ${uidStr} ${chalk.red('✗')} ${chalk.yellow('FS')} ${chalk.white(method.padEnd(12))} ${chalk.gray(srcTarget)} ${chalk.red(errMsg)}`;
-    console.log(msg);
-    writeToFile(`[ERROR] FS WRITE ${method} ${filepath} uid=${uid} success=false error="${errMsg}"`);
-  }
+    : formatPath(filepath);
+  logRpc({
+    category: 'FS', color: chalk.yellow, methodLabel: method,
+    detail,
+    uid, success, error, metadata,
+    fileTag: 'FS WRITE', fileBody: `${method} ${filepath}`,
+  });
 }
 
 /**
@@ -264,30 +275,18 @@ export function logFsWrite(
  */
 export function logGitRead(
   method: string,
-  params: {
-    dir?: string;
-    [key: string]: any;
-  },
+  params: { dir?: string; [key: string]: any },
   uid: string,
   success: boolean,
   error?: any,
   metadata?: Record<string, any>
 ): void {
-  const dir = formatPath(params.dir);
-  const metaStr = metadata ? ` ${chalk.gray(JSON.stringify(metadata))}` : '';
-  const timestamp = chalk.gray(formatTimeCompact());
-  const uidStr = chalk.gray(formatUid(uid));
-
-  if (success) {
-    const msg = `${timestamp} ${uidStr} ${chalk.green('✓')} ${chalk.magenta('GIT')} ${chalk.white(method.padEnd(12))} ${chalk.gray(dir)}${metaStr}`;
-    console.log(msg);
-    writeToFile(`[INFO] GIT READ ${method} dir=${params.dir} uid=${uid} success=true${metaStr}`);
-  } else {
-    const errMsg = error?.message || String(error);
-    const msg = `${timestamp} ${uidStr} ${chalk.red('✗')} ${chalk.magenta('GIT')} ${chalk.white(method.padEnd(12))} ${chalk.gray(dir)} ${chalk.red(errMsg)}`;
-    console.log(msg);
-    writeToFile(`[ERROR] GIT READ ${method} dir=${params.dir} uid=${uid} success=false error="${errMsg}"`);
-  }
+  logRpc({
+    category: 'GIT', color: chalk.magenta, methodLabel: method,
+    detail: formatPath(params.dir),
+    uid, success, error, metadata,
+    fileTag: 'GIT READ', fileBody: `${method} dir=${params.dir}`,
+  });
 }
 
 /**
@@ -295,38 +294,22 @@ export function logGitRead(
  */
 export function logGitWrite(
   method: string,
-  params: {
-    dir?: string;
-    message?: string;
-    filepaths?: string[];
-    ref?: string;
-    [key: string]: any;
-  },
+  params: { dir?: string; message?: string; filepaths?: string[]; ref?: string; [key: string]: any },
   uid: string,
   success: boolean,
   error?: any,
   metadata?: Record<string, any>
 ): void {
-  const dir = formatPath(params.dir);
-  const details = [];
-  if (params.message) details.push(`msg="${params.message.substring(0, 30)}${params.message.length > 30 ? '...' : ''}"`);
-  if (params.filepaths?.length) details.push(`files=${params.filepaths.length}`);
-  if (params.ref) details.push(`ref=${params.ref}`);
-  const detailStr = details.length ? ` ${chalk.gray(details.join(' '))}` : '';
-  const metaStr = metadata ? ` ${chalk.gray(JSON.stringify(metadata))}` : '';
-  const timestamp = chalk.gray(formatTimeCompact());
-  const uidStr = chalk.gray(formatUid(uid));
-
-  if (success) {
-    const msg = `${timestamp} ${uidStr} ${chalk.green('✓')} ${chalk.yellow('GIT')} ${chalk.white(method.padEnd(12))} ${chalk.gray(dir)}${detailStr}${metaStr}`;
-    console.log(msg);
-    writeToFile(`[INFO] GIT WRITE ${method} dir=${params.dir} uid=${uid} success=true${detailStr}${metaStr}`);
-  } else {
-    const errMsg = error?.message || String(error);
-    const msg = `${timestamp} ${uidStr} ${chalk.red('✗')} ${chalk.yellow('GIT')} ${chalk.white(method.padEnd(12))} ${chalk.gray(dir)} ${chalk.red(errMsg)}`;
-    console.log(msg);
-    writeToFile(`[ERROR] GIT WRITE ${method} dir=${params.dir} uid=${uid} success=false error="${errMsg}"`);
-  }
+  const extraTokens: string[] = [];
+  if (params.message) extraTokens.push(`msg="${params.message.substring(0, 30)}${params.message.length > 30 ? '...' : ''}"`);
+  if (params.filepaths?.length) extraTokens.push(`files=${params.filepaths.length}`);
+  if (params.ref) extraTokens.push(`ref=${params.ref}`);
+  logRpc({
+    category: 'GIT', color: chalk.yellow, methodLabel: method,
+    detail: formatPath(params.dir), extraTokens,
+    uid, success, error, metadata,
+    fileTag: 'GIT WRITE', fileBody: `${method} dir=${params.dir}`,
+  });
 }
 
 /**
@@ -334,30 +317,19 @@ export function logGitWrite(
  */
 export function logTerminalRead(
   method: string,
-  params: {
-    terminalId?: string;
-    [key: string]: any;
-  },
+  params: { terminalId?: string; [key: string]: any },
   uid: string,
   success: boolean,
   error?: any,
   metadata?: Record<string, any>
 ): void {
   const termId = params.terminalId || 'all';
-  const metaStr = metadata ? ` ${chalk.gray(JSON.stringify(metadata))}` : '';
-  const timestamp = chalk.gray(formatTimeCompact());
-  const uidStr = chalk.gray(formatUid(uid));
-
-  if (success) {
-    const msg = `${timestamp} ${uidStr} ${chalk.green('✓')} ${chalk.blue('TERM')} ${chalk.white(method.padEnd(12))} ${chalk.gray(termId)}${metaStr}`;
-    console.log(msg);
-    writeToFile(`[INFO] TERMINAL READ ${method} terminalId=${termId} uid=${uid} success=true${metaStr}`);
-  } else {
-    const errMsg = error?.message || String(error);
-    const msg = `${timestamp} ${uidStr} ${chalk.red('✗')} ${chalk.blue('TERM')} ${chalk.white(method.padEnd(12))} ${chalk.gray(termId)} ${chalk.red(errMsg)}`;
-    console.log(msg);
-    writeToFile(`[ERROR] TERMINAL READ ${method} terminalId=${termId} uid=${uid} success=false error="${errMsg}"`);
-  }
+  logRpc({
+    category: 'TERM', color: chalk.blue, methodLabel: method,
+    detail: termId,
+    uid, success, error, metadata,
+    fileTag: 'TERMINAL READ', fileBody: `${method} terminalId=${termId}`,
+  });
 }
 
 /**
@@ -365,37 +337,25 @@ export function logTerminalRead(
  */
 export function logTerminalWrite(
   method: string,
-  params: {
-    terminalId?: string;
-    data?: string;
-    cols?: number;
-    rows?: number;
-    [key: string]: any;
-  },
+  params: { terminalId?: string; data?: string; cols?: number; rows?: number; [key: string]: any },
   uid: string,
   success: boolean,
   error?: any,
   metadata?: Record<string, any>
 ): void {
   const termId = params.terminalId || metadata?.terminalId || 'new';
-  const details = [];
-  if (params.cols && params.rows) details.push(`${params.cols}x${params.rows}`);
-  if (params.data) details.push(`${params.data.length}b`);
-  const detailStr = details.length ? ` ${chalk.gray(details.join(' '))}` : '';
-  const metaStr = metadata && !metadata.terminalId ? ` ${chalk.gray(JSON.stringify(metadata))}` : '';
-  const timestamp = chalk.gray(formatTimeCompact());
-  const uidStr = chalk.gray(formatUid(uid));
-
-  if (success) {
-    const msg = `${timestamp} ${uidStr} ${chalk.green('✓')} ${chalk.yellow('TERM')} ${chalk.white(method.padEnd(12))} ${chalk.gray(termId)}${detailStr}${metaStr}`;
-    console.log(msg);
-    writeToFile(`[INFO] TERMINAL WRITE ${method} terminalId=${termId} uid=${uid} success=true${detailStr}${metaStr}`);
-  } else {
-    const errMsg = error?.message || String(error);
-    const msg = `${timestamp} ${uidStr} ${chalk.red('✗')} ${chalk.yellow('TERM')} ${chalk.white(method.padEnd(12))} ${chalk.gray(termId)} ${chalk.red(errMsg)}`;
-    console.log(msg);
-    writeToFile(`[ERROR] TERMINAL WRITE ${method} terminalId=${termId} uid=${uid} success=false error="${errMsg}"`);
-  }
+  const extraTokens: string[] = [];
+  if (params.cols && params.rows) extraTokens.push(`${params.cols}x${params.rows}`);
+  if (params.data) extraTokens.push(`${params.data.length}b`);
+  // `terminalId` in metadata is already shown as the detail — strip it so we
+  // don't render the same id twice on the line.
+  const cleanedMeta = metadata && !metadata.terminalId ? metadata : undefined;
+  logRpc({
+    category: 'TERM', color: chalk.yellow, methodLabel: method,
+    detail: termId, extraTokens,
+    uid, success, error, metadata: cleanedMeta,
+    fileTag: 'TERMINAL WRITE', fileBody: `${method} terminalId=${termId}`,
+  });
 }
 
 /**
@@ -403,37 +363,28 @@ export function logTerminalWrite(
  */
 export function logSearchRead(
   method: string,
-  params: {
-    path?: string;
-    searchTerm?: string;
-    [key: string]: any;
-  },
+  params: { path?: string; searchTerm?: string; [key: string]: any },
   uid: string,
   success: boolean,
   error?: any,
   metadata?: Record<string, any>
 ): void {
-  const filepath = formatPath(params.path);
-  const searchTerm = params.searchTerm ? `"${params.searchTerm.substring(0, 30)}${params.searchTerm.length > 30 ? '...' : ''}'"` : '';
-  const details = [];
-  if (searchTerm) details.push(searchTerm);
-  if (metadata?.matches !== undefined) details.push(`matches=${metadata.matches}`);
-  if (metadata?.method) details.push(metadata.method);
-  const detailStr = details.length ? ` ${chalk.gray(details.join(' '))}` : '';
-  const metaStr = metadata && !metadata.matches && !metadata.method ? ` ${chalk.gray(JSON.stringify(metadata))}` : '';
-  const timestamp = chalk.gray(formatTimeCompact());
-  const uidStr = chalk.gray(formatUid(uid));
-
-  if (success) {
-    const msg = `${timestamp} ${uidStr} ${chalk.green('✓')} ${chalk.green('SEARCH')} ${chalk.white(method.padEnd(12))} ${chalk.gray(filepath)}${detailStr}${metaStr}`;
-    console.log(msg);
-    writeToFile(`[INFO] SEARCH ${method} ${params.path} searchTerm="${params.searchTerm}" uid=${uid} success=true${detailStr}${metaStr}`);
-  } else {
-    const errMsg = error?.message || String(error);
-    const msg = `${timestamp} ${uidStr} ${chalk.red('✗')} ${chalk.green('SEARCH')} ${chalk.white(method.padEnd(12))} ${chalk.gray(filepath)} ${chalk.red(errMsg)}`;
-    console.log(msg);
-    writeToFile(`[ERROR] SEARCH ${method} ${params.path} searchTerm="${params.searchTerm}" uid=${uid} success=false error="${errMsg}"`);
+  const extraTokens: string[] = [];
+  if (params.searchTerm) {
+    const trimmed = params.searchTerm.substring(0, 30) + (params.searchTerm.length > 30 ? '...' : '');
+    extraTokens.push(`"${trimmed}'"`);
   }
+  if (metadata?.matches !== undefined) extraTokens.push(`matches=${metadata.matches}`);
+  if (metadata?.method) extraTokens.push(metadata.method);
+  // matches/method are already pulled out into extraTokens — only forward
+  // remaining metadata to avoid duplicating those keys in the trailing JSON.
+  const cleanedMeta = metadata && !metadata.matches && !metadata.method ? metadata : undefined;
+  logRpc({
+    category: 'SEARCH', color: chalk.green, methodLabel: method,
+    detail: formatPath(params.path), extraTokens,
+    uid, success, error, metadata: cleanedMeta,
+    fileTag: 'SEARCH', fileBody: `${method} ${params.path} searchTerm="${params.searchTerm}"`,
+  });
 }
 
 /**
@@ -441,33 +392,21 @@ export function logSearchRead(
  */
 export function logLsp(
   method: string,
-  params: {
-    name?: string;
-    type?: string;
-    types?: string[];
-    [key: string]: any;
-  },
+  params: { name?: string; type?: string; types?: string[]; [key: string]: any },
   uid: string,
   success: boolean,
   error?: any,
   metadata?: Record<string, any>
 ): void {
-  const filepath = formatPath(params.name);
+  // LSP's middle column shows the type(s) rather than the RPC method — same
+  // RPC handles many request types, the type is the user-relevant signal.
   const types = params.types?.length ? params.types.join('+') : (params.type || method);
-  const metaStr = metadata ? ` ${chalk.gray(JSON.stringify(metadata))}` : '';
-  const timestamp = chalk.gray(formatTimeCompact());
-  const uidStr = chalk.gray(formatUid(uid));
-
-  if (success) {
-    const msg = `${timestamp} ${uidStr} ${chalk.green('✓')} ${chalk.cyan('LSP')} ${chalk.white(types.padEnd(12))} ${chalk.gray(filepath)}${metaStr}`;
-    console.log(msg);
-    writeToFile(`[INFO] LSP ${types} ${params.name || ''} uid=${uid} success=true${metaStr}`);
-  } else {
-    const errMsg = error?.message || String(error);
-    const msg = `${timestamp} ${uidStr} ${chalk.red('✗')} ${chalk.cyan('LSP')} ${chalk.white(types.padEnd(12))} ${chalk.gray(filepath)} ${chalk.red(errMsg)}`;
-    console.log(msg);
-    writeToFile(`[ERROR] LSP ${types} ${params.name || ''} uid=${uid} success=false error="${errMsg}"`);
-  }
+  logRpc({
+    category: 'LSP', color: chalk.cyan, methodLabel: types,
+    detail: formatPath(params.name),
+    uid, success, error, metadata,
+    fileTag: 'LSP', fileBody: `${types} ${params.name || ''}`,
+  });
 }
 
 /**
@@ -598,6 +537,29 @@ export function logBrowserProxy(
   }
 }
 
+/**
+ * Log an ACP RPC call (capabilities, newSession, setModel, prompt, cancel,
+ * closeSession). Detail is the chatId for session-scoped calls, or the
+ * model id for setModel — whatever helps identify the call at a glance.
+ */
+export function logAcp(
+  method: string,
+  params: { chatId?: string; model?: string | null; [key: string]: any },
+  uid: string,
+  success: boolean,
+  error?: any,
+  metadata?: Record<string, any>
+): void {
+  const detail = params.chatId ? formatUid(params.chatId) : (params.model || '');
+  logRpc({
+    category: 'ACP', color: chalk.magenta, methodLabel: method,
+    detail,
+    uid, success, error, metadata,
+    fileTag: 'ACP', fileBody: `${method} chatId=${params.chatId || ''} model=${params.model || ''}`,
+    methodPad: 14,
+  });
+}
+
 export default {
   logFsRead,
   logFsWrite,
@@ -610,4 +572,5 @@ export default {
   logBrowserProxy,
   logAuth,
   logConnection,
+  logAcp,
 };

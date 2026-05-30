@@ -14,6 +14,7 @@ import * as path from 'path';
 import { createRequire } from 'module';
 import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types.js';
 import { AcpProcess } from './AcpProcess.js';
+import { logAcp } from '../utils/logger.js';
 import {
   ACP_PROTOCOL_VERSION,
   ACP_ERROR_AUTH_REQUIRED,
@@ -45,8 +46,14 @@ interface ManagedSession {
   // Outstanding session/request_permission promises, keyed by the id we sent
   // to the client. Drained on cancel/teardown so the agent never hangs.
   pendingPermissions: Map<number, PendingPermission>;
-  // In-progress prompt; cancel() needs no extra state because the agent
-  // itself owns the cancellation token. We just relay session/cancel.
+  // True while a session/prompt RPC is in flight to the agent. Guards against
+  // a second concurrent prompt on the same chatId — the agent's stdio can't
+  // safely interleave two outstanding session/prompt requests, and the second
+  // would resolve against the wrong response.
+  promptInFlight: boolean;
+  // Single shared 'disconnect' listener has been wired for the owning socket.
+  // Idempotency guard — see ensureSocketTeardown.
+  socketTeardownWired: boolean;
 }
 
 // One ACP-capable CLI agent on the host. We model this as a list so adding
@@ -93,6 +100,23 @@ export class AcpService {
   }
 
   async handle(method: string, params: any, socket: AuthenticatedSocket): Promise<any> {
+    const uid = socket.data.deviceId ?? '';
+    try {
+      const result = await this.dispatch(method, params, socket);
+      // Skip noisy success log for `prompt` — the agent streams session/update
+      // notifications throughout the turn; one more line per prompt-completion
+      // is redundant. (Failures still log below.)
+      if (method !== 'prompt' && method !== 'respondPermission') {
+        logAcp(`acp.${method}`, params || {}, uid, true);
+      }
+      return result;
+    } catch (err: any) {
+      logAcp(`acp.${method}`, params || {}, uid, false, err);
+      throw err;
+    }
+  }
+
+  private async dispatch(method: string, params: any, socket: AuthenticatedSocket): Promise<any> {
     switch (method) {
       case 'capabilities':
         // `refresh: true` re-probes PATH so the client can pick up agents
@@ -220,8 +244,21 @@ export class AcpService {
       throw createRPCError(ErrorCode.INVALID_PARAMS, 'chatId is required');
     }
     const existing = this.sessions.get(params.chatId);
-    if (existing && existing.proc.isAlive()) {
-      // Idempotent — re-use the live session.
+    // Idempotent re-use, BUT only when the caller hasn't asked for a different
+    // model. If they explicitly passed a model that doesn't match the live
+    // session's, the only correct behaviour is to recreate — silently returning
+    // the old session would leave the agent wired to the old model even though
+    // the chat thinks the switch took effect.
+    const requestedModel = params.model ?? null;
+    const modelMatches = requestedModel == null || requestedModel === existing?.model;
+    if (existing && existing.proc.isAlive() && modelMatches) {
+      // Rebind to the caller's socket — ACP sessions persist across client
+      // disconnects so the user can resume. Without this, the session.socket
+      // still points at the prior (dead) socket and the agent's permission
+      // requests would emit to nowhere. socketTeardownWired is reset so the
+      // next permission attaches a 'disconnect' handler on the *new* socket.
+      existing.socket = socket;
+      existing.socketTeardownWired = false;
       const ownerAgent = this.cachedCapabilities?.agents.find((a) => a.name === existing.agentName);
       return {
         sessionId: existing.agentSessionId,
@@ -230,7 +267,7 @@ export class AcpService {
       };
     }
     if (existing) {
-      this.sessions.delete(params.chatId);
+      await this.closeSessionInternal(params.chatId);
     }
 
     // Ensure the registry is populated before model→agent lookup.
@@ -322,6 +359,8 @@ export class AcpService {
       proc,
       socket: args.socket,
       pendingPermissions: new Map(),
+      promptInFlight: false,
+      socketTeardownWired: false,
     };
     this.sessions.set(args.chatId, session);
     return session;
@@ -361,23 +400,41 @@ export class AcpService {
 
   async prompt(params: { chatId: string; content: string }): Promise<{ stopReason: string } & Record<string, unknown>> {
     const session = this.requireSession(params.chatId);
-    // Pass the whole result through. ACP only standardizes `stopReason`, but
-    // agents commonly attach `_meta` / `usage` so the client can render token
-    // accounting; forwarding the full object lets us evolve without churning
-    // this layer each time the agent's payload grows a field.
-    // No timeout: a real prompt easily runs minutes (tool loops, long reasoning,
-    // bash subprocesses). Cancellation is out-of-band via session/cancel (the
-    // client's stop button). Agent death still rejects the pending request via
-    // AcpProcess's exit handler.
-    const result = await session.proc.request<{ stopReason: string } & Record<string, unknown>>(
-      'session/prompt',
-      {
-        sessionId: session.agentSessionId,
-        prompt: [{ type: 'text', text: params.content }],
-      },
-      0
-    );
-    return result;
+    // Reject a second prompt for a chat that already has one in flight.
+    // Queuing two session/prompts on the same agent stdio is undefined
+    // behaviour; the client UI gates this too but the server is the
+    // authoritative defence (covers racy submits and clients that bypass
+    // the stop-button guard). The `reason` field on data is the typed
+    // channel the client matches on — keep it stable.
+    if (session.promptInFlight) {
+      throw createRPCError(
+        ErrorCode.FEATURE_DISABLED,
+        `Chat ${params.chatId} has a turn already in flight`,
+        { reason: 'prompt_busy' }
+      );
+    }
+    session.promptInFlight = true;
+    try {
+      // Pass the whole result through. ACP only standardizes `stopReason`, but
+      // agents commonly attach `_meta` / `usage` so the client can render token
+      // accounting; forwarding the full object lets us evolve without churning
+      // this layer each time the agent's payload grows a field.
+      // No timeout: a real prompt easily runs minutes (tool loops, long reasoning,
+      // bash subprocesses). Cancellation is out-of-band via session/cancel (the
+      // client's stop button). Agent death still rejects the pending request via
+      // AcpProcess's exit handler.
+      const result = await session.proc.request<{ stopReason: string } & Record<string, unknown>>(
+        'session/prompt',
+        {
+          sessionId: session.agentSessionId,
+          prompt: [{ type: 'text', text: params.content }],
+        },
+        0
+      );
+      return result;
+    } finally {
+      session.promptInFlight = false;
+    }
   }
 
   async cancel(params: { chatId: string }): Promise<null> {
@@ -387,6 +444,14 @@ export class AcpService {
     // ACP spec: any in-flight session/request_permission must be answered
     // with {outcome: 'cancelled'} after we send session/cancel.
     this.drainPendingPermissions(session);
+    // Do NOT clear promptInFlight here. The agent must reply to the
+    // outstanding session/prompt (with stopReason='cancelled') and the
+    // prompt()'s try/finally clears the flag once the RPC settles. Clearing
+    // eagerly would let a follow-up prompt fire while the previous
+    // session/prompt is still pending on the agent's stdio — exactly the
+    // race the flag exists to prevent. If an agent is so broken it never
+    // replies to its own cancel, the recovery path is closeSession +
+    // newSession (forced respawn) rather than weakening the invariant.
     return null;
   }
 
@@ -484,9 +549,11 @@ export class AcpService {
 
   // Bridge ACP's session/request_permission to the spck client. We reuse the
   // git.requestAuth pattern: emit a server-initiated `rpc` request, await the
-  // matching response. No timeout — the user may take their time — but we
-  // detach on socket disconnect and on session/cancel so nothing hangs forever
-  // and listeners don't leak.
+  // matching response. No timeout — the user may take their time. The session
+  // wires a single 'disconnect' listener per socket (see ensureSocketTeardown
+  // below) that drains every pending permission for that session, so we don't
+  // need to attach a per-request disconnect handler and trip Node's
+  // MaxListenersExceededWarning on tool-heavy turns.
   private async requestPermission(session: ManagedSession, params: any): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const requestId = this.nextPermissionId++;
@@ -497,7 +564,6 @@ export class AcpService {
         settled = true;
         session.pendingPermissions.delete(requestId);
         try { socket.off('rpc', responseHandler); } catch { /* ignore */ }
-        try { socket.off('disconnect', onDisconnect); } catch { /* ignore */ }
         fn();
       };
       const responseHandler = (response: any) => {
@@ -508,18 +574,13 @@ export class AcpService {
           finish(() => resolve(response.result));
         }
       };
-      const onDisconnect = () => {
-        // Owning socket went away — answer the agent with `cancelled` so its
-        // turn can unblock instead of waiting on a dead peer.
-        finish(() => resolve({ outcome: { outcome: 'cancelled' } }));
-      };
       session.pendingPermissions.set(requestId, {
         responseHandler,
         socket,
         resolve: (value) => finish(() => resolve(value)),
       });
+      this.ensureSocketTeardown(session);
       socket.on('rpc', responseHandler);
-      socket.on('disconnect', onDisconnect);
       socket.emit('rpc', {
         jsonrpc: '2.0',
         id: requestId,
@@ -529,6 +590,29 @@ export class AcpService {
           ...params,
         },
       });
+    });
+  }
+
+  // Attach (at most once per current owner socket) a single 'disconnect'
+  // listener that drains pending permissions THIS socket issued — replacing
+  // the prior per-request listener that consolidated into one source of
+  // MaxListenersExceededWarning under tool-heavy turns. Idempotency is
+  // tracked via socketTeardownWired, which newSession resets to false when
+  // it rebinds the session to a new socket (multi-tab reconnect). The
+  // listener captures the owner socket and drains only permissions whose
+  // `pending.socket === owner`, so a stale owner disappearing can't cancel
+  // permissions issued by the current owner.
+  private ensureSocketTeardown(session: ManagedSession): void {
+    if (session.socketTeardownWired) return;
+    session.socketTeardownWired = true;
+    const owner = session.socket;
+    owner.on('disconnect', () => {
+      for (const [id, pending] of Array.from(session.pendingPermissions)) {
+        if (pending.socket !== owner) continue;
+        try { pending.socket.off('rpc', pending.responseHandler); } catch { /* ignore */ }
+        pending.resolve({ outcome: { outcome: 'cancelled' } });
+        session.pendingPermissions.delete(id);
+      }
     });
   }
 
@@ -545,11 +629,19 @@ export class AcpService {
     return session;
   }
 
+  // True when `child` is `root` or strictly nested under it. A raw
+  // `startsWith` would falsely accept sibling directories that share the
+  // root's name as a prefix (e.g. `/proj/foo-extra` vs root `/proj/foo`).
+  private isWithinRoot(child: string, root: string): boolean {
+    if (child === root) return true;
+    return child.startsWith(root + path.sep);
+  }
+
   private resolveCwd(input: string): string {
     // Always resolve cwd against the cli's rootPath. ACP sessions are
     // sandboxed to the project the cli is serving.
     const abs = path.resolve(this.rootPath, input);
-    if (!abs.startsWith(path.resolve(this.rootPath))) {
+    if (!this.isWithinRoot(abs, path.resolve(this.rootPath))) {
       throw createRPCError(ErrorCode.INVALID_PATH, `cwd outside project root: ${input}`);
     }
     return abs;
@@ -560,8 +652,7 @@ export class AcpService {
       throw createRPCError(ErrorCode.INVALID_PARAMS, 'path is required');
     }
     const abs = path.resolve(session.cwd, requested);
-    const rootResolved = path.resolve(this.rootPath);
-    if (!abs.startsWith(rootResolved)) {
+    if (!this.isWithinRoot(abs, path.resolve(this.rootPath))) {
       throw createRPCError(ErrorCode.INVALID_PATH, `path outside project root: ${requested}`);
     }
     return abs;

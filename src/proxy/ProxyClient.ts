@@ -89,6 +89,19 @@ export class ProxyClient {
   // 'io server disconnect', so the outer connect loop can wait + retry.
   private suppressServerDisconnectExit = false;
 
+  // Custom reconnect backoff schedule (ms between attempts). Past the last
+  // entry we keep retrying at that interval until MAX_RECONNECT_ATTEMPTS.
+  // Socket.IO's built-in `reconnectionDelay * 2^attempt` curve can't produce
+  // this exact sequence, so we disable it (`reconnection: false`) and drive
+  // reconnects from handleDisconnect / handleSocketConnectError.
+  private static readonly RECONNECT_SCHEDULE_MS = [1000, 5000, 10000, 20000, 30000, 60000];
+  private static readonly MAX_RECONNECT_ATTEMPTS = 35;
+  private reconnectAttempt = 0;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  // True once initial auth completes. Pre-auth failures are owned by
+  // waitForAuthentication; our scheduler should only kick in afterwards.
+  private initialConnectAuthed = false;
+
   constructor(private options: ProxyClientOptions) {
     this.config = options.config;
     this.tools = options.tools;
@@ -126,10 +139,7 @@ export class ProxyClient {
         firebaseToken: this.firebaseToken,
         serverToken: existingToken,
       },
-      reconnection: true,
-      reconnectionAttempts: 35,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 10000,
+      reconnection: false, // custom schedule — see RECONNECT_SCHEDULE_MS
       timeout: 25000,
     } as any);
 
@@ -162,7 +172,12 @@ export class ProxyClient {
 
       logAuth('token_refresh_success', { userId: this.userId });
 
-      // Disconnect current socket
+      // Disconnect current socket and tear down reconnect state — a timer
+      // scheduled against the old socket would fire after we've assigned a
+      // new one, and the stale `initialConnectAuthed=true` would let the
+      // persistent connect_error handler keep scheduling against the new
+      // pre-auth socket. Reset everything so connect() starts clean.
+      this.resetReconnectState();
       if (this.socket) {
         this.socket.removeAllListeners();
         this.socket.disconnect();
@@ -204,11 +219,15 @@ export class ProxyClient {
       });
     });
 
-    // Connection state
+    // Connection state. The `reconnect_*` events are Socket.IO built-ins —
+    // since we disable its reconnection (`reconnection: false`) they never
+    // fire; we call the same handlers from our custom scheduler instead.
     this.socket.on('disconnect', this.handleDisconnect.bind(this));
-    this.socket.on('reconnect_attempt', this.handleReconnectAttempt.bind(this));
-    this.socket.on('reconnect', this.handleReconnect.bind(this));
-    this.socket.on('reconnect_failed', this.handleReconnectFailed.bind(this));
+    // Persistent connect_error handler covers reconnect-attempt failures.
+    // Pre-auth failures are still owned by waitForAuthentication's
+    // socket.once('connect_error', ...) listener — both fire, ours no-ops
+    // until initialConnectAuthed flips to true.
+    this.socket.on('connect_error', this.handleSocketConnectError.bind(this));
   }
 
   /**
@@ -268,6 +287,12 @@ export class ProxyClient {
     logAuth('proxy_authenticated', { userId: data.userId, clientId: data.clientId });
 
     this.tokenRefreshState = 'idle';
+
+    // Successful auth — any pending reconnect cycle is done. Reset attempt
+    // counter so the next disconnect starts the schedule fresh at 1s.
+    this.initialConnectAuthed = true;
+    this.reconnectAttempt = 0;
+    this.clearReconnectTimer();
 
     // Track if this is a new CLI session (vs automatic reconnection in same session)
     const isNewSession = this.connectionSettings === null;
@@ -862,6 +887,17 @@ export class ProxyClient {
       console.warn(`${t('proxyError.dailyLimitExceededHint')}\n`);
     }
 
+    // Intentionally do NOT call cleanupTerminalService or cleanupAcpSessions
+    // here — terminal PTYs and ACP agent subprocesses are deliberately kept
+    // alive across disconnects so the user can reconnect (new tab, restored
+    // session) and resume their work. Both services key state by deviceId,
+    // and the client re-attaches on reconnect via `subscribe` (terminal) and
+    // `acp.newSession` (which is idempotent on chatId).
+    //
+    // The trade-off: long-lived idle clients accumulate processes. If that
+    // ever becomes the dominant cost, add an idle TTL on each service rather
+    // than killing eagerly on disconnect.
+
     // Clean up connection tracking
     this.activeConnections.delete(data.connectionId);
   }
@@ -1011,8 +1047,80 @@ export class ProxyClient {
       process.exit(1);
     }
 
-    // Socket.IO will auto-reconnect
+    // We initiated this (graceful disconnect()) — don't auto-reconnect.
+    if (reason === 'io client disconnect') return;
+
+    // Pre-auth disconnects are owned by the outer connect loop, not our
+    // scheduler. Once initial auth completed, drive reconnects ourselves.
+    if (!this.initialConnectAuthed) return;
+
     console.log(t('connection.attemptingReconnect'));
+    this.scheduleReconnect();
+  }
+
+  /**
+   * Cancel any pending reconnect attempt. Safe to call when no timer is set.
+   * Does NOT reset the attempt counter — the caller decides whether the
+   * existing schedule is still meaningful (e.g. handleAuthenticated resets
+   * the counter; cleanup paths just drop the timer).
+   */
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  /**
+   * Full reset of the reconnect state machine. Used by paths that tear down
+   * the socket and don't plan to resume from the prior schedule — without
+   * this, a reused/relayed ProxyClient inherits a stale backoff index and
+   * may jump straight to the schedule's last slot (60s) on its next
+   * reconnect instead of starting at 1s.
+   */
+  private resetReconnectState(): void {
+    this.clearReconnectTimer();
+    this.reconnectAttempt = 0;
+    this.initialConnectAuthed = false;
+  }
+
+  /**
+   * Schedule the next reconnect attempt using our custom backoff schedule.
+   * No-op if a reconnect is already pending or we've exhausted attempts.
+   */
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) return;
+    if (this.reconnectAttempt >= ProxyClient.MAX_RECONNECT_ATTEMPTS) {
+      this.handleReconnectFailed();
+      return;
+    }
+    const scheduleIdx = Math.min(
+      this.reconnectAttempt,
+      ProxyClient.RECONNECT_SCHEDULE_MS.length - 1
+    );
+    const delay = ProxyClient.RECONNECT_SCHEDULE_MS[scheduleIdx];
+    this.reconnectAttempt++;
+    const attemptNumber = this.reconnectAttempt;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.handleReconnectAttempt(attemptNumber);
+      try {
+        this.socket?.connect();
+      } catch {
+        // socket.connect() shouldn't throw — but if it does, schedule the
+        // next attempt rather than wedging the loop.
+        this.scheduleReconnect();
+      }
+    }, delay);
+  }
+
+  /**
+   * Reconnect-attempt failure handler. waitForAuthentication owns the
+   * pre-auth case via its `once('connect_error', ...)` listener.
+   */
+  private handleSocketConnectError(_error: Error): void {
+    if (!this.initialConnectAuthed) return;
+    this.scheduleReconnect();
   }
 
   /**
@@ -1044,6 +1152,7 @@ export class ProxyClient {
    * against a different relay without leaving a reconnecting socket behind.
    */
   forceCleanup(): void {
+    this.resetReconnectState();
     if (!this.socket) return;
     this.socket.removeAllListeners();
     this.socket.disconnect();
@@ -1055,6 +1164,7 @@ export class ProxyClient {
    * Graceful disconnect from proxy
    */
   async disconnect(): Promise<void> {
+    this.resetReconnectState();
     if (!this.socket) return;
 
     RPCRouter.cleanup();
