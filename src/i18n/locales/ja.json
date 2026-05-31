@@ -299,6 +299,10 @@
     "summaryMaxBuffer": "- 最大バッファ行数: {{value}}",
     "summaryMaxProcesses": "- 最大プロセス数: {{value}}",
     "summaryUserAuth": "ユーザー認証: {{status}}",
-    "received": "{{signal}} を受信しました"
+    "received": "{{signal}} を受信しました",
+    "acpConfig": "ACP（ローカル AI エージェント）設定",
+    "acpDescription1": "ACP は、このホスト上で動作するローカル AI コーディングエージェント",
+    "acpDescription2": "（Claude Code、Codex、Gemini）を制御します。エージェントはシェルとファイルシステムに間接的にアクセスします。",
+    "acpPrompt": "ACP（ローカル AI エージェント）サービスを有効にしますか？ [Y/n]: "
   }
 }

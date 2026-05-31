@@ -151,7 +151,7 @@ export async function startProxyClient(
     }
 
     // Step 7: Display feature summary
-    displayFeatureSummary(tools, config.terminal.enabled, config.security.userAuthenticationEnabled, config.browserProxy?.enabled ?? true, config.languageServer?.enabled ?? true);
+    displayFeatureSummary(tools, config.terminal.enabled, config.security.userAuthenticationEnabled, config.browserProxy?.enabled ?? true, config.languageServer?.enabled ?? true, config.acp?.enabled ?? true);
 
     // Step 8: Pick the first relay to try (override > saved > ping-best)
     let initialServer: string | null = null;

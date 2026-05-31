@@ -21,12 +21,13 @@ export class RPCRouter {
   private static currentSockets: Map<string, AuthenticatedSocket> = new Map();
   private static browserProxyService: BrowserProxyService;
   private static languageServerService: LanguageServerService;
-  private static acpService: AcpService;
+  private static acpService: AcpService | undefined;
   private static rootPath: string;
   private static tools: ToolDetectionResult;
   private static terminalEnabled: boolean;
   private static browserProxyEnabled: boolean;
   private static languageServerEnabled: boolean;
+  private static acpEnabled: boolean;
   private static fileWatcher: FileWatcher | null = null;
   private static broadcastCallback: ((method: string, params: any) => void) | null = null;
 
@@ -39,6 +40,11 @@ export class RPCRouter {
     this.terminalEnabled = config.terminal?.enabled ?? true;
     this.browserProxyEnabled = config.browserProxy?.enabled ?? true;
     this.languageServerEnabled = config.languageServer?.enabled ?? true;
+    // ACP is opt-out per project. Default true for back-compat with configs
+    // that predate the toggle. When disabled, we don't construct the service
+    // at all — `acp.*` RPCs reject with FEATURE_DISABLED below, and the
+    // client's transport-switcher falls back to the cloud (SSE) path.
+    this.acpEnabled = config.acp?.enabled ?? true;
     this.filesystemService = new FilesystemService(rootPath, config.filesystem);
     this.gitService = new GitService(rootPath);
     this.browserProxyService = new BrowserProxyService();
@@ -47,7 +53,9 @@ export class RPCRouter {
       typescript: config.languageServer?.typescript,
       python: config.languageServer?.python,
     });
-    this.acpService = new AcpService({ rootPath });
+    if (this.acpEnabled) {
+      this.acpService = new AcpService({ rootPath });
+    }
 
     // Parse maxFileSize from config
     const maxFileSizeBytes = this.parseFileSize(config.filesystem.maxFileSize);
@@ -222,9 +230,19 @@ export class RPCRouter {
         }
 
         case 'acp':
-          // Service handles its own availability gating so `acp.capabilities`
-          // always answers and the client uses it to decide whether to expose
-          // the transport switcher.
+          // Project-level kill switch. When `config.acp.enabled` is false we
+          // never construct the service, and the transport-switcher in the
+          // client expects `acp.capabilities` to answer with available:false
+          // so it can fall back to the SSE path. Other acp.* methods reject
+          // with FEATURE_DISABLED so a misbehaving client gets a clear error
+          // rather than a 'Method not found'.
+          if (!this.acpService) {
+            if (methodName === 'capabilities') return { available: false, agents: [] };
+            throw createRPCError(
+              ErrorCode.FEATURE_DISABLED,
+              'ACP is disabled in this project\'s configuration.'
+            );
+          }
           return await this.acpService.handle(methodName, params, socket);
 
         default:

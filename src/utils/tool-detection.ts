@@ -153,7 +153,8 @@ export function displayFeatureSummary(
   terminalEnabled: boolean,
   userAuthEnabled?: boolean,
   browserProxyEnabled?: boolean,
-  languageServerEnabled?: boolean
+  languageServerEnabled?: boolean,
+  acpEnabled?: boolean
 ): void {
   console.log(`\n=== ${t('features.title')} ===\n`);
 
@@ -193,14 +194,18 @@ export function displayFeatureSummary(
     features.push(`❌ ${t('features.lspDisabled')}`);
   }
 
-  const acpAgents: string[] = [];
-  if (tools.claude) acpAgents.push('Claude Code');
-  if (tools.codex) acpAgents.push('Codex');
-  if (tools.gemini) acpAgents.push('Gemini CLI');
-  if (acpAgents.length > 0) {
-    features.push(`✅ ACP agents: ${acpAgents.join(', ')}`);
+  if (acpEnabled === false) {
+    features.push(`❌ ACP agents (disabled in config)`);
   } else {
-    features.push(`⚠️  ACP agents (no local agent binaries on PATH)`);
+    const acpAgents: string[] = [];
+    if (tools.claude) acpAgents.push('Claude Code');
+    if (tools.codex) acpAgents.push('Codex');
+    if (tools.gemini) acpAgents.push('Gemini CLI');
+    if (acpAgents.length > 0) {
+      features.push(`✅ ACP agents: ${acpAgents.join(', ')}`);
+    } else {
+      features.push(`⚠️  ACP agents (no local agent binaries on PATH)`);
+    }
   }
 
   features.forEach(feature => console.log(`   ${feature}`));

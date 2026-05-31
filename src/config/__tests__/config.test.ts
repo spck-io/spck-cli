@@ -45,6 +45,9 @@ describe('config', () => {
       browserProxy: {
         enabled: true
       },
+      acp: {
+        enabled: true
+      },
       filesystem: {
         maxFileSize: '100MB',
         watchIgnorePatterns: ['node_modules/**'],

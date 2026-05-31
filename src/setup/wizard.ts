@@ -127,6 +127,17 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
       true
     );
 
+    // Step 5.5: ACP (local AI agent) configuration
+    console.log('\n--- ' + t('setup.acpConfig') + ' ---\n');
+    console.log(t('setup.acpDescription1'));
+    console.log(t('setup.acpDescription2') + '\n');
+
+    const acpEnabled = await questionYesNo(
+      rl,
+      t('setup.acpPrompt'),
+      true
+    );
+
     // Step 6: Security configuration
     console.log('\n--- ' + t('setup.securityConfig') + ' ---\n');
     console.log(t('setup.securityDescription1'));
@@ -175,6 +186,9 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
       },
       browserProxy: {
         enabled: browserProxyEnabled
+      },
+      acp: {
+        enabled: acpEnabled
       },
       filesystem: {
         maxFileSize: '10MB',
@@ -238,5 +252,6 @@ function displayConfigSummary(config: ServerConfig): void {
 
   console.log('  ' + t('setup.summaryUserAuth', { status: config.security.userAuthenticationEnabled ? t('setup.summaryEnabled') : t('setup.summaryDisabled') }));
   console.log('  ' + t('setup.summaryBrowserProxy', { status: config.browserProxy?.enabled !== false ? t('setup.summaryEnabled') : t('setup.summaryDisabled') }));
+  console.log('  ' + t('setup.summaryAcp', { status: config.acp?.enabled !== false ? t('setup.summaryEnabled') : t('setup.summaryDisabled') }));
   console.log('');
 }

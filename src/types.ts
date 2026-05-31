@@ -47,6 +47,14 @@ export interface ServerConfig {
     typescript?: boolean;
     python?: boolean;
   };
+
+  // ACP (Agent Client Protocol) — lets the editor drive a local AI coding
+  // agent (Claude Code, Codex, Gemini) that runs on this host. The agent
+  // has indirect shell/filesystem access, so per-project opt-out is
+  // supported. Defaults to enabled when missing for backward compatibility.
+  acp?: {
+    enabled: boolean;
+  };
 }
 
 // Connection Settings (stored in .spck-editor/config/connection-settings.json)

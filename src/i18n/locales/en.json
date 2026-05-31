@@ -292,6 +292,10 @@
     "browserProxyConfig": "Browser Proxy Configuration",
     "browserProxyDescription": "Browser proxy allows Spck Editor to open a live preview of your local dev server inside the browser.",
     "browserProxyPrompt": "Enable browser proxy service? [Y/n]: ",
+    "acpConfig": "ACP (Local AI Agent) Configuration",
+    "acpDescription1": "ACP lets the editor drive a local AI coding agent (Claude Code, Codex, Gemini)",
+    "acpDescription2": "running on this host. The agent has indirect shell and filesystem access.",
+    "acpPrompt": "Enable ACP (local AI agent) service? [Y/n]: ",
     "securityConfig": "Security Configuration",
     "securityDescription1": "Additional user authentication adds an extra security layer",
     "securityDescription2": "by requiring the client to verify their Firebase identity.",
@@ -318,6 +322,7 @@
     "summaryMaxProcesses": "- Max processes: {{value}}",
     "summaryUserAuth": "User authentication: {{status}}",
     "summaryBrowserProxy": "Browser proxy: {{status}}",
+    "summaryAcp": "ACP (local AI agent): {{status}}",
     "received": "Received {{signal}}"
   }
 }

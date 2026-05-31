@@ -299,6 +299,10 @@
     "summaryMaxBuffer": "- Baris buffer maks: {{value}}",
     "summaryMaxProcesses": "- Proses maks: {{value}}",
     "summaryUserAuth": "Autentikasi pengguna: {{status}}",
-    "received": "Menerima {{signal}}"
+    "received": "Menerima {{signal}}",
+    "acpConfig": "Konfigurasi ACP (Agen AI Lokal)",
+    "acpDescription1": "ACP memungkinkan editor menjalankan agen AI lokal (Claude Code, Codex, Gemini)",
+    "acpDescription2": "di host ini. Agen memiliki akses tidak langsung ke shell dan sistem file.",
+    "acpPrompt": "Aktifkan layanan ACP (agen AI lokal)? [Y/n]: "
   }
 }

@@ -44,6 +44,12 @@ export function loadConfig(configPath?: string): ServerConfig {
       config.browserProxy = { enabled: true };
       needsSave = true;
     }
+    if (!config.acp) {
+      // Older configs predate the ACP toggle. Default to enabled so the
+      // upgrade is non-breaking for users who relied on the feature.
+      config.acp = { enabled: true };
+      needsSave = true;
+    }
     if (needsSave) {
       try { saveConfig(config, configPath); } catch { /* best-effort */ }
     }
@@ -177,6 +183,9 @@ export function createDefaultConfig(overrides: Partial<ServerConfig> = {}): Serv
       ],
     },
     browserProxy: {
+      enabled: true,
+    },
+    acp: {
       enabled: true,
     },
     ...overrides,

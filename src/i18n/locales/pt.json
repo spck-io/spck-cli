@@ -299,6 +299,10 @@
     "summaryMaxBuffer": "- Linhas máximas do buffer: {{value}}",
     "summaryMaxProcesses": "- Processos máximos: {{value}}",
     "summaryUserAuth": "Autenticação de usuário: {{status}}",
-    "received": "Recebido {{signal}}"
+    "received": "Recebido {{signal}}",
+    "acpConfig": "Configuração do ACP (agente de IA local)",
+    "acpDescription1": "O ACP permite que o editor controle um agente de IA local (Claude Code, Codex, Gemini)",
+    "acpDescription2": "em execução neste host. O agente tem acesso indireto ao shell e ao sistema de arquivos.",
+    "acpPrompt": "Ativar o serviço ACP (agente de IA local)? [Y/n]: "
   }
 }

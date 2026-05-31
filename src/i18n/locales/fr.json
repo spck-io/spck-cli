@@ -299,6 +299,10 @@
     "summaryMaxBuffer": "- Lignes maximum du tampon : {{value}}",
     "summaryMaxProcesses": "- Processus maximum : {{value}}",
     "summaryUserAuth": "Authentification utilisateur : {{status}}",
-    "received": "Reçu {{signal}}"
+    "received": "Reçu {{signal}}",
+    "acpConfig": "Configuration ACP (agent IA local)",
+    "acpDescription1": "ACP permet à l’éditeur de piloter un agent IA local (Claude Code, Codex, Gemini)",
+    "acpDescription2": "exécuté sur cet hôte. L’agent a un accès indirect au shell et au système de fichiers.",
+    "acpPrompt": "Activer le service ACP (agent IA local) ? [O/n] : "
   }
 }

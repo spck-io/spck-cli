@@ -299,6 +299,10 @@
     "summaryMaxBuffer": "- 最大缓冲行数: {{value}}",
     "summaryMaxProcesses": "- 最大进程数: {{value}}",
     "summaryUserAuth": "用户认证: {{status}}",
-    "received": "收到 {{signal}}"
+    "received": "收到 {{signal}}",
+    "acpConfig": "ACP（本地 AI 代理）配置",
+    "acpDescription1": "ACP 允许编辑器驱动在此主机上运行的本地 AI 编码代理",
+    "acpDescription2": "（Claude Code、Codex、Gemini）。代理可间接访问 shell 和文件系统。",
+    "acpPrompt": "启用 ACP（本地 AI 代理）服务？[Y/n]: "
   }
 }

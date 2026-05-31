@@ -218,6 +218,9 @@ The configuration is stored in `.spck-editor/config/spck-cli.config.json` in you
   },
   "browserProxy": {
     "enabled": true
+  },
+  "acp": {
+    "enabled": true
   }
 }
 ```
@@ -227,6 +230,12 @@ The configuration is stored in `.spck-editor/config/spck-cli.config.json` in you
 #### Browser Proxy Settings
 
 - **`browserProxy.enabled`** (boolean, default: `true`): Enable/disable the browser proxy feature. Set to `false` to prevent the mobile app from opening browser proxy sessions through the CLI.
+
+#### ACP (Local AI Agent) Settings
+
+- **`acp.enabled`** (boolean, default: `true`): Enable/disable ACP. When `false`, the editor's "Local Claude Code" / agent switcher hides and the cloud (SSE) path is used instead. Disable this per-project when you don't want the editor to be able to drive a local AI coding agent on this host — the agent has indirect shell and filesystem access, so this is the per-project opt-out.
+  - **Backward-compat**: configs that predate this option are loaded with `acp: { enabled: true }` populated automatically and re-saved.
+  - See [Local AI Coding Agents (ACP)](#local-ai-coding-agents-acp) below for details on the agents this controls.
 
 #### Terminal Settings
 
@@ -436,7 +445,19 @@ If an agent isn't authenticated, the CLI surfaces an error like `ACP agent requi
 
 ### Disabling
 
-ACP detection is silent and non-blocking — there is no opt-out flag because the only "cost" is detecting whether the binaries exist on `PATH`. To prevent a particular agent from being offered, simply don't install it (or remove it from `PATH`).
+ACP is opt-out **per project** via `acp.enabled` in `spck-cli.config.json`:
+
+```json
+{
+  "acp": {
+    "enabled": false
+  }
+}
+```
+
+When disabled, `acp.capabilities` answers with `{ available: false, agents: [] }`, the editor's Local Claude Code / agent transport-switcher hides, and any direct `acp.*` call rejects with `FEATURE_DISABLED`. The setup wizard asks this question at first run (default `Y`); configs that predate the option are loaded with `acp.enabled: true` populated automatically for backward compatibility.
+
+To prevent a *particular* agent from being offered while keeping ACP enabled for others, simply don't install that agent (or remove it from `PATH`).
 
 ## Connection Limits
 
