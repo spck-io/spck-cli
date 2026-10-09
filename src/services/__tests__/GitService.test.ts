@@ -63,6 +63,31 @@ describe('GitService', () => {
     } catch {}
   });
 
+  describe('force push', () => {
+    it('rejects a normal history rewrite and permits an explicit force push', async () => {
+      const remote = path.join(testRoot, 'remote.git');
+      await execGit(['init', '--bare', remote], testRoot);
+      await execGit(['init', '-b', 'main'], repoPath);
+      await execGit(['config', 'user.name', 'Test'], repoPath);
+      await execGit(['config', 'user.email', 'test@example.com'], repoPath);
+      await fs.writeFile(path.join(repoPath, 'file.txt'), 'original\n');
+      await execGit(['add', '.'], repoPath);
+      await execGit(['commit', '-m', 'original'], repoPath);
+      await execGit(['remote', 'add', 'origin', remote], repoPath);
+      vi.spyOn(service as any, 'setupAskpass').mockResolvedValue({ env: {}, cleanup: vi.fn() });
+      await service.handle('push', { dir: '/repo', remote: 'origin', remoteRef: 'main' }, mockSocket);
+      await fs.writeFile(path.join(repoPath, 'file.txt'), 'remote work\n');
+      await execGit(['commit', '-am', 'remote work'], repoPath);
+      await service.handle('push', { dir: '/repo', remote: 'origin', remoteRef: 'main' }, mockSocket);
+      const remoteHead = await execGit(['rev-parse', 'refs/heads/main'], remote);
+      await execGit(['reset', '--hard', 'HEAD~1'], repoPath);
+      await expect(service.handle('push', { dir: '/repo', remote: 'origin', remoteRef: 'main' }, mockSocket)).rejects.toBeDefined();
+      expect(await execGit(['rev-parse', 'refs/heads/main'], remote)).toBe(remoteHead);
+      await service.handle('push', { dir: '/repo', remote: 'origin', remoteRef: 'main', force: true }, mockSocket);
+      expect(await execGit(['rev-parse', 'refs/heads/main'], remote)).toBe(await execGit(['rev-parse', 'HEAD'], repoPath));
+    });
+  });
+
   describe('Path Validation', () => {
     it('should accept valid paths', async () => {
       await execGit(['init'], repoPath);

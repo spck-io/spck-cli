@@ -1447,7 +1447,9 @@ export class GitService {
    */
   private async push(dir: string, params: any, socket: AuthenticatedSocket): Promise<{ success: boolean }> {
     const remote = params.remote || 'origin';
-    const args = ['push', remote];
+    const args = ['push'];
+    if (params.force === true) args.push('--force');
+    args.push(remote);
 
     if (params.remoteRef) {
       // Get current branch for the local side of the refspec
