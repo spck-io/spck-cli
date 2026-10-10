@@ -463,6 +463,14 @@ describe('GitService', () => {
       expect(result.branches).toContain('feature');
     });
 
+    it('should list lightweight and annotated tags', async () => {
+      await execGit(['tag', 'release/v1'], repoPath);
+      await execGit(['tag', '-a', 'v2', '-m', 'Release'], repoPath);
+      await execGit(['pack-refs', '--all'], repoPath);
+      const result = await service.handle('listTags', { dir: '/repo' }, mockSocket);
+      expect(result.tags).toEqual(['release/v1', 'v2']);
+    });
+
     it('should filter out empty lines', async () => {
       const result = await service.handle(
         'listBranches',

@@ -112,7 +112,7 @@ export class GitService {
 
     // Define read and write operations
     const readOps = ['readCommit', 'readObject', 'getHeadTree', 'getOidAtPath', 'listFiles', 'resolveRef',
-                     'currentBranch', 'log', 'status', 'statusCounts', 'getConfig', 'listBranches',
+                     'currentBranch', 'log', 'status', 'statusCounts', 'getConfig', 'listBranches', 'listTags',
                      'listRemotes', 'isIgnored', 'bulkIsIgnored', 'isInitialized', 'listSubmodules', 'requestAuth',
                      'getDefaultAuthor', 'listCommitsAndTags', 'findMergeBase'];
     const writeOps = ['add', 'remove', 'resetIndex', 'commit', 'setConfig', 'checkout', 'init',
@@ -188,6 +188,10 @@ export class GitService {
         case 'listBranches':
           result = await this.listBranches(gitCwd, params);
           logGitRead(method, params, deviceId, true, undefined, { count: result.branches.length });
+          return result;
+        case 'listTags':
+          result = await this.listTags(gitCwd);
+          logGitRead(method, params, deviceId, true, undefined, { count: result.tags.length });
           return result;
         case 'checkout':
           result = await this.checkout(gitCwd, params);
@@ -1038,6 +1042,11 @@ export class GitService {
     }
 
     return { success: true };
+  }
+
+  private async listTags(dir: string): Promise<{ tags: string[] }> {
+    const { stdout } = await this.execGit(['tag', '--list'], { cwd: dir });
+    return { tags: stdout.split('\n').filter(Boolean) };
   }
 
   /**
