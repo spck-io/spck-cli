@@ -63,6 +63,20 @@ describe('GitService', () => {
     } catch {}
   });
 
+  describe('readObject', () => {
+    it('preserves binary blob bytes across JSON transport', async () => {
+      await execGit(['init'], repoPath);
+      const bytes = Buffer.from([0, 255, 128, 192, 175, 13, 10]);
+      await fs.writeFile(path.join(repoPath, 'binary.dat'), bytes);
+      const oid = await execGit(['hash-object', '-w', 'binary.dat'], repoPath);
+      const result = await service.handle('readObject', { dir: '/repo', oid }, mockSocket);
+      const received = JSON.parse(JSON.stringify(result));
+      expect(Buffer.from(received.base64, 'base64')).toEqual(bytes);
+      const text = await service.handle('readObject', { dir: '/repo', oid, encoding: 'utf8' }, mockSocket);
+      expect(text.object).toBe(bytes.toString('utf8'));
+    });
+  });
+
   describe('force push', () => {
     it('rejects a normal history rewrite and permits an explicit force push', async () => {
       const remote = path.join(testRoot, 'remote.git');

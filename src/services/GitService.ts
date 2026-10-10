@@ -16,12 +16,14 @@ interface ExecGitOptions {
   env?: NodeJS.ProcessEnv;
   input?: string;
   acceptExitCodes?: number[];
+  binary?: boolean;
 }
 
 interface ExecGitResult {
   stdout: string;
   stderr: string;
   code: number;
+  stdoutBuffer?: Buffer;
 }
 
 export class GitService {
@@ -356,11 +358,13 @@ export class GitService {
       });
 
       let stdout = '';
+      const stdoutChunks: Buffer[] = [];
       let stderr = '';
 
       if (git.stdout) {
         git.stdout.on('data', (data) => {
-          stdout += data.toString();
+          if (options.binary) stdoutChunks.push(data);
+          else stdout += data.toString();
         });
       }
 
@@ -394,7 +398,7 @@ export class GitService {
           // Send sanitized error to client (no file paths from stderr/stdout)
           reject(new Error(`Git command failed with exit code ${code}`));
         } else {
-          resolve({ stdout, stderr, code: exitCode });
+          resolve({ stdout, stderr, code: exitCode, ...(options.binary ? { stdoutBuffer: Buffer.concat(stdoutChunks) } : {}) });
         }
       });
 
@@ -476,11 +480,12 @@ export class GitService {
    */
   private async readObject(dir: string, params: any): Promise<any> {
     const { oid, encoding } = params;
-    const { stdout } = await this.execGit(['cat-file', '-p', oid], { cwd: dir });
+    const { stdoutBuffer } = await this.execGit(['cat-file', '-p', oid], { cwd: dir, binary: true });
+    const bytes = stdoutBuffer!;
 
     return {
       oid,
-      object: encoding === 'utf8' ? stdout : Buffer.from(stdout, 'utf8'),
+      ...(encoding ? { object: bytes.toString(encoding) } : { base64: bytes.toString('base64') }),
       format: 'content'
     };
   }
