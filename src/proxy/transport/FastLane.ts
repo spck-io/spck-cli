@@ -6,7 +6,9 @@
  * The relay decides who may use Fast Lane (Supporter tier or higher) and only
  * forwards signals for connections it has granted. The CLI never trusts the
  * DataChannel on its own: the same HMAC handshake used over the relay must
- * complete over the DataChannel before any RPC is served.
+ * complete over the DataChannel before any RPC is served, and on Fast Lane
+ * that handshake also signs both DTLS fingerprints (channelBinding), so a
+ * relay that rewrote the SDP to man-in-the-middle the connection is detected.
  *
  * WebRTC comes from the optional `node-datachannel` dependency. If it failed
  * to install (unsupported platform), Fast Lane is reported as unsupported and
@@ -60,6 +62,30 @@ export function loadWebRTC(): Promise<WebRTCModule | null> {
       .catch(() => null);
   }
   return webrtcPromise;
+}
+
+/** Canonical `alg HEX` list of the DTLS fingerprints in an SDP, or '' if none. */
+function sdpFingerprints(sdp: string): string {
+  const found = new Set<string>();
+  for (const match of sdp.matchAll(/^a=fingerprint:(\S+)[ \t]+([0-9A-Fa-f:]+)[ \t]*\r?$/gm)) {
+    found.add(`${match[1].toLowerCase()} ${match[2].toUpperCase()}`);
+  }
+  return Array.from(found).sort().join(',');
+}
+
+/**
+ * Channel binding for the auth handshake: both DTLS certificate fingerprints,
+ * offer (editor) first. The WebRTC stack refuses a DTLS peer whose certificate
+ * doesn't match the remote SDP fingerprint, so if both ends sign the same
+ * binding, nobody — including the signaling relay — swapped fingerprints to
+ * sit in the middle. Must stay byte-identical to PeerTransport.channelBinding
+ * in app-fs/peer-transport.js. Returns null when either side lacks one.
+ */
+export function channelBinding(offerSdp: string, answerSdp: string): string | null {
+  const offer = sdpFingerprints(offerSdp);
+  const answer = sdpFingerprints(answerSdp);
+  if (!offer || !answer) return null;
+  return `offer=${offer};answer=${answer}`;
 }
 
 /** Only accept ICE server entries that look like STUN/TURN URLs. */
@@ -197,6 +223,8 @@ interface Session {
   pendingCandidates: Array<{ candidate: string; sdpMid?: string | null }>;
   timer: NodeJS.Timeout | null;
   open: boolean;
+  offerSdp: string | null;
+  answerSdp: string | null;
 }
 
 export interface FastLaneHooks {
@@ -252,6 +280,8 @@ export class FastLaneManager {
       pendingCandidates: [],
       timer: null,
       open: false,
+      offerSdp: null,
+      answerSdp: null,
     };
     this.sessions.set(connectionId, session);
 
@@ -311,6 +341,7 @@ export class FastLaneManager {
           if (typeof signal.sdp !== 'string' || signal.sdp.length > MAX_SDP_LENGTH || session.remoteDescriptionSet) return;
           await session.pc.setRemoteDescription({ type: 'offer', sdp: signal.sdp });
           session.remoteDescriptionSet = true;
+          session.offerSdp = signal.sdp;
           for (const candidate of session.pendingCandidates.splice(0)) {
             await session.pc.addIceCandidate(candidate).catch(() => {});
           }
@@ -318,6 +349,7 @@ export class FastLaneManager {
           await session.pc.setLocalDescription(answer);
           if (this.sessions.get(connectionId) !== session) return;
           const sdp = session.pc.localDescription?.sdp ?? answer.sdp;
+          session.answerSdp = sdp;
           this.hooks.sendSignal(connectionId, { type: 'answer', sdp });
           break;
         }
@@ -342,6 +374,13 @@ export class FastLaneManager {
       this.hooks.sendSignal(connectionId, { type: 'abort', reason: 'negotiation_failed' });
       this.close(connectionId, 'negotiation_failed');
     }
+  }
+
+  /** Channel binding of an open session (see channelBinding), else null. */
+  channelBinding(connectionId: string): string | null {
+    const session = this.sessions.get(connectionId);
+    if (!session?.open || !session.offerSdp || !session.answerSdp) return null;
+    return channelBinding(session.offerSdp, session.answerSdp);
   }
 
   send(connectionId: string, event: string, data: any): boolean {

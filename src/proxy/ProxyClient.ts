@@ -74,6 +74,8 @@ interface ActiveConnection {
   connectedAt: number;
   socketWrapper?: ProxySocketWrapper;
   deviceId?: string;
+  // Transport the auth handshake completed on; the connection is pinned to it.
+  transport?: 'relay' | 'fastlane';
 }
 
 export class ProxyClient {
@@ -127,8 +129,9 @@ export class ProxyClient {
       },
       onMessage: (connectionId: string, event: string, data: any) => {
         if (event !== 'rpc') return;
+        if (this.isPinnedElsewhere(connectionId, 'fastlane')) return;
         this.connectionTransport.set(connectionId, 'fastlane');
-        this.handleClientMessage({ connectionId, data }).catch(() => {});
+        this.handleClientMessage({ connectionId, data }, 'fastlane').catch(() => {});
       },
       onClose: (connectionId: string, reason: string, wasOpen: boolean) => {
         if (this.connectionTransport.get(connectionId) === 'fastlane') {
@@ -265,13 +268,14 @@ export class ProxyClient {
     this.socket.on('client_connecting', this.handleClientConnecting.bind(this));
     this.socket.on('multiple_connection_attempt', this.handleMultipleConnection.bind(this));
     this.socket.on('client_message', (msg: ProxyClientMessageEvent) => {
+      if (this.isPinnedElsewhere(msg.connectionId, 'relay')) return;
       // The editor speaking over the relay means it isn't (or is no longer)
       // using Fast Lane for this connection — drop any half-built peer.
       if (this.fastLane.has(msg.connectionId)) {
         this.fastLane.close(msg.connectionId, 'superseded', false);
       }
       this.connectionTransport.set(msg.connectionId, 'relay');
-      return this.handleClientMessage(msg);
+      return this.handleClientMessage(msg, 'relay');
     });
     this.socket.on('client_disconnected', this.handleClientDisconnected.bind(this));
 
@@ -486,13 +490,13 @@ export class ProxyClient {
   /**
    * Handle client message (includes handshake and RPC)
    */
-  private async handleClientMessage(msg: ProxyClientMessageEvent): Promise<void> {
+  private async handleClientMessage(msg: ProxyClientMessageEvent, transport: 'relay' | 'fastlane'): Promise<void> {
     const { connectionId, data } = msg;
 
     try {
       // Handle handshake protocol messages
       if (data.type) {
-        await this.handleHandshakeMessage(connectionId, data);
+        await this.handleHandshakeMessage(connectionId, data, transport);
         return;
       }
 
@@ -525,10 +529,10 @@ export class ProxyClient {
   /**
    * Handle handshake protocol messages
    */
-  private async handleHandshakeMessage(connectionId: string, data: any): Promise<void> {
+  private async handleHandshakeMessage(connectionId: string, data: any, transport: 'relay' | 'fastlane'): Promise<void> {
     switch (data.type) {
       case 'auth':
-        await this.handleClientAuth(connectionId, data);
+        await this.handleClientAuth(connectionId, data, transport);
         break;
 
       case 'user_verification':
@@ -545,9 +549,32 @@ export class ProxyClient {
   }
 
   /**
-   * Handle client HMAC authentication
+   * A connection is pinned to the transport its auth handshake completed on.
+   * Without this, a compromised relay could inject handshake messages for a
+   * Fast Lane-authenticated connection over the relay path and pull its
+   * traffic (e.g. broadcasts) back onto a channel the relay can read.
    */
-  private async handleClientAuth(connectionId: string, authMessage: any): Promise<void> {
+  private isPinnedElsewhere(connectionId: string, transport: 'relay' | 'fastlane'): boolean {
+    const connection = this.activeConnections.get(connectionId);
+    if (!connection?.transport || connection.transport === transport) return false;
+    logConnection('transport_mismatch_dropped', connection.deviceId, {
+      connectionId,
+      pinned: connection.transport,
+      received: transport,
+    });
+    return true;
+  }
+
+  /**
+   * Handle client HMAC authentication.
+   *
+   * On Fast Lane the editor's HMAC also covers the DTLS channel binding (both
+   * certificate fingerprints), and we answer with our own HMAC proof over the
+   * same binding. Each side signs the fingerprints it actually negotiated, so
+   * a relay that substituted fingerprints in the SDP to sit in the middle
+   * produces mismatched bindings and the handshake fails on both ends.
+   */
+  private async handleClientAuth(connectionId: string, authMessage: any, transport: 'relay' | 'fastlane'): Promise<void> {
     try {
       if (!this.connectionSettings) {
         throw new Error('No connection settings available');
@@ -575,10 +602,23 @@ export class ProxyClient {
         throw new Error(timestampValidation.error);
       }
 
-      // Verify HMAC signature (always includes deviceId)
-      const messageToVerify = { type: 'auth', clientId, timestamp, nonce, deviceId };
+      // Channel binding: required on Fast Lane, forbidden on the relay (an
+      // editor that signed a binding believes it is on a direct connection,
+      // so receiving it via the relay means someone is forwarding it).
+      const expectedBinding = transport === 'fastlane' ? this.fastLane.channelBinding(connectionId) : null;
+      if (transport === 'fastlane' && !expectedBinding) {
+        throw new Error('Fast Lane channel binding unavailable');
+      }
+      if ((authMessage.channelBinding ?? null) !== expectedBinding) {
+        throw new Error('Channel binding mismatch - possible man-in-the-middle on the connection');
+      }
+
+      // Verify HMAC signature (always includes deviceId, plus the binding on Fast Lane)
+      const messageToVerify: Record<string, unknown> = { type: 'auth', clientId, timestamp, nonce, deviceId };
+      if (expectedBinding) messageToVerify.channelBinding = expectedBinding;
       const expectedHmac = this.computeHMAC(messageToVerify, this.connectionSettings.secret);
-      if (hmac !== expectedHmac) {
+      if (typeof hmac !== 'string' || hmac.length !== expectedHmac.length ||
+          !crypto.timingSafeEqual(Buffer.from(hmac), Buffer.from(expectedHmac))) {
         throw new Error('Invalid HMAC signature');
       }
 
@@ -619,13 +659,19 @@ export class ProxyClient {
         connectedAt: Date.now(),
         socketWrapper,
         deviceId,
+        transport,
       });
 
-      // Send success response
-      this.sendToClient(connectionId, 'handshake', {
-        type: 'auth_result',
-        success: true,
-      });
+      // Send success response. On Fast Lane, prove we hold the secret too and
+      // saw the same DTLS fingerprints, so the editor can detect an impostor.
+      const authResult: Record<string, unknown> = { type: 'auth_result', success: true };
+      if (expectedBinding) {
+        authResult.serverProof = this.computeHMAC(
+          { timestamp, type: 'auth_proof', nonce, channelBinding: expectedBinding },
+          this.connectionSettings.secret
+        );
+      }
+      this.sendToClient(connectionId, 'handshake', authResult);
 
       // Check if user authentication is required
       if (userVerificationRequired) {

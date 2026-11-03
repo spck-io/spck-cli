@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { encodeMessage, decodeMessage, FrameReassembler, FRAGMENT_SIZE } from '../framing.js';
-import { FastLaneManager, loadWebRTC, sanitizeIceServers, DATA_CHANNEL_LABEL } from '../FastLane.js';
+import { FastLaneManager, loadWebRTC, sanitizeIceServers, channelBinding, DATA_CHANNEL_LABEL } from '../FastLane.js';
 
 function roundTrip(event: string, data: any) {
   const reassembler = new FrameReassembler();
@@ -56,6 +56,22 @@ describe('sanitizeIceServers', () => {
   });
 });
 
+describe('channelBinding', () => {
+  // Same vector as app-fs/network-connection.spec.js — the two implementations must agree.
+  const offer = 'v=0\r\na=fingerprint:SHA-256 ab:cd:ef\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=fingerprint:sha-256 AB:CD:EF\r\n';
+  const answer = 'v=0\r\na=fingerprint:sha-256 01:02:03\r\n';
+
+  it('canonicalizes and orders offer then answer fingerprints', () => {
+    expect(channelBinding(offer, answer)).toBe('offer=sha-256 AB:CD:EF;answer=sha-256 01:02:03');
+  });
+
+  it('is direction-sensitive and null without fingerprints', () => {
+    expect(channelBinding(answer, offer)).not.toBe(channelBinding(offer, answer));
+    expect(channelBinding('v=0\r\n', answer)).toBeNull();
+    expect(channelBinding(offer, '')).toBeNull();
+  });
+});
+
 const webrtc = await loadWebRTC();
 
 describe.skipIf(!webrtc)('FastLaneManager (real node-datachannel loopback)', () => {
@@ -104,6 +120,11 @@ describe.skipIf(!webrtc)('FastLaneManager (real node-datachannel loopback)', () 
 
     await openPromise;
     expect(manager.isOpen('c1')).toBe(true);
+    // Both ends derive the same binding from the descriptions they negotiated.
+    const editorBinding = channelBinding(editorPc.localDescription.sdp, editorPc.remoteDescription.sdp);
+    expect(editorBinding).toMatch(/^offer=sha-256 [0-9A-F:]+;answer=sha-256 [0-9A-F:]+$/);
+    expect(manager.channelBinding('c1')).toBe(editorBinding);
+    expect(manager.channelBinding('unknown')).toBeNull();
     await expect.poll(() => received.length, { timeout: 5000 }).toBe(1);
     expect(received[0].data.params.blob.length).toBe(50_000);
 

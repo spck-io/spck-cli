@@ -84,11 +84,13 @@ async function triggerEvent(event: string, data: any): Promise<void> {
 /**
  * Create HMAC-signed auth message
  */
-function createAuthMessage(secret: string, clientId: string, deviceId: string = 'test-device-123'): any {
+function createAuthMessage(secret: string, clientId: string, deviceId: string = 'test-device-123', channelBinding?: string): any {
   const timestamp = Date.now();
   const nonce = Math.random().toString(36).substring(2);
-  const message = { type: 'auth', clientId, timestamp, nonce, deviceId };
-  const messageToSign = timestamp + JSON.stringify({ type: 'auth', clientId, nonce, deviceId });
+  const signed: any = { type: 'auth', clientId, nonce, deviceId };
+  if (channelBinding) signed.channelBinding = channelBinding;
+  const message = { ...signed, timestamp };
+  const messageToSign = timestamp + JSON.stringify(signed);
   const hmac = crypto.createHmac('sha256', secret).update(messageToSign).digest('hex');
   return { ...message, hmac };
 }
@@ -571,6 +573,89 @@ describe('ProxyClient Security', () => {
           }),
         })
       );
+    });
+  });
+
+  describe('Fast Lane channel binding', () => {
+    const BINDING = 'offer=sha-256 AA:BB;answer=sha-256 CC:DD';
+
+    /** Deliver a message as if it arrived over the connection's DataChannel. */
+    function fromFastLane(client: ProxyClient, connectionId: string, data: any) {
+      (client as any).fastLane.hooks.onMessage(connectionId, 'rpc', data);
+      return new Promise(resolve => setImmediate(resolve));
+    }
+
+    function authResults(connectionId: string) {
+      return mockSocket.emit.mock.calls
+        .filter(([event, msg]: any[]) => event === 'handshake' && msg.connectionId === connectionId && msg.data.type === 'auth_result')
+        .map(([, msg]: any[]) => msg.data);
+    }
+
+    async function setupFastLaneClient(binding: string | null = BINDING) {
+      const client = await setupClient();
+      vi.spyOn((client as any).fastLane, 'channelBinding').mockReturnValue(binding);
+      return client;
+    }
+
+    it('accepts a matching binding and returns a proof over it', async () => {
+      const client = await setupFastLaneClient();
+      const auth = createAuthMessage(TEST_SECRET, TEST_CLIENT_ID, 'dev-1', BINDING);
+      await fromFastLane(client, 'fl-1', auth);
+
+      const [result] = authResults('fl-1');
+      expect(result.success).toBe(true);
+      const expectedProof = crypto.createHmac('sha256', TEST_SECRET)
+        .update(auth.timestamp + JSON.stringify({ type: 'auth_proof', nonce: auth.nonce, channelBinding: BINDING }))
+        .digest('hex');
+      expect(result.serverProof).toBe(expectedProof);
+    });
+
+    it('rejects a binding that differs from the negotiated one (relay swapped fingerprints)', async () => {
+      const client = await setupFastLaneClient();
+      await fromFastLane(client, 'fl-2', createAuthMessage(TEST_SECRET, TEST_CLIENT_ID, 'dev-1', 'offer=sha-256 EE;answer=sha-256 CC:DD'));
+      expect(authResults('fl-2')).toEqual([expect.objectContaining({ success: false, error: expect.stringMatching(/Channel binding mismatch/) })]);
+    });
+
+    it('rejects Fast Lane auth that carries no binding', async () => {
+      const client = await setupFastLaneClient();
+      await fromFastLane(client, 'fl-3', createAuthMessage(TEST_SECRET, TEST_CLIENT_ID, 'dev-1'));
+      expect(authResults('fl-3')).toEqual([expect.objectContaining({ success: false })]);
+    });
+
+    it('rejects Fast Lane auth when no binding can be derived', async () => {
+      const client = await setupFastLaneClient(null);
+      await fromFastLane(client, 'fl-4', createAuthMessage(TEST_SECRET, TEST_CLIENT_ID, 'dev-1', BINDING));
+      expect(authResults('fl-4')).toEqual([expect.objectContaining({ success: false, error: expect.stringMatching(/unavailable/) })]);
+    });
+
+    it('rejects a bound auth that arrives over the relay (forwarded by a middleman)', async () => {
+      await setupFastLaneClient();
+      await triggerEvent('client_message', {
+        connectionId: 'fl-5',
+        data: createAuthMessage(TEST_SECRET, TEST_CLIENT_ID, 'dev-1', BINDING),
+      });
+      expect(authResults('fl-5')).toEqual([expect.objectContaining({ success: false })]);
+    });
+
+    it('does not sign a binding into the HMAC unless it is the negotiated one', async () => {
+      const client = await setupFastLaneClient();
+      // Valid HMAC over a stripped message, but a binding field bolted on afterwards.
+      const auth = { ...createAuthMessage(TEST_SECRET, TEST_CLIENT_ID, 'dev-1'), channelBinding: BINDING };
+      await fromFastLane(client, 'fl-6', auth);
+      expect(authResults('fl-6')).toEqual([expect.objectContaining({ success: false, error: 'Invalid HMAC signature' })]);
+    });
+
+    it('ignores relay traffic for a connection authenticated over Fast Lane', async () => {
+      const client = await setupFastLaneClient();
+      await fromFastLane(client, 'fl-7', createAuthMessage(TEST_SECRET, TEST_CLIENT_ID, 'dev-1', BINDING));
+      mockSocket.emit.mockClear();
+
+      await triggerEvent('client_message', { connectionId: 'fl-7', data: { type: 'protocol_selected', version: 1 } });
+      expect(mockSocket.emit).not.toHaveBeenCalledWith('handshake', expect.objectContaining({ connectionId: 'fl-7' }));
+      expect((client as any).activeConnections.get('fl-7').handshakeComplete).toBeFalsy();
+
+      await fromFastLane(client, 'fl-7', { type: 'protocol_selected', version: 1 });
+      expect((client as any).activeConnections.get('fl-7').handshakeComplete).toBe(true);
     });
   });
 });

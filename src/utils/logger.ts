@@ -452,7 +452,7 @@ export function logAuth(
  * Log connection events (client connecting, authenticated, disconnected)
  */
 export function logConnection(
-  event: 'connecting' | 'authenticated' | 'auth_failed' | 'disconnected' | 'ready' | 'fast_lane_open' | 'fast_lane_closed',
+  event: 'connecting' | 'authenticated' | 'auth_failed' | 'disconnected' | 'ready' | 'fast_lane_open' | 'fast_lane_closed' | 'transport_mismatch_dropped',
   deviceId?: string,
   metadata?: Record<string, any>
 ): void {
@@ -499,6 +499,11 @@ export function logConnection(
       symbol = '⚡';
       color = chalk.gray;
       logLevel = 'INFO';
+      break;
+    case 'transport_mismatch_dropped':
+      symbol = chalk.yellow('⚠');
+      color = chalk.yellow;
+      logLevel = 'WARN';
       break;
     default:
       symbol = 'ℹ';
