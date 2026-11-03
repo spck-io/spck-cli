@@ -24,11 +24,11 @@ vi.mock('node-pty', () => {
 // Mock @xterm/headless
 vi.mock('@xterm/headless', () => {
   const mod = {
-    Terminal: vi.fn().mockImplementation(() => ({
+    Terminal: vi.fn().mockImplementation(function () { return {
       write: vi.fn(),
       resize: vi.fn(),
       loadAddon: vi.fn(),
-    })),
+    }; }),
   };
   return { default: mod, ...mod };
 });
@@ -36,9 +36,9 @@ vi.mock('@xterm/headless', () => {
 // Mock @xterm/addon-serialize
 vi.mock('@xterm/addon-serialize', () => {
   const mod = {
-    SerializeAddon: vi.fn().mockImplementation(() => ({
+    SerializeAddon: vi.fn().mockImplementation(function () { return {
       serialize: vi.fn(() => 'serialized-buffer'),
-    })),
+    }; }),
   };
   return { default: mod, ...mod };
 });
@@ -102,8 +102,8 @@ describe('TerminalService', () => {
 
     // Configure mocks
     (pty.spawn as Mock).mockReturnValue(mockPtyProcess);
-    (XtermHeadless as unknown as Mock).mockImplementation(() => mockXterm);
-    (SerializeAddon as unknown as Mock).mockImplementation(() => mockSerializeAddon);
+    (XtermHeadless as unknown as Mock).mockImplementation(function () { return mockXterm; });
+    (SerializeAddon as unknown as Mock).mockImplementation(function () { return mockSerializeAddon; });
 
     // Create service
     service = new TerminalService(() => mockSocket, 10, 10000, '/test/root');

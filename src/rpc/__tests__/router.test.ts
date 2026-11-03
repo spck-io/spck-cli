@@ -111,10 +111,10 @@ describe('RPCRouter', () => {
     // Create mock instance for terminal service that will be returned by constructor
     // Use a single tracked cleanup function across all instances
     const mockCleanupFn = vi.fn();
-    MockTerminalService.mockImplementation(() => ({
-      handle: mockTerminalHandle,
-      cleanup: mockCleanupFn,
-    }) as any);
+    // vitest 4+: constructor mocks need a `function`, not an arrow function
+    MockTerminalService.mockImplementation(function () {
+      return { handle: mockTerminalHandle, cleanup: mockCleanupFn };
+    } as any);
 
     // Initialize router
     RPCRouter.initialize('/test/root', {
@@ -322,7 +322,7 @@ describe('RPCRouter', () => {
       };
 
       // Override the mock to return our instance
-      MockTerminalService.mockImplementationOnce(() => mockServiceWithCleanup as any);
+      MockTerminalService.mockImplementationOnce(function () { return mockServiceWithCleanup; } as any);
 
       // Create a terminal service - this will instantiate the mock
       await RPCRouter.route(

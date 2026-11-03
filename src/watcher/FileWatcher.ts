@@ -4,15 +4,27 @@
 
 import * as chokidar from 'chokidar';
 import { EventEmitter } from 'events';
+import * as path from 'path';
 
 export class FileWatcher extends EventEmitter {
   private watcher: chokidar.FSWatcher;
 
-  constructor(rootPath: string, ignorePatterns: string[]) {
+  /**
+   * @param ignoredDirNames Directory names to skip anywhere in the tree
+   *   (e.g. 'node_modules'). chokidar 4+ no longer accepts globs, so this
+   *   matches whole path segments instead; ignored directories are not
+   *   descended into.
+   */
+  constructor(rootPath: string, ignoredDirNames: string[]) {
     super();
 
+    const ignored = new Set(ignoredDirNames);
+    const root = path.resolve(rootPath);
     this.watcher = chokidar.watch(rootPath, {
-      ignored: ignorePatterns,
+      ignored: (filePath: string) => {
+        const rel = path.relative(root, path.resolve(filePath));
+        return rel !== '' && rel.split(path.sep).some((segment) => ignored.has(segment));
+      },
       persistent: true,
       ignoreInitial: true,
       awaitWriteFinish: {

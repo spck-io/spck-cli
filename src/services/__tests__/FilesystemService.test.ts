@@ -7,7 +7,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
-import * as fossilDelta from 'fossil-delta';
+import { createDelta } from 'fossil-delta';
 import { FilesystemService } from '../FilesystemService.js';
 import { ErrorCode } from '../../types.js';
 
@@ -364,7 +364,7 @@ describe('FilesystemService', () => {
       const modified = Buffer.from('Hello, Universe!');
       await fs.writeFile(path.join(testRoot, 'patch.txt'), original);
 
-      const delta = fossilDelta.create(original, modified);
+      const delta = createDelta(original, modified);
       const baseHash = crypto.createHash('sha256').update(original).digest('hex');
       const newHash = crypto.createHash('sha256').update(modified).digest('hex');
 
@@ -413,7 +413,7 @@ describe('FilesystemService', () => {
       const modified = Buffer.from('tested');
       await fs.writeFile(path.join(testRoot, 'verify.txt'), original);
 
-      const delta = fossilDelta.create(original, modified);
+      const delta = createDelta(original, modified);
       const baseHash = crypto.createHash('sha256').update(original).digest('hex');
       const wrongNewHash = 'wrong-final-hash';
 

@@ -6,7 +6,7 @@ import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import fossilDelta from 'fossil-delta';
+import { applyDelta } from 'fossil-delta';
 import writeFileAtomic from 'write-file-atomic';
 import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types.js';
 import { parseFileSize } from '../config/config.js';
@@ -584,7 +584,7 @@ export class FilesystemService {
 
       // Apply fossil-delta patch
       const deltaBuffer = Buffer.from(params.delta);
-      const patchedResult = fossilDelta.apply(currentContents, deltaBuffer);
+      const patchedResult = applyDelta<Uint8Array>(currentContents, deltaBuffer);
 
       // Convert to Buffer if it's an array
       const patchedContents = Buffer.isBuffer(patchedResult)

@@ -88,11 +88,7 @@ export class RPCRouter {
   }
 
   private static startFileWatcher(rootPath: string): void {
-    this.fileWatcher = new FileWatcher(rootPath, [
-      '**/.git/**',
-      '**/.spck-editor/**',
-      '**/node_modules/**',
-    ]);
+    this.fileWatcher = new FileWatcher(rootPath, ['.git', '.spck-editor', 'node_modules']);
 
     this.fileWatcher.on('change', (filePath: string) => {
       const rel = '/' + path.relative(rootPath, filePath);

@@ -26,7 +26,7 @@ Connect your local development environment to Spck Editor mobile app and access 
 
 ### Required
 
-- **Node.js**: 18.0.0 or higher
+- **Node.js**: 22.22.2 or higher (or 24.15+)
 - **Operating System**: Linux, macOS, or Windows
 - **Spck Editor Account**: Free account (30 min/day) or Premium subscription (unlimited)
 - **Spck Editor Mobile App**: Required for QR code connection (Android/iOS)
