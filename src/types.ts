@@ -55,6 +55,13 @@ export interface ServerConfig {
   acp?: {
     enabled: boolean;
   };
+
+  // Fast Lane — direct WebRTC connection to the editor (Supporter tier and
+  // above; the relay is used only for signaling). Defaults to enabled when
+  // missing. Disable for networks where peer-to-peer traffic is not allowed.
+  fastLane?: {
+    enabled: boolean;
+  };
 }
 
 // Connection Settings (stored in .spck-editor/config/connection-settings.json)

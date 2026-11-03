@@ -29,11 +29,13 @@ import {
   saveConnectionSettings,
 } from '../config/credentials.js';
 import { t } from '../i18n/index.js';
+import { formatServerName, getServerLabel } from '../config/server-selection.js';
 import { logAuth, logConnection } from '../utils/logger.js';
 import { RPCRouter } from '../rpc/router.js';
 import { validateHandshakeTimestamp } from './handshake-validation.js';
 import { requireValidHMAC } from '../connection/hmac.js';
 import { needsChunking, chunkMessage } from './chunking.js';
+import { FastLaneManager, FastLaneSignal, FRAMING_VERSION } from './transport/FastLane.js';
 
 function formatTimeUntilReset(resetTime?: number): string {
   const now = Date.now();
@@ -102,11 +104,43 @@ export class ProxyClient {
   // waitForAuthentication; our scheduler should only kick in afterwards.
   private initialConnectAuthed = false;
 
+  // Fast Lane (direct WebRTC). The relay socket stays up as the control and
+  // signaling channel; per connection, replies go out on whichever transport
+  // the editor last spoke on, so a mid-negotiation fallback to the relay
+  // can never strand responses on a half-open DataChannel.
+  private fastLane: FastLaneManager;
+  private fastLaneSupported = false;
+  private connectionTransport: Map<string, 'relay' | 'fastlane'> = new Map();
+
   constructor(private options: ProxyClientOptions) {
     this.config = options.config;
     this.tools = options.tools;
     this.firebaseToken = options.firebaseToken;
     this.userId = options.userId;
+
+    this.fastLane = new FastLaneManager({
+      sendSignal: (connectionId: string, signal: FastLaneSignal) => {
+        this.socket?.emit('signal', { connectionId, data: signal });
+      },
+      onOpen: (connectionId: string) => {
+        logConnection('fast_lane_open', this.activeConnections.get(connectionId)?.deviceId, { connectionId });
+      },
+      onMessage: (connectionId: string, event: string, data: any) => {
+        if (event !== 'rpc') return;
+        this.connectionTransport.set(connectionId, 'fastlane');
+        this.handleClientMessage({ connectionId, data }).catch(() => {});
+      },
+      onClose: (connectionId: string, reason: string, wasOpen: boolean) => {
+        if (this.connectionTransport.get(connectionId) === 'fastlane') {
+          // Editor will tear down its relay socket and reconnect; until then
+          // nothing more can reach it, so forget the connection's transport.
+          this.connectionTransport.delete(connectionId);
+        }
+        if (wasOpen) {
+          logConnection('fast_lane_closed', this.activeConnections.get(connectionId)?.deviceId, { connectionId, reason });
+        }
+      },
+    });
 
     RPCRouter.setBroadcastCallback((method: string, params: any) => {
       for (const [connectionId, connection] of this.activeConnections) {
@@ -125,20 +159,41 @@ export class ProxyClient {
 
     const relayServer = this.options.proxyServerUrl;
     console.log(`\n=== ${t('connection.title')} ===\n`);
-    console.log(`   ${t('connection.relayServer', { server: relayServer })}\n`);
+    console.log(`   ${t('connection.relayServer', { server: formatServerName(relayServer) })}\n`);
 
     // Determine if we're renewing an existing connection
     const existingToken = existingConnectionSettings?.serverToken;
+
+    // Advertise Fast Lane only when the native WebRTC binding loaded and the
+    // project hasn't opted out. Older relays ignore the extra auth field.
+    // `auth` is a callback so the socket + handlers are created synchronously
+    // while the (async, cached) WebRTC probe runs on each (re)connect.
+    const fastLaneEnabled = this.config.fastLane?.enabled ?? true;
+    let fastLaneAnnounced = false;
+    const buildAuth = (cb: (data: object) => void) => {
+      const probe = fastLaneEnabled ? FastLaneManager.isSupported() : Promise.resolve(false);
+      probe.then((supported) => {
+        this.fastLaneSupported = supported;
+        if (!fastLaneAnnounced) {
+          fastLaneAnnounced = true;
+          console.log(`   ${t(supported
+            ? 'connection.fastLaneAvailable'
+            : fastLaneEnabled ? 'connection.fastLaneUnavailable' : 'connection.fastLaneDisabled')}\n`);
+        }
+        cb({
+          firebaseToken: this.firebaseToken,
+          serverToken: existingToken,
+          capabilities: { fastLane: supported ? FRAMING_VERSION : 0 },
+        });
+      });
+    };
 
     // Create Socket.IO client - connect to /listen namespace
     // Note: /listen is a Socket.IO namespace, not an HTTP path
     const namespaceUrl = `wss://${relayServer}/listen`;
     this.socket = io(namespaceUrl, {
       transports: ['websocket'],
-      auth: {
-        firebaseToken: this.firebaseToken,
-        serverToken: existingToken,
-      },
+      auth: buildAuth,
       reconnection: false, // custom schedule — see RECONNECT_SCHEDULE_MS
       timeout: 25000,
     } as any);
@@ -178,6 +233,7 @@ export class ProxyClient {
       // persistent connect_error handler keep scheduling against the new
       // pre-auth socket. Reset everything so connect() starts clean.
       this.resetReconnectState();
+      this.closeAllFastLanes();
       if (this.socket) {
         this.socket.removeAllListeners();
         this.socket.disconnect();
@@ -208,8 +264,32 @@ export class ProxyClient {
     // Client events
     this.socket.on('client_connecting', this.handleClientConnecting.bind(this));
     this.socket.on('multiple_connection_attempt', this.handleMultipleConnection.bind(this));
-    this.socket.on('client_message', this.handleClientMessage.bind(this));
+    this.socket.on('client_message', (msg: ProxyClientMessageEvent) => {
+      // The editor speaking over the relay means it isn't (or is no longer)
+      // using Fast Lane for this connection — drop any half-built peer.
+      if (this.fastLane.has(msg.connectionId)) {
+        this.fastLane.close(msg.connectionId, 'superseded', false);
+      }
+      this.connectionTransport.set(msg.connectionId, 'relay');
+      return this.handleClientMessage(msg);
+    });
     this.socket.on('client_disconnected', this.handleClientDisconnected.bind(this));
+
+    // Fast Lane signaling. The relay only sends these after verifying the
+    // account's subscription, and only for connections it is routing to us.
+    this.socket.on('client_fast_lane', (msg: { connectionId: string; iceServers?: unknown }) => {
+      if (!this.fastLaneSupported || !msg?.connectionId) {
+        if (msg?.connectionId) {
+          this.socket?.emit('signal', { connectionId: msg.connectionId, data: { type: 'abort', reason: 'unsupported' } });
+        }
+        return;
+      }
+      this.fastLane.prepare(msg.connectionId, msg.iceServers).catch(() => {});
+    });
+    this.socket.on('client_signal', (msg: { connectionId: string; data: any }) => {
+      if (!msg?.connectionId) return;
+      this.fastLane.handleSignal(msg.connectionId, msg.data).catch(() => {});
+    });
 
     // Error handling (async wrapper for handleError)
     this.socket.on('error', (error: ProxyErrorEvent) => {
@@ -368,10 +448,10 @@ export class ProxyClient {
     if (this.config.name) {
       console.log(t('connection.name', { name: this.config.name }));
     }
-    console.log(t('connection.relayServerLabel', { server: relayServer }));
+    console.log(t('connection.relayServerLabel', { server: formatServerName(relayServer) }));
     console.log('-'.repeat(60));
     console.log(`\n${t('connection.relayServerMismatch')}`);
-    console.log(`${t('connection.relayServerMismatchHint', { server: relayServer })}\n`);
+    console.log(`${t('connection.relayServerMismatchHint', { server: getServerLabel(relayServer) ?? relayServer })}\n`);
   }
 
   /**
@@ -800,38 +880,51 @@ export class ProxyClient {
     try {
       let index = 0;
       for await (const chunk of iterable) {
-        // Emit directly (bypass sendToClient/needsChunking) — Socket.IO handles Buffer natively
-        this.socket.emit('rpc', {
-          connectionId,
-          data: {
-            __binaryChunk: true,
-            chunkId,
-            requestId,
-            index,
-            total,
-            data: chunk, // Buffer — Socket.IO sends as binary attachment
-          },
+        // Bypass sendToClient/needsChunking — both transports carry Buffers
+        // natively (Socket.IO attachments / Fast Lane binary blobs).
+        this.emitRpcFrame(connectionId, {
+          __binaryChunk: true,
+          chunkId,
+          requestId,
+          index,
+          total,
+          data: chunk,
         });
         index++;
+        if (this.connectionTransport.get(connectionId) === 'fastlane') {
+          await this.fastLane.whenWritable(connectionId);
+        }
       }
     } catch (error: any) {
       // Stream error — send a normal RPC error so the client rejects the pending request
-      this.socket.emit('rpc', {
-        connectionId,
-        data: {
-          jsonrpc: '2.0',
-          id: requestId,
-          error: createRPCError(ErrorCode.INTERNAL_ERROR, error.message || 'Binary stream error'),
-        },
+      this.emitRpcFrame(connectionId, {
+        jsonrpc: '2.0',
+        id: requestId,
+        error: createRPCError(ErrorCode.INTERNAL_ERROR, error.message || 'Binary stream error'),
       });
     }
   }
 
   /**
-   * Send message to client via proxy
-   * Automatically chunks large payloads (>800kB)
+   * Emit a raw 'rpc' frame on the connection's current transport.
+   */
+  private emitRpcFrame(connectionId: string, data: any): void {
+    if (this.connectionTransport.get(connectionId) === 'fastlane' &&
+        this.fastLane.send(connectionId, 'rpc', data)) {
+      return;
+    }
+    this.socket?.emit('rpc', { connectionId, data });
+  }
+
+  /**
+   * Send message to client via Fast Lane when active, otherwise via proxy.
+   * Relay payloads are chunked above 800kB; Fast Lane fragments internally.
    */
   private sendToClient(connectionId: string, event: string, data: any): void {
+    if (this.connectionTransport.get(connectionId) === 'fastlane' &&
+        this.fastLane.send(connectionId, event, data)) {
+      return;
+    }
     if (!this.socket) return;
 
     // Check if message needs chunking
@@ -899,7 +992,18 @@ export class ProxyClient {
     // than killing eagerly on disconnect.
 
     // Clean up connection tracking
+    this.fastLane.close(data.connectionId, 'client_disconnected', false);
+    this.connectionTransport.delete(data.connectionId);
     this.activeConnections.delete(data.connectionId);
+  }
+
+  /**
+   * Close every Fast Lane session. Peer sessions never outlive the relay
+   * control socket: the relay is what enforces account limits.
+   */
+  private closeAllFastLanes(): void {
+    this.fastLane.closeAll();
+    this.connectionTransport.clear();
   }
 
   /**
@@ -1040,6 +1144,7 @@ export class ProxyClient {
     }
 
     console.warn(`\n⚠️  ${t('connection.disconnectedFromProxy', { reason })}`);
+    this.closeAllFastLanes();
 
     if (reason === 'io server disconnect') {
       // Server forcefully disconnected us
@@ -1153,6 +1258,7 @@ export class ProxyClient {
    */
   forceCleanup(): void {
     this.resetReconnectState();
+    this.closeAllFastLanes();
     if (!this.socket) return;
     this.socket.removeAllListeners();
     this.socket.disconnect();
@@ -1165,6 +1271,7 @@ export class ProxyClient {
    */
   async disconnect(): Promise<void> {
     this.resetReconnectState();
+    this.closeAllFastLanes();
     if (!this.socket) return;
 
     RPCRouter.cleanup();
