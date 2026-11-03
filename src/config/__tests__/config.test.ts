@@ -33,7 +33,7 @@ describe('config', () => {
   describe('loadConfig()', () => {
     const validConfig: ServerConfig = {
       version: 1,
-      root: '/mock/root',
+      root: mockCwd,
       terminal: {
         enabled: true,
         maxBufferedLines: 5000,
@@ -57,7 +57,7 @@ describe('config', () => {
     beforeEach(() => {
       // Mock root directory exists for validation
       mockFs.existsSync.mockImplementation((path: any) => {
-        if (path === '/mock/root') return true;
+        if (path === mockCwd) return true;
         return false;
       });
     });
@@ -132,15 +132,44 @@ describe('config', () => {
       }).toThrow();
     });
 
-    it('should throw error if root directory does not exist', () => {
-      mockFs.existsSync.mockImplementation((path: any) => {
-        // Config exists, but root doesn't
-        if (path.includes('.spck-editor')) return true;
-        return false;
-      });
+    it.each([
+      ['no longer exists', false],
+      ['belongs to another existing project', true],
+    ])('should rebase a stored root that %s onto cwd for the default project config', (_desc, otherRootExists) => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockFs.existsSync.mockImplementation((path: any) =>
+        path.includes('.spck-editor') || path === mockCwd || (otherRootExists && path === '/other/project')
+      );
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ ...validConfig, root: '/other/project' }));
+
+      const result = loadConfig();
+
+      expect(result.root).toBe(mockCwd);
+      const saved = JSON.parse(mockFs.writeFileSync.mock.calls[0][1] as string);
+      expect(saved.root).toBe(mockCwd);
+    });
+
+    it('should not rewrite the config when root already matches cwd', () => {
+      mockFs.existsSync.mockReturnValue(true);
       mockFs.readFileSync.mockReturnValue(JSON.stringify(validConfig));
 
-      expect(() => loadConfig()).toThrow('Root directory does not exist');
+      loadConfig();
+
+      expect(mockFs.writeFileSync).not.toHaveBeenCalled();
+    });
+
+    it('should keep a custom config path root as-is', () => {
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ ...validConfig, root: '/other/project' }));
+
+      expect(loadConfig('custom.json').root).toBe('/other/project');
+    });
+
+    it('should throw error if root directory does not exist for a custom config path', () => {
+      mockFs.existsSync.mockImplementation((path: any) => path.endsWith('custom.json'));
+      mockFs.readFileSync.mockReturnValue(JSON.stringify(validConfig));
+
+      expect(() => loadConfig('custom.json')).toThrow('Root directory does not exist');
     });
 
     it('should use custom config path when provided', () => {

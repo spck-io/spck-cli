@@ -35,11 +35,20 @@ export function loadConfig(configPath?: string): ServerConfig {
     const configData = fs.readFileSync(fullPath, 'utf8');
     const config: ServerConfig = JSON.parse(configData);
 
+    // The default config lives inside the project it serves, so its root is always cwd.
+    // A different stored root means the project was moved or the config was copied from
+    // another project - rebase it, even if the old root still exists (else we'd serve it)
+    let needsSave = false;
+    if (!configPath && typeof config.root === 'string' && path.resolve(config.root) !== process.cwd()) {
+      console.warn('⚠️  ' + t('config.rootRebased', { from: config.root, to: process.cwd() }));
+      config.root = process.cwd();
+      needsSave = true;
+    }
+
     // Validate required fields
     validateConfig(config);
 
     // Backward-compatibility: populate missing optional sections and re-save
-    let needsSave = false;
     if (!config.browserProxy) {
       config.browserProxy = { enabled: true };
       needsSave = true;

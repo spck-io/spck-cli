@@ -12,6 +12,7 @@
     "fileNotFoundHint": "正在运行设置向导以创建初始配置...",
     "fileCorrupted": "配置文件已损坏: {{path}}",
     "fileCorruptedHint": "将运行设置向导以重新创建...",
+    "rootRebased": "根目录 {{from}} 与当前项目不符，改用 {{to}}",
     "saved": "配置保存成功！"
   },
   "auth": {

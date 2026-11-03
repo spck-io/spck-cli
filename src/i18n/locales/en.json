@@ -12,6 +12,7 @@
     "fileNotFoundHint": "Running setup wizard to create initial configuration...",
     "fileCorrupted": "Configuration file is corrupted: {{path}}",
     "fileCorruptedHint": "Will run setup wizard to recreate...",
+    "rootRebased": "Configured root {{from}} does not match this project; using {{to}} instead",
     "saved": "Configuration saved successfully!"
   },
   "auth": {

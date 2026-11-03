@@ -103,6 +103,9 @@ export function isProjectDirSetup(projectRoot: string): boolean {
     if (!stats.isSymbolicLink()) {
       return false;
     }
+    if (path.resolve(projectDir, fs.readlinkSync(configSymlink)) !== dataPath) {
+      return false;
+    }
   } catch (error) {
     return false;
   }
@@ -113,6 +116,30 @@ export function isProjectDirSetup(projectRoot: string): boolean {
   }
 
   return true;
+}
+
+function lstatOrNull(p: string): fs.Stats | null {
+  try {
+    return fs.lstatSync(p);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Copy config from a previous symlink target into the new data directory, if the new one is empty.
+ * The old target may no longer exist (e.g. home dir renamed /Users/a -> /Users/b), so fall back to
+ * the same project ID under the current home base dir.
+ */
+function migrateConfigData(oldTarget: string, dataPath: string, homeBaseDir: string): void {
+  if (fs.readdirSync(dataPath).length > 0) {
+    return;
+  }
+  const candidates = [oldTarget, path.join(homeBaseDir, path.basename(oldTarget))];
+  const source = candidates.find((c) => c !== dataPath && lstatOrNull(c)?.isDirectory());
+  if (source) {
+    fs.cpSync(source, dataPath, { recursive: true });
+  }
 }
 
 /**
@@ -149,19 +176,18 @@ export function setupProjectDir(projectRoot: string): void {
     }
   }
 
-  // Create config symlink if it doesn't exist
-  if (!fs.existsSync(configSymlink)) {
+  // Use lstat (not existsSync) so dangling symlinks are detected - existsSync follows
+  // the link and reports false for a broken one, which made symlinkSync fail with EEXIST
+  const linkStats = lstatOrNull(configSymlink);
+  if (!linkStats) {
     fs.symlinkSync(dataPath, configSymlink, 'dir');
-  } else {
-    // Verify existing symlink points to correct location
-    const stats = fs.lstatSync(configSymlink);
-    if (stats.isSymbolicLink()) {
-      const target = fs.readlinkSync(configSymlink);
-      if (target !== dataPath) {
-        // Points to wrong location - remove and recreate
-        fs.unlinkSync(configSymlink);
-        fs.symlinkSync(dataPath, configSymlink, 'dir');
-      }
+  } else if (linkStats.isSymbolicLink()) {
+    const target = path.resolve(projectDir, fs.readlinkSync(configSymlink));
+    if (target !== dataPath) {
+      // Project moved or home dir renamed - carry the old config over before relinking
+      migrateConfigData(target, dataPath, homeBaseDir);
+      fs.unlinkSync(configSymlink);
+      fs.symlinkSync(dataPath, configSymlink, 'dir');
     }
   }
 

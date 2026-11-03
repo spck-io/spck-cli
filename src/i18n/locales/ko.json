@@ -12,6 +12,7 @@
     "fileNotFoundHint": "설정 마법사를 실행하여 초기 설정을 생성합니다...",
     "fileCorrupted": "설정 파일이 손상되었습니다: {{path}}",
     "fileCorruptedHint": "설정 마법사를 실행하여 재생성합니다...",
+    "rootRebased": "루트 디렉터리 {{from}}이(가) 이 프로젝트와 일치하지 않아 {{to}}을(를) 사용합니다",
     "saved": "설정이 성공적으로 저장되었습니다!"
   },
   "auth": {

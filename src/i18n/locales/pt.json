@@ -12,6 +12,7 @@
     "fileNotFoundHint": "Executando assistente de configuração para criar a configuração inicial...",
     "fileCorrupted": "O arquivo de configuração está corrompido: {{path}}",
     "fileCorruptedHint": "O assistente de configuração será executado para recriar...",
+    "rootRebased": "O diretório raiz {{from}} não corresponde a este projeto; usando {{to}}",
     "saved": "Configuração salva com sucesso!"
   },
   "auth": {

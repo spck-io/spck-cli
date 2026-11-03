@@ -12,6 +12,7 @@
     "fileNotFoundHint": "Menjalankan wizard pengaturan untuk membuat konfigurasi awal...",
     "fileCorrupted": "Berkas konfigurasi rusak: {{path}}",
     "fileCorruptedHint": "Akan menjalankan wizard pengaturan untuk membuat ulang...",
+    "rootRebased": "Direktori root {{from}} tidak sesuai dengan proyek ini; menggunakan {{to}}",
     "saved": "Konfigurasi berhasil disimpan!"
   },
   "auth": {
