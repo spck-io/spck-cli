@@ -184,7 +184,12 @@ export class ProxyClient {
         cb({
           firebaseToken: this.firebaseToken,
           serverToken: existingToken,
-          capabilities: { fastLane: supported ? FRAMING_VERSION : 0 },
+          // When Fast Lane is off, say why so the relay can tell the editor
+          // something actionable. A CLI that sends no capabilities at all
+          // predates Fast Lane and is reported as outdated.
+          capabilities: supported
+            ? { fastLane: FRAMING_VERSION }
+            : { fastLane: 0, fastLaneUnavailable: fastLaneEnabled ? 'unsupported' : 'disabled' },
         });
       });
     };
