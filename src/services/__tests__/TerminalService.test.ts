@@ -708,6 +708,58 @@ describe('TerminalService', () => {
     });
   });
 
+  describe('dashboard kill / remove', () => {
+    it('kills a running terminal, notifies the editor on exit, and hides it from list', async () => {
+      const terminalId = await service.handle('create', { cols: 80, rows: 24 });
+
+      expect(service.kill(terminalId)).toBe(true);
+      expect(mockPtyProcess.kill).toHaveBeenCalledWith();
+
+      ptyExitHandler?.({ exitCode: 129 }); // what the shell does on SIGHUP
+      expect(mockSocket.emit).toHaveBeenCalledWith('rpc', expect.objectContaining({
+        method: 'terminal.exited',
+        params: { terminalId, exitCode: 129 },
+      }));
+      expect(await service.handle('list', {})).toEqual([]);
+      expect(service.kill(terminalId)).toBe(false);
+    });
+
+    it('sends SIGKILL when the shell ignores SIGHUP', async () => {
+      vi.useFakeTimers();
+      try {
+        const terminalId = await service.handle('create', { cols: 80, rows: 24 });
+        service.kill(terminalId);
+        vi.advanceTimersByTime(3000);
+        expect(mockPtyProcess.kill).toHaveBeenLastCalledWith('SIGKILL');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not SIGKILL a shell that exited within the grace period', async () => {
+      vi.useFakeTimers();
+      try {
+        const terminalId = await service.handle('create', { cols: 80, rows: 24 });
+        service.kill(terminalId);
+        ptyExitHandler?.({ exitCode: 129 });
+        vi.advanceTimersByTime(3000);
+        expect(mockPtyProcess.kill).not.toHaveBeenCalledWith('SIGKILL');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('removes only exited terminals', async () => {
+      const terminalId = await service.handle('create', { cols: 80, rows: 24 });
+      await service.handle('activate', { terminalId });
+
+      expect(service.remove(terminalId)).toBe(false); // still running
+      ptyExitHandler?.({ exitCode: 0 });
+      expect(service.remove(terminalId)).toBe(true);
+      expect(service.getSummaries()).toEqual([]);
+    });
+  });
+
   describe('getSummaries', () => {
     it('reports age, buffer size, last attach time and exit status', async () => {
       vi.useFakeTimers();

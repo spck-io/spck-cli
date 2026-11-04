@@ -49,6 +49,8 @@ export interface TerminalSummary {
 
 // Minimum interval between re-serializing a changed buffer to measure its size
 const BUFFER_MEASURE_INTERVAL_MS = 5000;
+// How long a killed shell gets to exit on SIGHUP before SIGKILL
+const KILL_GRACE_MS = 3000;
 
 export class TerminalService {
   private sessions: Map<string, TerminalSession> = new Map();
@@ -433,6 +435,41 @@ export class TerminalService {
       // (terminal.exited is only emitted once, at the moment the shell dies).
       params: { terminalId, buffer, exited: session.exited, exitCode: session.exitCode },
     });
+  }
+
+  /**
+   * Kill a terminal from the CLI dashboard. The exit handler then marks it
+   * exited and notifies the editor, which shows its "process exited" notice.
+   * Shells that ignore SIGHUP get SIGKILL after a grace period.
+   * @returns false when the terminal doesn't exist or already exited
+   */
+  kill(terminalId: string): boolean {
+    const session = this.sessions.get(terminalId);
+    if (!session || session.exited) return false;
+    session.pty.kill();
+    const timer = setTimeout(() => {
+      if (!session.exited) {
+        try {
+          session.pty.kill('SIGKILL');
+        } catch {
+          // Already gone
+        }
+      }
+    }, KILL_GRACE_MS);
+    timer.unref?.();
+    return true;
+  }
+
+  /**
+   * Forget an exited terminal from the CLI dashboard.
+   * @returns false when the terminal doesn't exist or is still running
+   */
+  remove(terminalId: string): boolean {
+    const session = this.sessions.get(terminalId);
+    if (!session || !session.exited) return false;
+    this.sessions.delete(terminalId);
+    if (this.activeTerminalId === terminalId) this.activeTerminalId = null;
+    return true;
   }
 
   /**

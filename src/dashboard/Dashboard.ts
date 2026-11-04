@@ -20,7 +20,9 @@ import { fit, formatBytes, formatDuration, stripAnsi, truncate, visibleWidth, wr
 import { RPCRouter } from '../rpc/router.js';
 import type { TerminalSummary } from '../services/TerminalService.js';
 
-type View = 'main' | 'logs' | 'qr';
+type View = 'main' | 'logs' | 'qr' | 'terminals';
+
+type TerminalRow = TerminalSummary & { deviceId: string };
 
 export interface DashboardOptions {
   proxy: ProxyClient;
@@ -54,6 +56,12 @@ export class Dashboard {
   // Show the pairing QR until the first editor connects, since entering the
   // alternate screen hides the one printed during startup.
   private autoQr = false;
+  // Terminals view: selected terminal and a pending kill awaiting a second [x]
+  private selectedTerminal: { deviceId: string; id: string } | null = null;
+  private killArmed: { id: string; at: number } | null = null;
+  // Stable "#n" labels, so numbers don't shift when a terminal goes away
+  private readonly terminalNumbers = new Map<string, number>();
+  private nextTerminalNumber = 1;
 
   constructor(private options: DashboardOptions) {
     for (const setting of SETTINGS) {
@@ -134,6 +142,8 @@ export class Dashboard {
 
     if (this.view === 'logs') {
       this.handleLogKey(name, key);
+    } else if (this.view === 'terminals') {
+      this.handleTerminalsKey(name);
     } else if (this.view === 'qr') {
       if (name === 'escape' || name === 'c' || name === 'return') this.setView('main');
       else if (name === 'l') this.setView('logs');
@@ -147,6 +157,7 @@ export class Dashboard {
   private handleMainKey(name: string | undefined): void {
     if (name === 'l') return this.setView('logs');
     if (name === 'c') return this.setView('qr');
+    if (name === 'm' && this.terminalsEnabled()) return this.setView('terminals');
     if (name === 'q') return this.handleQuitKey();
     if (name === 'w') {
       this.options.wakeLock.toggle();
@@ -194,6 +205,62 @@ export class Dashboard {
     this.clampLogScroll();
   }
 
+  private handleTerminalsKey(name: string | undefined): void {
+    const terminals = this.terminalRows();
+    const index = this.selectedTerminalIndex(terminals);
+    switch (name) {
+      case 'escape':
+      case 'm':
+        this.setView('main');
+        break;
+      case 'l':
+        this.setView('logs');
+        break;
+      case 'q':
+        this.handleQuitKey();
+        break;
+      case 'up':
+        this.selectTerminal(terminals[Math.max(0, index - 1)]);
+        break;
+      case 'down':
+        this.selectTerminal(terminals[Math.min(terminals.length - 1, index + 1)]);
+        break;
+      case 'x':
+      case 'delete':
+        this.killOrRemoveSelected(terminals[index]);
+        break;
+    }
+  }
+
+  private selectTerminal(terminal: TerminalRow | undefined): void {
+    if (!terminal) return;
+    if (this.selectedTerminal?.id !== terminal.id) this.killArmed = null;
+    this.selectedTerminal = { deviceId: terminal.deviceId, id: terminal.id };
+  }
+
+  private killOrRemoveSelected(terminal: TerminalRow | undefined): void {
+    if (!terminal) return;
+    const label = this.terminalLabel(terminal.id);
+    if (terminal.exited) {
+      if (RPCRouter.removeTerminal(terminal.deviceId, terminal.id)) {
+        this.setFlash(t('dashboard.terminalRemoved', { name: label }));
+      }
+      return;
+    }
+    // Killing loses the shell and whatever runs in it, so ask for a second press
+    if (this.killArmed?.id === terminal.id && Date.now() - this.killArmed.at < QUIT_CONFIRM_MS) {
+      this.killArmed = null;
+      if (RPCRouter.killTerminal(terminal.deviceId, terminal.id)) {
+        console.log(`[Dashboard] Killed terminal ${label}`);
+        this.setFlash(t('dashboard.terminalKilled', { name: label }));
+      }
+      return;
+    }
+    this.killArmed = { id: terminal.id, at: Date.now() };
+    this.setFlash(t('dashboard.terminalKillConfirm', { name: label }));
+    setTimeout(() => this.scheduleRender(), QUIT_CONFIRM_MS).unref();
+  }
+
   private handleQuitKey(): void {
     if (Date.now() - this.quitArmedAt < QUIT_CONFIRM_MS) {
       this.options.onQuit();
@@ -206,6 +273,7 @@ export class Dashboard {
 
   private setView(view: View): void {
     this.view = view;
+    this.killArmed = null;
     this.autoQr = false;
     this.logScroll = 0;
   }
@@ -259,6 +327,7 @@ export class Dashboard {
     let lines: string[];
     if (this.view === 'logs') lines = this.renderLogs(width, height);
     else if (this.view === 'qr') lines = this.renderQr(width);
+    else if (this.view === 'terminals') lines = this.renderTerminalsView(width);
     else lines = this.renderMain(width);
 
     const body = lines.slice(0, height - 1).map((line) => truncate(line, width));
@@ -296,18 +365,11 @@ export class Dashboard {
     lines.push('');
 
     // Terminals
-    if (this.options.config.terminal?.enabled !== false) {
-      lines.push(chalk.bold(t('dashboard.terminals')));
-      const terminals = RPCRouter.getTerminalSummaries();
-      if (terminals.length === 0) {
-        lines.push('  ' + chalk.gray(t('dashboard.noTerminals')));
-      } else {
-        const connectedDevices = new Set(status.clients.filter((c) => c.ready && c.deviceId).map((c) => c.deviceId));
-        terminals.forEach((terminal, index) => {
-          const viewing = !terminal.exited && terminal.active && connectedDevices.has(terminal.deviceId);
-          lines.push('  ' + this.renderTerminal(terminal, index, viewing));
-        });
-      }
+    if (this.terminalsEnabled()) {
+      const terminals = this.terminalRows();
+      const manage = terminals.length > 0 ? chalk.gray('  ' + t('dashboard.terminalsManageHint')) : '';
+      lines.push(chalk.bold(t('dashboard.terminals')) + manage);
+      lines.push(...this.terminalLines(terminals, status, null));
       lines.push('');
     }
 
@@ -362,10 +424,58 @@ export class Dashboard {
     return `${dot} ${id}${transport}${ping}${state}`;
   }
 
-  private renderTerminal(terminal: TerminalSummary, index: number, viewing: boolean): string {
+  private terminalsEnabled(): boolean {
+    return this.options.config.terminal?.enabled !== false;
+  }
+
+  private terminalRows(): TerminalRow[] {
+    const terminals = RPCRouter.getTerminalSummaries();
+    for (const terminal of terminals) {
+      if (!this.terminalNumbers.has(terminal.id)) this.terminalNumbers.set(terminal.id, this.nextTerminalNumber++);
+    }
+    return terminals;
+  }
+
+  private terminalLabel(id: string): string {
+    return `#${this.terminalNumbers.get(id) ?? '?'}`;
+  }
+
+  private selectedTerminalIndex(terminals: TerminalRow[]): number {
+    const index = terminals.findIndex((row) => row.id === this.selectedTerminal?.id);
+    return index === -1 ? 0 : index;
+  }
+
+  /** One line per terminal; `selectedIndex` highlights a row (terminals view). */
+  private terminalLines(terminals: TerminalRow[], status: ProxyStatus, selectedIndex: number | null): string[] {
+    if (terminals.length === 0) return ['  ' + chalk.gray(t('dashboard.noTerminals'))];
+    const connectedDevices = new Set(status.clients.filter((c) => c.ready && c.deviceId).map((c) => c.deviceId));
+    return terminals.map((terminal, index) => {
+      const viewing = !terminal.exited && terminal.active && connectedDevices.has(terminal.deviceId);
+      const line = this.renderTerminal(terminal, viewing);
+      if (selectedIndex === null) return '  ' + line;
+      return index === selectedIndex ? chalk.inverse('> ' + stripAnsi(line)) : '  ' + line;
+    });
+  }
+
+  private renderTerminalsView(width: number): string[] {
+    const status = this.options.proxy.getStatus();
+    const terminals = this.terminalRows();
+    const index = this.selectedTerminalIndex(terminals);
+    // Keep the selection valid when the selected terminal went away
+    if (terminals[index]) this.selectedTerminal = { deviceId: terminals[index].deviceId, id: terminals[index].id };
+    else this.selectedTerminal = null;
+
+    const lines: string[] = [this.renderHeader(width), '', chalk.bold(t('dashboard.terminals'))];
+    lines.push(...this.terminalLines(terminals, status, terminals.length > 0 ? index : null));
+    lines.push('');
+    lines.push(chalk.gray('  ' + t('dashboard.terminalsViewHint')));
+    return lines;
+  }
+
+  private renderTerminal(terminal: TerminalRow, viewing: boolean): string {
     const now = Date.now();
     const dot = terminal.exited ? chalk.gray('●') : viewing ? chalk.green('●') : chalk.cyan('●');
-    const name = fit(`#${index + 1}`, 5);
+    const name = fit(this.terminalLabel(terminal.id), 5);
     const state = terminal.exited
       ? chalk.gray(fit(t('dashboard.terminalExited', {
         code: terminal.exitCode ?? '?',
@@ -498,10 +608,17 @@ export class Dashboard {
     let items: string[];
     if (this.view === 'logs') {
       items = [key('↑↓', t('dashboard.keyScroll')), key('l', t('dashboard.keyBack')), key('q', t('dashboard.keyQuit'))];
+    } else if (this.view === 'terminals') {
+      const selected = this.terminalRows().find((row) => row.id === this.selectedTerminal?.id);
+      items = [key('↑↓', t('dashboard.keySelect'))];
+      if (selected) items.push(key('x', selected.exited ? t('dashboard.keyRemove') : t('dashboard.keyKill')));
+      items.push(key('m', t('dashboard.keyBack')), key('q', t('dashboard.keyQuit')));
     } else if (this.view === 'qr') {
       items = [key('c', t('dashboard.keyBack')), key('l', t('dashboard.keyLogs')), key('q', t('dashboard.keyQuit'))];
     } else {
-      items = [key('l', t('dashboard.keyLogs')), key('c', t('dashboard.keyQr')), key('q', t('dashboard.keyQuit'))];
+      items = [key('l', t('dashboard.keyLogs')), key('c', t('dashboard.keyQr'))];
+      if (this.terminalsEnabled()) items.push(key('m', t('dashboard.keyTerminals')));
+      items.push(key('q', t('dashboard.keyQuit')));
     }
     return truncate(' ' + items.join('   '), width);
   }

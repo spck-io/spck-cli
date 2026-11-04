@@ -301,6 +301,16 @@ export class RPCRouter {
     return summaries.sort((a, b) => a.createdAt - b.createdAt);
   }
 
+  /** Kill a running terminal on behalf of the CLI dashboard. */
+  static killTerminal(deviceId: string, terminalId: string): boolean {
+    return this.terminalServices.get(deviceId)?.kill(terminalId) ?? false;
+  }
+
+  /** Forget an exited terminal on behalf of the CLI dashboard. */
+  static removeTerminal(deviceId: string, terminalId: string): boolean {
+    return this.terminalServices.get(deviceId)?.remove(terminalId) ?? false;
+  }
+
   /**
    * Cleanup terminal service for socket
    */
