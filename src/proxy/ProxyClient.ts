@@ -29,7 +29,6 @@ import {
   saveConnectionSettings,
 } from '../config/credentials.js';
 import { t } from '../i18n/index.js';
-import { formatServerName, getServerLabel } from '../config/server-selection.js';
 import { logAuth, logConnection } from '../utils/logger.js';
 import { RPCRouter } from '../rpc/router.js';
 import { validateHandshakeTimestamp } from './handshake-validation.js';
@@ -162,7 +161,6 @@ export class ProxyClient {
 
     const relayServer = this.options.proxyServerUrl;
     console.log(`\n=== ${t('connection.title')} ===\n`);
-    console.log(`   ${t('connection.relayServer', { server: formatServerName(relayServer) })}\n`);
 
     // Determine if we're renewing an existing connection
     const existingToken = existingConnectionSettings?.serverToken;
@@ -452,10 +450,7 @@ export class ProxyClient {
     if (this.config.name) {
       console.log(t('connection.name', { name: this.config.name }));
     }
-    console.log(t('connection.relayServerLabel', { server: formatServerName(relayServer) }));
-    console.log('-'.repeat(60));
-    console.log(`\n${t('connection.relayServerMismatch')}`);
-    console.log(`${t('connection.relayServerMismatchHint', { server: getServerLabel(relayServer) ?? relayServer })}\n`);
+    console.log('-'.repeat(60) + '\n');
   }
 
   /**

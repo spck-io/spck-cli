@@ -91,14 +91,10 @@
   },
   "connection": {
     "title": "Connecting to Relay Server",
-    "relayServer": "Relay server: {{server}}",
     "scanQR": "Scan this QR code with Spck Editor mobile app:",
     "clientId": "Client ID: {{id}}",
     "secret": "Secret: {{secret}}",
     "name": "Name: {{name}}",
-    "relayServerLabel": "Relay server: {{server}}",
-    "relayServerMismatch": "IMPORTANT: The client must select the same relay server",
-    "relayServerMismatchHint": "({{server}}) in Spck Editor to connect.",
     "existingFound": "Existing connection found",
     "connectedAt": "Connected at: {{date}}",
     "noExisting": "No existing connection found. Connecting to proxy...",
@@ -144,9 +140,9 @@
     "unhandledError": "Unhandled error in handleError:",
     "freeTierNotice": "Free account: {{used}} / {{limit}} min used today ({{remaining}} min remaining)",
     "freeTierUpgrade": "Upgrade for unlimited CLI access.",
-    "fastLaneAvailable": "Fast Lane (direct WebRTC): available for Supporter and Gold accounts",
-    "fastLaneUnavailable": "Fast Lane (direct WebRTC): unavailable on this platform — using relay only",
-    "fastLaneDisabled": "Fast Lane (direct WebRTC): disabled in project config — using relay only"
+    "fastLaneAvailable": "Fast Lane: available for Supporter and Gold accounts. A direct connection between Spck Editor and this CLI using WebRTC technology, reducing latency by at least 50%.",
+    "fastLaneUnavailable": "Relay: Fast Lane (direct WebRTC) is unavailable on this platform",
+    "fastLaneDisabled": "Relay: Fast Lane is disabled in project config"
   },
   "multipleConnection": {
     "detected": "MULTIPLE CONNECTION ATTEMPT DETECTED!",

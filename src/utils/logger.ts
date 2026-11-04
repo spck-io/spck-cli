@@ -120,11 +120,10 @@ function formatTimeCompact(): string {
 }
 
 /**
- * Format UID for display (truncate if needed)
+ * Short device id for display (no ellipsis): "wq5jzwu11abc" -> "wq5jzwu1"
  */
-function formatUid(uid: string, maxLen: number = 12): string {
-  if (uid.length <= maxLen) return uid;
-  return uid.substring(0, maxLen - 3) + '...';
+function formatUid(uid: string, maxLen: number = 8): string {
+  return uid.length <= maxLen ? uid : uid.substring(0, maxLen);
 }
 
 /**
@@ -166,6 +165,63 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// Console layout, one line per event:
+//   HH:MM:SS  <symbol>  CATEGORY  message            detail  ·  detail   device xxxxxxxx
+const CATEGORY_WIDTH = 7;
+const MESSAGE_WIDTH = 28;
+
+type Level = 'ok' | 'info' | 'warn' | 'error';
+
+const LEVEL_SYMBOL: Record<Level, string> = {
+  ok: chalk.green('✓'),
+  info: chalk.blue('●'),
+  warn: chalk.yellow('⚠'),
+  error: chalk.red('✗'),
+};
+
+// Internal identifiers that only matter in the log file, not on screen.
+const HIDDEN_META_KEYS = new Set(['connectionId', 'newConnectionId', 'userId', 'deviceId', 'firstConnection', 'clientId']);
+
+/**
+ * Render metadata as readable "key: value" text, skipping internal ids.
+ */
+function formatMeta(metadata?: Record<string, any>): string[] {
+  if (!metadata) return [];
+  return Object.entries(metadata)
+    .filter(([key, val]) => !HIDDEN_META_KEYS.has(key) && val !== undefined && val !== null && val !== '')
+    .map(([key, val]) => `${key}: ${typeof val === 'object' ? JSON.stringify(val) : val}`);
+}
+
+/**
+ * Plain (uncolored) metadata for the log file.
+ */
+function plainMeta(metadata?: Record<string, any>): string {
+  return metadata ? ` ${JSON.stringify(metadata)}` : '';
+}
+
+function consoleLine(opts: {
+  level: Level;
+  category: string;
+  color: (s: string) => string;
+  message: string;
+  details?: string[];
+  error?: string;
+  device?: string;
+  messageWidth?: number;
+}): void {
+  const parts = [
+    chalk.gray(formatTimeCompact()),
+    LEVEL_SYMBOL[opts.level],
+    opts.color(opts.category.padEnd(CATEGORY_WIDTH)),
+    chalk.white(opts.message.padEnd(opts.messageWidth ?? MESSAGE_WIDTH)),
+  ];
+  const details = (opts.details ?? []).filter(Boolean).join(chalk.gray(' · '));
+  if (details) parts.push(chalk.gray(details));
+  if (opts.error) parts.push(chalk.red(opts.error));
+  if (opts.device) parts.push(chalk.gray(`[${formatUid(opts.device)}]`));
+  console.log(parts.join('  ').trimEnd());
+}
+
 // Debounce state for browser proxy console output
 const BROWSER_PROXY_DEBOUNCE_MS = 1000;
 let _browserDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -175,53 +231,53 @@ let _browserLastUid = '';
 
 function flushBrowserProxyLog(): void {
   if (_browserSuccessCount === 0) return;
-  const timestamp = chalk.gray(formatTimeCompact());
-  const uidStr = chalk.gray(formatUid(_browserLastUid));
-  const sizeStr = chalk.gray(formatBytes(_browserTotalBytes));
-  const countStr = chalk.white(String(_browserSuccessCount));
-  console.log(`${timestamp} ${uidStr} ${chalk.green('✓')} ${chalk.blueBright('BROWSER')} ${countStr} files fetched (${sizeStr})`);
+  consoleLine({
+    level: 'ok', category: 'BROWSER', color: chalk.blueBright,
+    message: `Fetched ${_browserSuccessCount} ${_browserSuccessCount === 1 ? 'file' : 'files'}`,
+    details: [formatBytes(_browserTotalBytes)],
+    device: _browserLastUid,
+  });
   _browserSuccessCount = 0;
   _browserTotalBytes = 0;
   _browserLastUid = '';
   _browserDebounceTimer = null;
 }
 
-// Shared core for RPC-style log lines. Every per-service helper below has the
-// same structural shape: `<timestamp> <uid> <✓/✗> <CATEGORY> <method col> <detail>
-// [extra tokens] [metadata]` on the console, and `[LEVEL] <FILE_TAG> <file body>
-// uid=<uid> success=<bool> [extra tokens] [metadata]` to the file log. The
+// Shared core for RPC-style log lines (FS, GIT, TERM, SEARCH, LSP, ACP). The
 // per-service knobs (category label + color, how to pick `detail`, the inline
 // `extraTokens`, the file tag + body) are captured in this options object; the
 // helpers below assemble those before delegating.
 interface RpcLogOpts {
   category: string;                       // e.g. 'FS', 'GIT', 'ACP'
   color: (s: string) => string;           // chalk color for the category label
-  methodLabel: string;                    // middle column text (often `method`)
-  detail: string;                         // gray right-of-method text
-  extraTokens?: string[];                 // inline gray tokens (msg=…, files=…)
+  methodLabel: string;                    // message column text (often `method`)
+  detail: string;                         // right-of-method text (path, dir, id)
+  extraTokens?: string[];                 // inline tokens (msg=…, files=…)
   uid: string;
   success: boolean;
   error?: any;
   metadata?: Record<string, any>;
   fileTag: string;                        // 'FS READ', 'GIT WRITE', 'SEARCH'…
   fileBody: string;                       // text between the tag and `uid=`
-  methodPad?: number;                     // padding for the middle column; default 12
+  methodPad?: number;                     // padding for the message column
 }
 
 function logRpc(opts: RpcLogOpts): void {
-  const extraStr = opts.extraTokens?.length ? ` ${chalk.gray(opts.extraTokens.join(' '))}` : '';
-  const metaStr = opts.metadata ? ` ${chalk.gray(JSON.stringify(opts.metadata))}` : '';
-  const ts = chalk.gray(formatTimeCompact());
-  const uidStr = chalk.gray(formatUid(opts.uid));
-  const categoryCol = opts.color(opts.category);
-  const methodCol = chalk.white(opts.methodLabel.padEnd(opts.methodPad ?? 12));
-
+  const details = [opts.detail, ...(opts.extraTokens ?? []), ...formatMeta(opts.metadata)];
   if (opts.success) {
-    console.log(`${ts} ${uidStr} ${chalk.green('✓')} ${categoryCol} ${methodCol} ${chalk.gray(opts.detail)}${extraStr}${metaStr}`);
-    writeToFile(`[INFO] ${opts.fileTag} ${opts.fileBody} uid=${opts.uid} success=true${extraStr}${metaStr}`);
+    consoleLine({
+      level: 'ok', category: opts.category, color: opts.color,
+      message: opts.methodLabel, messageWidth: opts.methodPad ?? 20,
+      details, device: opts.uid,
+    });
+    writeToFile(`[INFO] ${opts.fileTag} ${opts.fileBody} uid=${opts.uid} success=true${opts.extraTokens?.length ? ' ' + opts.extraTokens.join(' ') : ''}${plainMeta(opts.metadata)}`);
   } else {
     const errMsg = opts.error?.message || String(opts.error);
-    console.log(`${ts} ${uidStr} ${chalk.red('✗')} ${categoryCol} ${methodCol} ${chalk.gray(opts.detail)} ${chalk.red(errMsg)}`);
+    consoleLine({
+      level: 'error', category: opts.category, color: opts.color,
+      message: opts.methodLabel, messageWidth: opts.methodPad ?? 20,
+      details: [opts.detail], error: errMsg, device: opts.uid,
+    });
     writeToFile(`[ERROR] ${opts.fileTag} ${opts.fileBody} uid=${opts.uid} success=false error="${errMsg}"`);
   }
 }
@@ -409,6 +465,39 @@ export function logLsp(
   });
 }
 
+const AUTH_LABELS: Record<string, string> = {
+  token_refresh_start: 'Refreshing session token',
+  token_refresh_success: 'Session token refreshed',
+  token_refresh_failed: 'Session token expired',
+  token_refresh_error: 'Session token refresh failed',
+  reconnect_with_new_token: 'Reconnecting with new token',
+  proxy_authenticated: 'Signed in to relay',
+  firebase_auth_success: 'Signed in',
+  multiple_connection_attempt: 'Another client is connected',
+  new_device_connecting: 'New device connecting',
+  credentials_corrupted: 'Stored credentials are corrupted',
+  connection_settings_corrupted: 'Connection settings are corrupted',
+};
+
+const CONNECTION_LABELS: Record<string, string> = {
+  connecting: 'Client connecting',
+  authenticated: 'Client authenticated',
+  auth_failed: 'Authentication failed',
+  disconnected: 'Client disconnected',
+  ready: 'Client ready',
+  fast_lane_open: 'Fast Lane connected',
+  fast_lane_closed: 'Fast Lane closed',
+  transport_mismatch_dropped: 'Message dropped',
+};
+
+/** "some_event_name" -> "Some event name" for events without an explicit label */
+function humanize(event: string): string {
+  const text = event.replace(/_/g, ' ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+const TRANSPORT_NAMES: Record<string, string> = { relay: 'Relay', fastlane: 'Fast Lane' };
+
 /**
  * Log an authentication event
  */
@@ -417,35 +506,19 @@ export function logAuth(
   details: Record<string, any>,
   level: 'info' | 'warn' | 'error' = 'info'
 ): void {
-  const timestamp = chalk.gray(formatTimeCompact());
-  const deviceId = details.deviceId ? chalk.gray(formatUid(details.deviceId)) : '';
-  const userId = details.userId ? chalk.gray(`user=${details.userId}`) : '';
   const metaStr = Object.entries(details)
     .filter(([key]) => key !== 'deviceId' && key !== 'userId')
     .map(([key, val]) => `${key}=${val}`)
     .join(' ');
 
-  let symbol: string;
-  let color: (str: string) => string;
-  let logLevel: string;
-
-  if (level === 'error') {
-    symbol = chalk.red('✗');
-    color = chalk.red;
-    logLevel = 'ERROR';
-  } else if (level === 'warn') {
-    symbol = chalk.yellow('⚠');
-    color = chalk.yellow;
-    logLevel = 'WARN';
-  } else {
-    symbol = chalk.green('✓');
-    color = chalk.green;
-    logLevel = 'INFO';
-  }
-
-  const msg = `${timestamp} ${deviceId} ${userId} ${symbol} ${color('AUTH')} ${chalk.white(event.padEnd(20))} ${chalk.gray(metaStr)}`;
-  console.log(msg);
-  writeToFile(`[${logLevel}] AUTH ${event} ${metaStr}`);
+  const consoleLevel: Level = level === 'info' ? 'ok' : level;
+  consoleLine({
+    level: consoleLevel, category: 'AUTH', color: level === 'error' ? chalk.red : level === 'warn' ? chalk.yellow : chalk.green,
+    message: AUTH_LABELS[event] ?? humanize(event),
+    details: formatMeta(details),
+    device: details.deviceId,
+  });
+  writeToFile(`[${level.toUpperCase()}] AUTH ${event} ${metaStr}`);
 }
 
 /**
@@ -456,64 +529,38 @@ export function logConnection(
   deviceId?: string,
   metadata?: Record<string, any>
 ): void {
-  const timestamp = chalk.gray(formatTimeCompact());
-  const deviceStr = deviceId ? chalk.gray(formatUid(deviceId)) : chalk.gray('...');
-  const metaStr = metadata ? ` ${chalk.gray(JSON.stringify(metadata))}` : '';
+  const levels: Record<string, { level: Level; color: (s: string) => string; file: string }> = {
+    connecting: { level: 'info', color: chalk.blue, file: 'INFO' },
+    authenticated: { level: 'ok', color: chalk.green, file: 'INFO' },
+    auth_failed: { level: 'error', color: chalk.red, file: 'ERROR' },
+    disconnected: { level: 'info', color: chalk.gray, file: 'INFO' },
+    ready: { level: 'ok', color: chalk.green, file: 'INFO' },
+    fast_lane_open: { level: 'ok', color: chalk.green, file: 'INFO' },
+    fast_lane_closed: { level: 'info', color: chalk.gray, file: 'INFO' },
+    transport_mismatch_dropped: { level: 'warn', color: chalk.yellow, file: 'WARN' },
+  };
+  const style = levels[event] ?? { level: 'info' as Level, color: chalk.gray, file: 'INFO' };
 
-  let symbol: string;
-  let color: (str: string) => string;
-  let logLevel: string;
-
-  switch (event) {
-    case 'connecting':
-      symbol = '🔌';
-      color = chalk.blue;
-      logLevel = 'INFO';
-      break;
-    case 'authenticated':
-      symbol = chalk.green('✓');
-      color = chalk.green;
-      logLevel = 'INFO';
-      break;
-    case 'auth_failed':
-      symbol = chalk.red('✗');
-      color = chalk.red;
-      logLevel = 'ERROR';
-      break;
-    case 'disconnected':
-      symbol = '🔌';
-      color = chalk.gray;
-      logLevel = 'INFO';
-      break;
-    case 'ready':
-      symbol = '🎉';
-      color = chalk.green;
-      logLevel = 'INFO';
-      break;
-    case 'fast_lane_open':
-      symbol = '⚡';
-      color = chalk.green;
-      logLevel = 'INFO';
-      break;
-    case 'fast_lane_closed':
-      symbol = '⚡';
-      color = chalk.gray;
-      logLevel = 'INFO';
-      break;
-    case 'transport_mismatch_dropped':
-      symbol = chalk.yellow('⚠');
-      color = chalk.yellow;
-      logLevel = 'WARN';
-      break;
-    default:
-      symbol = 'ℹ';
-      color = chalk.gray;
-      logLevel = 'INFO';
+  // Friendlier rendering for the fields these events carry
+  const details: string[] = [];
+  if (metadata?.reason) details.push(`reason: ${metadata.reason}`);
+  if (metadata?.protocolVersion !== undefined) details.push(`protocol v${metadata.protocolVersion}`);
+  if (metadata?.pinned && metadata?.received) {
+    details.push(`connection uses ${TRANSPORT_NAMES[metadata.pinned] ?? metadata.pinned}, received on ${TRANSPORT_NAMES[metadata.received] ?? metadata.received}`);
   }
+  const rest = metadata ? Object.fromEntries(
+    Object.entries(metadata).filter(([key]) => !['reason', 'protocolVersion', 'pinned', 'received', 'error'].includes(key))
+  ) : undefined;
+  details.push(...formatMeta(rest));
 
-  const msg = `${timestamp} ${deviceStr} ${symbol} ${color('CONN')} ${chalk.white(event.padEnd(15))}${metaStr}`;
-  console.log(msg);
-  writeToFile(`[${logLevel}] CONN ${event} deviceId=${deviceId || 'unknown'}${metaStr}`);
+  consoleLine({
+    level: style.level, category: 'CONN', color: style.color,
+    message: CONNECTION_LABELS[event] ?? humanize(event),
+    details,
+    error: metadata?.error,
+    device: deviceId,
+  });
+  writeToFile(`[${style.file}] CONN ${event} deviceId=${deviceId || 'unknown'}${plainMeta(metadata)}`);
 }
 
 /**
@@ -542,12 +589,12 @@ export function logBrowserProxy(
     if (_browserDebounceTimer) clearTimeout(_browserDebounceTimer);
     _browserDebounceTimer = setTimeout(flushBrowserProxyLog, BROWSER_PROXY_DEBOUNCE_MS);
   } else {
-    const displayUrl = formatPath(params.url, 60);
-    const timestamp = chalk.gray(formatTimeCompact());
-    const uidStr = chalk.gray(formatUid(uid));
     const errMsg = error?.message || String(error);
-    const msg = `${timestamp} ${uidStr} ${chalk.red('✗')} ${chalk.blueBright('BROWSER')} ${chalk.white(httpMethod.padEnd(7))} ${chalk.gray(displayUrl)} ${chalk.red(errMsg)}`;
-    console.log(msg);
+    consoleLine({
+      level: 'error', category: 'BROWSER', color: chalk.blueBright,
+      message: httpMethod, messageWidth: 7,
+      details: [formatPath(params.url, 60)], error: errMsg, device: uid,
+    });
     writeToFile(`[ERROR] BROWSER PROXY ${httpMethod} ${params.url} uid=${uid} success=false error="${errMsg}"`);
   }
 }
