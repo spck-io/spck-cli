@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fit, formatDuration, stripAnsi, truncate, visibleWidth, wrap } from '../screen.js';
+import { fit, formatBytes, formatDuration, stripAnsi, truncate, visibleWidth, wrap } from '../screen.js';
 
 const red = (s: string) => `\x1b[31m${s}\x1b[39m`;
 
@@ -34,5 +34,13 @@ describe('dashboard screen helpers', () => {
     expect(formatDuration(12 * 60_000)).toBe('12m');
     expect(formatDuration((3 * 60 + 5) * 60_000)).toBe('3h 05m');
     expect(formatDuration(50 * 3600_000)).toBe('2d 2h');
+  });
+
+  it('formats buffer sizes', () => {
+    expect(formatBytes(512)).toBe('512 B');
+    expect(formatBytes(1536)).toBe('1.5 KB');
+    expect(formatBytes(50 * 1024)).toBe('50 KB');
+    expect(formatBytes(1.2 * 1024 * 1024)).toBe('1.2 MB');
+    expect(formatBytes(25 * 1024 * 1024)).toBe('25 MB');
   });
 });

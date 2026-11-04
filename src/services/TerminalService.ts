@@ -26,7 +26,29 @@ interface TerminalSession {
   exitCode?: number;
   uid: string;
   pendingWrites: number; // Track number of pending write operations
+  createdAt: number;
+  exitedAt?: number;
+  lastAttachedAt: number; // last create/activate by an editor
+  // Serialized buffer size, recomputed lazily (serializing 10k lines isn't free)
+  bufferBytes: number;
+  bufferDirty: boolean;
+  bufferMeasuredAt: number;
 }
+
+export interface TerminalSummary {
+  id: string;
+  exited: boolean;
+  exitCode?: number;
+  createdAt: number;
+  exitedAt?: number;
+  lastAttachedAt: number;
+  bufferBytes: number;
+  // The terminal this device's editor last activated (it streams output while that editor is connected)
+  active: boolean;
+}
+
+// Minimum interval between re-serializing a changed buffer to measure its size
+const BUFFER_MEASURE_INTERVAL_MS = 5000;
 
 export class TerminalService {
   private sessions: Map<string, TerminalSession> = new Map();
@@ -118,8 +140,17 @@ export class TerminalService {
   private async create(params: { cols: number; rows: number }): Promise<string> {
     const uid = this.getUid();
 
-    // Check terminal limit
-    const userTerminals = Array.from(this.sessions.values()).filter((s) => s.uid === uid);
+    // Exited sessions are hidden from the editor (see list), so drop them here
+    // rather than letting invisible dead terminals pile up in memory. The
+    // active one is kept so an editor still showing it can redraw its buffer.
+    for (const [id, s] of this.sessions) {
+      if (s.exited && s.uid === uid && id !== this.activeTerminalId) {
+        this.sessions.delete(id);
+      }
+    }
+
+    // Check terminal limit (dead terminals don't count)
+    const userTerminals = Array.from(this.sessions.values()).filter((s) => s.uid === uid && !s.exited);
 
     if (userTerminals.length >= this.maxTerminals) {
       throw createRPCError(
@@ -177,6 +208,7 @@ export class TerminalService {
       if (session) {
         // Track pending write
         session.pendingWrites++;
+        session.bufferDirty = true;
 
         // Write to xterm with callback
         xterm.write(data, () => {
@@ -203,6 +235,7 @@ export class TerminalService {
       if (session) {
         session.exited = true;
         session.exitCode = exitCode;
+        session.exitedAt = Date.now();
 
         // Notify client
         this.getSocket().emit('rpc', {
@@ -224,6 +257,11 @@ export class TerminalService {
       exited: false,
       uid,
       pendingWrites: 0,
+      createdAt: Date.now(),
+      lastAttachedAt: Date.now(),
+      bufferBytes: 0,
+      bufferDirty: true,
+      bufferMeasuredAt: 0,
     });
 
     // Send initial buffer
@@ -275,6 +313,7 @@ export class TerminalService {
 
     // Update active terminal
     this.activeTerminalId = params.terminalId;
+    session.lastAttachedAt = Date.now();
 
     // Send full buffer refresh
     await this.sendBufferRefresh(params.terminalId);
@@ -352,8 +391,10 @@ export class TerminalService {
    */
   private async list(): Promise<string[]> {
     const uid = this.getUid();
+    // Exited terminals are left out: an editor restoring sessions would only
+    // show a dead prompt that can't take input.
     return Array.from(this.sessions.values())
-      .filter((s) => s.uid === uid)
+      .filter((s) => s.uid === uid && !s.exited)
       .map((s) => s.id);
   }
 
@@ -388,8 +429,40 @@ export class TerminalService {
     this.getSocket().emit('rpc', {
       jsonrpc: '2.0',
       method: 'terminal.bufferRefresh',
-      params: { terminalId, buffer },
+      // exited/exitCode let a reconnecting editor learn about an exit it missed
+      // (terminal.exited is only emitted once, at the moment the shell dies).
+      params: { terminalId, buffer, exited: session.exited, exitCode: session.exitCode },
     });
+  }
+
+  /**
+   * Status of every session, oldest first, for the CLI dashboard.
+   */
+  getSummaries(): TerminalSummary[] {
+    const now = Date.now();
+    return Array.from(this.sessions.values())
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map((session) => {
+        if (session.bufferDirty && now - session.bufferMeasuredAt >= BUFFER_MEASURE_INTERVAL_MS) {
+          try {
+            session.bufferBytes = Buffer.byteLength(session.serializeAddon.serialize(), 'utf8');
+          } catch {
+            // Keep the previous measurement
+          }
+          session.bufferDirty = false;
+          session.bufferMeasuredAt = now;
+        }
+        return {
+          id: session.id,
+          exited: session.exited,
+          exitCode: session.exitCode,
+          createdAt: session.createdAt,
+          exitedAt: session.exitedAt,
+          lastAttachedAt: session.lastAttachedAt,
+          bufferBytes: session.bufferBytes,
+          active: this.activeTerminalId === session.id,
+        };
+      });
   }
 
   /**

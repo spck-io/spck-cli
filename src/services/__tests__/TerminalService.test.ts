@@ -513,6 +513,39 @@ describe('TerminalService', () => {
       expect(result).toEqual([terminal1, terminal2]);
     });
 
+    it('should leave exited terminals out of the list', async () => {
+      const terminal1 = await service.handle('create', { cols: 80, rows: 24 });
+      await service.handle('create', { cols: 80, rows: 24 });
+      ptyExitHandler?.({ exitCode: 0 }); // the mock's handler belongs to the last terminal created
+
+      const result = await service.handle('list', {});
+
+      expect(result).toEqual([terminal1]);
+    });
+
+    it('should not count exited terminals toward the limit, and drop them on create', async () => {
+      service = new TerminalService(() => mockSocket, 2, 10000, '/test/root');
+      const terminal1 = await service.handle('create', { cols: 80, rows: 24 });
+      const terminal2 = await service.handle('create', { cols: 80, rows: 24 });
+      ptyExitHandler?.({ exitCode: 0 });
+
+      const terminal3 = await service.handle('create', { cols: 80, rows: 24 });
+
+      expect(await service.handle('list', {})).toEqual([terminal1, terminal3]);
+      expect(service.getSummaries().map((s) => s.id)).not.toContain(terminal2);
+    });
+
+    it('should keep the exited terminal an editor is still showing so its buffer can be redrawn', async () => {
+      const terminal1 = await service.handle('create', { cols: 80, rows: 24 });
+      await service.handle('activate', { terminalId: terminal1 });
+      ptyExitHandler?.({ exitCode: 0 });
+
+      await service.handle('create', { cols: 80, rows: 24 });
+
+      expect(service.getSummaries().map((s) => s.id)).toContain(terminal1);
+      await expect(service.handle('refresh', { terminalId: terminal1 })).resolves.toBeUndefined();
+    });
+
     it('should return empty array when no terminals exist', async () => {
       const result = await service.handle('list', {});
 
@@ -645,6 +678,63 @@ describe('TerminalService', () => {
           method: 'terminal.bufferRefresh',
         })
       );
+    });
+
+    it('should report exit status in buffer refresh so a reconnecting editor learns of a missed exit', async () => {
+      ptyExitHandler?.({ exitCode: 130 });
+      mockSocket.emit.mockClear();
+
+      await service.handle('activate', { terminalId });
+
+      expect(mockSocket.emit).toHaveBeenCalledWith(
+        'rpc',
+        expect.objectContaining({
+          method: 'terminal.bufferRefresh',
+          params: expect.objectContaining({ terminalId, exited: true, exitCode: 130 }),
+        })
+      );
+    });
+
+    it('should report a live terminal as not exited in buffer refresh', async () => {
+      await service.handle('refresh', { terminalId });
+
+      expect(mockSocket.emit).toHaveBeenCalledWith(
+        'rpc',
+        expect.objectContaining({
+          method: 'terminal.bufferRefresh',
+          params: expect.objectContaining({ terminalId, exited: false }),
+        })
+      );
+    });
+  });
+
+  describe('getSummaries', () => {
+    it('reports age, buffer size, last attach time and exit status', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(1_000_000);
+        const terminalId = await service.handle('create', { cols: 80, rows: 24 });
+
+        vi.setSystemTime(1_060_000);
+        await service.handle('activate', { terminalId });
+
+        let [summary] = service.getSummaries();
+        expect(summary).toMatchObject({
+          id: terminalId,
+          exited: false,
+          createdAt: 1_000_000,
+          lastAttachedAt: 1_060_000,
+          bufferBytes: Buffer.byteLength('serialized-buffer-content'),
+          active: true,
+        });
+
+        vi.setSystemTime(1_120_000);
+        ptyExitHandler?.({ exitCode: 1 });
+        [summary] = service.getSummaries();
+        expect(summary).toMatchObject({ exited: true, exitCode: 1, exitedAt: 1_120_000 });
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

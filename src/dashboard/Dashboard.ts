@@ -16,7 +16,9 @@ import { t } from '../i18n/index.js';
 import { LogBuffer, LogEntry } from './LogBuffer.js';
 import { WakeLock } from './WakeLock.js';
 import { SETTINGS, SettingDef, toggleSetting } from './settings.js';
-import { fit, formatDuration, stripAnsi, truncate, visibleWidth, wrap } from './screen.js';
+import { fit, formatBytes, formatDuration, stripAnsi, truncate, visibleWidth, wrap } from './screen.js';
+import { RPCRouter } from '../rpc/router.js';
+import type { TerminalSummary } from '../services/TerminalService.js';
 
 type View = 'main' | 'logs' | 'qr';
 
@@ -293,6 +295,22 @@ export class Dashboard {
     }
     lines.push('');
 
+    // Terminals
+    if (this.options.config.terminal?.enabled !== false) {
+      lines.push(chalk.bold(t('dashboard.terminals')));
+      const terminals = RPCRouter.getTerminalSummaries();
+      if (terminals.length === 0) {
+        lines.push('  ' + chalk.gray(t('dashboard.noTerminals')));
+      } else {
+        const connectedDevices = new Set(status.clients.filter((c) => c.ready && c.deviceId).map((c) => c.deviceId));
+        terminals.forEach((terminal, index) => {
+          const viewing = !terminal.exited && terminal.active && connectedDevices.has(terminal.deviceId);
+          lines.push('  ' + this.renderTerminal(terminal, index, viewing));
+        });
+      }
+      lines.push('');
+    }
+
     // Fast Lane
     lines.push(chalk.bold(t('dashboard.fastLane')));
     for (const line of this.fastLaneLines(status, inner)) lines.push('  ' + line);
@@ -342,6 +360,23 @@ export class Dashboard {
       ? chalk.gray(t('dashboard.connectedFor', { time: formatDuration(Date.now() - client.connectedAt) }))
       : chalk.yellow(t('dashboard.handshaking'));
     return `${dot} ${id}${transport}${ping}${state}`;
+  }
+
+  private renderTerminal(terminal: TerminalSummary, index: number, viewing: boolean): string {
+    const now = Date.now();
+    const dot = terminal.exited ? chalk.gray('●') : viewing ? chalk.green('●') : chalk.cyan('●');
+    const name = fit(`#${index + 1}`, 5);
+    const state = terminal.exited
+      ? chalk.gray(fit(t('dashboard.terminalExited', {
+        code: terminal.exitCode ?? '?',
+        time: formatDuration((terminal.exitedAt ?? now) - terminal.createdAt),
+      }), 30))
+      : fit(t('dashboard.terminalRunning', { time: formatDuration(now - terminal.createdAt) }), 30);
+    const size = chalk.gray(fit(formatBytes(terminal.bufferBytes), 10));
+    const attached = viewing
+      ? chalk.green(t('dashboard.terminalViewing'))
+      : chalk.gray(t('dashboard.terminalAttached', { time: formatDuration(now - terminal.lastAttachedAt) }));
+    return `${dot} ${name}${state}${size}${attached}`;
   }
 
   private formatPing(client: ClientStatus): string {

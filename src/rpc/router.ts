@@ -6,7 +6,7 @@ import * as path from 'path';
 import { AuthenticatedSocket, JSONRPCRequest, ErrorCode, createRPCError, ToolDetectionResult } from '../types.js';
 import { FilesystemService } from '../services/FilesystemService.js';
 import { GitService } from '../services/GitService.js';
-import { TerminalService } from '../services/TerminalService.js';
+import { TerminalService, TerminalSummary } from '../services/TerminalService.js';
 import { SearchService } from '../services/SearchService.js';
 import { BrowserProxyService } from '../services/BrowserProxyService.js';
 import { LanguageServerService } from '../services/LanguageServerService.js';
@@ -288,6 +288,17 @@ export class RPCRouter {
         { method, originalError: error.toString() }
       );
     }
+  }
+
+  /**
+   * Terminal sessions across all editor devices, for the CLI dashboard.
+   */
+  static getTerminalSummaries(): Array<TerminalSummary & { deviceId: string }> {
+    const summaries: Array<TerminalSummary & { deviceId: string }> = [];
+    for (const [deviceId, service] of this.terminalServices) {
+      for (const summary of service.getSummaries()) summaries.push({ ...summary, deviceId });
+    }
+    return summaries.sort((a, b) => a.createdAt - b.createdAt);
   }
 
   /**
