@@ -148,6 +148,7 @@ describe('ProxyClient Security', () => {
       off: vi.fn(),
       emit: vi.fn(),
       disconnect: vi.fn(),
+      removeAllListeners: vi.fn(),
       id: 'mock-socket-id',
     };
 
@@ -658,6 +659,82 @@ describe('ProxyClient Security', () => {
       expect((client as any).activeConnections.get('fl-7').handshakeComplete).toBe(true);
     });
   });
+  describe('Dashboard status and editor latency', () => {
+    async function connectEditor(connectionId: string, deviceId: string) {
+      await triggerEvent('client_connecting', { connectionId });
+      await triggerEvent('client_message', { connectionId, data: createAuthMessage(TEST_SECRET, TEST_CLIENT_ID, deviceId) });
+      await triggerEvent('client_message', { connectionId, data: { type: 'protocol_selected', version: 1 } });
+    }
+
+    function rpcWithLatency(latency: unknown) {
+      return { ...createSignedRPCMessage(TEST_SECRET, 'fs.stat', { path: '/' }), latency };
+    }
+
+    beforeEach(() => {
+      mockRPCRouter.route.mockResolvedValue({});
+    });
+
+    it('shows the round trip the editor reports on its requests', async () => {
+      const client = await setupClient();
+      const onChange = vi.fn();
+      client.onStatusChange(onChange);
+      await connectEditor('conn-1', 'device-aaaaaaaa');
+
+      expect(client.getStatus().clients).toEqual([
+        expect.objectContaining({ connectionId: 'conn-1', deviceId: 'device-aaaaaaaa', transport: 'relay', ready: true, pingMs: null }),
+      ]);
+
+      onChange.mockClear();
+      await triggerEvent('client_message', { connectionId: 'conn-1', data: rpcWithLatency(42) });
+
+      expect(client.getStatus().clients[0].pingMs).toBe(42);
+      expect(onChange).toHaveBeenCalled();
+    });
+
+    it('keeps the last value when an editor sends none or junk', async () => {
+      const client = await setupClient();
+      await connectEditor('conn-1', 'device-aaaaaaaa');
+      await triggerEvent('client_message', { connectionId: 'conn-1', data: rpcWithLatency(30) });
+
+      await triggerEvent('client_message', { connectionId: 'conn-1', data: createSignedRPCMessage(TEST_SECRET, 'fs.stat', {}) });
+      await triggerEvent('client_message', { connectionId: 'conn-1', data: rpcWithLatency('fast') });
+      await triggerEvent('client_message', { connectionId: 'conn-1', data: rpcWithLatency(-5) });
+
+      expect(client.getStatus().clients[0].pingMs).toBe(30);
+    });
+
+    it('ignores latency on requests that fail HMAC verification', async () => {
+      const client = await setupClient();
+      await connectEditor('conn-1', 'device-aaaaaaaa');
+      mockRequireValidHMAC.mockImplementationOnce(() => { throw new Error('bad hmac'); });
+
+      await triggerEvent('client_message', { connectionId: 'conn-1', data: rpcWithLatency(5) });
+
+      expect(client.getStatus().clients[0].pingMs).toBeNull();
+    });
+
+    it('forgets disconnected editors', async () => {
+      const client = await setupClient();
+      await connectEditor('conn-1', 'device-aaaaaaaa');
+
+      await triggerEvent('client_disconnected', { connectionId: 'conn-1' });
+
+      expect(client.getStatus().clients).toEqual([]);
+    });
+
+    it('refuses Fast Lane offers once Fast Lane is turned off in the running config', async () => {
+      const options = { ...defaultOptions, config: { ...defaultOptions.config, fastLane: { enabled: true } } };
+      const client = await setupClient(options as any);
+      (client as any).fastLaneSupported = true;
+      options.config.fastLane.enabled = false;
+
+      await triggerEvent('client_fast_lane', { connectionId: 'conn-1' });
+
+      expect(mockSocket.emit).toHaveBeenCalledWith('signal', { connectionId: 'conn-1', data: { type: 'abort', reason: 'unsupported' } });
+      client.forceCleanup();
+    });
+  });
+
   describe('Token refresh during reconnect', () => {
     it('does not exit when the relay drops the socket while a token refresh is in flight', async () => {
       const client = await setupClient();

@@ -75,6 +75,28 @@ interface ActiveConnection {
   deviceId?: string;
   // Transport the auth handshake completed on; the connection is pinned to it.
   transport?: 'relay' | 'fastlane';
+  // Round trip the editor last reported on an RPC request (optional field)
+  pingMs?: number;
+}
+
+export type FastLaneState = 'checking' | 'available' | 'unsupported' | 'disabled';
+
+export interface ClientStatus {
+  connectionId: string;
+  deviceId?: string;
+  transport: 'relay' | 'fastlane';
+  connectedAt: number;
+  ready: boolean;
+  /** Round trip last reported by the editor, or null if it hasn't sent one */
+  pingMs: number | null;
+}
+
+export interface ProxyStatus {
+  relayUrl: string;
+  relayConnected: boolean;
+  clientId?: string;
+  fastLane: FastLaneState;
+  clients: ClientStatus[];
 }
 
 export class ProxyClient {
@@ -111,7 +133,10 @@ export class ProxyClient {
   // can never strand responses on a half-open DataChannel.
   private fastLane: FastLaneManager;
   private fastLaneSupported = false;
+  private fastLaneState: FastLaneState = 'checking';
   private connectionTransport: Map<string, 'relay' | 'fastlane'> = new Map();
+
+  private statusListeners: Set<() => void> = new Set();
 
   constructor(private options: ProxyClientOptions) {
     this.config = options.config;
@@ -125,6 +150,7 @@ export class ProxyClient {
       },
       onOpen: (connectionId: string) => {
         logConnection('fast_lane_open', this.activeConnections.get(connectionId)?.deviceId, { connectionId });
+        this.notifyStatus();
       },
       onMessage: (connectionId: string, event: string, data: any) => {
         if (event !== 'rpc') return;
@@ -141,6 +167,7 @@ export class ProxyClient {
         if (wasOpen) {
           logConnection('fast_lane_closed', this.activeConnections.get(connectionId)?.deviceId, { connectionId, reason });
         }
+        this.notifyStatus();
       },
     });
 
@@ -175,6 +202,8 @@ export class ProxyClient {
       const probe = fastLaneEnabled ? FastLaneManager.isSupported() : Promise.resolve(false);
       probe.then((supported) => {
         this.fastLaneSupported = supported;
+        this.fastLaneState = supported ? 'available' : fastLaneEnabled ? 'unsupported' : 'disabled';
+        this.notifyStatus();
         if (!fastLaneAnnounced) {
           fastLaneAnnounced = true;
           console.log(`   ${t(supported
@@ -285,7 +314,10 @@ export class ProxyClient {
     // Fast Lane signaling. The relay only sends these after verifying the
     // account's subscription, and only for connections it is routing to us.
     this.socket.on('client_fast_lane', (msg: { connectionId: string; iceServers?: unknown }) => {
-      if (!this.fastLaneSupported || !msg?.connectionId) {
+      // The config flag is re-read so turning Fast Lane off from the
+      // dashboard refuses new offers without waiting for a restart.
+      const enabled = this.config.fastLane?.enabled ?? true;
+      if (!this.fastLaneSupported || !enabled || !msg?.connectionId) {
         if (msg?.connectionId) {
           this.socket?.emit('signal', { connectionId: msg.connectionId, data: { type: 'abort', reason: 'unsupported' } });
         }
@@ -310,6 +342,7 @@ export class ProxyClient {
     // since we disable its reconnection (`reconnection: false`) they never
     // fire; we call the same handlers from our custom scheduler instead.
     this.socket.on('disconnect', this.handleDisconnect.bind(this));
+    this.socket.on('connect', () => this.notifyStatus());
     // Persistent connect_error handler covers reconnect-attempt failures.
     // Pre-auth failures are still owned by waitForAuthentication's
     // socket.once('connect_error', ...) listener — both fire, ours no-ops
@@ -425,22 +458,84 @@ export class ProxyClient {
     if (isNewSession || this.connectionSettings.clientId !== existingSettings?.clientId) {
       this.displayQRCode();
     }
+    this.notifyStatus();
+  }
+
+  /**
+   * spck:// URL the editor scans to pair with this CLI, or null before auth
+   */
+  getConnectUrl(): string | null {
+    if (!this.connectionSettings) return null;
+    const { clientId, secret } = this.connectionSettings;
+    let url = `spck://connect?clientId=${clientId}&secret=${secret}&rs=${encodeURIComponent(this.options.proxyServerUrl)}`;
+    if (this.config.name) {
+      url += `&name=${encodeURIComponent(this.config.name)}`;
+    }
+    return url;
+  }
+
+  getConnectionSettings(): ConnectionSettings | null {
+    return this.connectionSettings;
+  }
+
+  /**
+   * Snapshot of relay + editor connection state for the dashboard
+   */
+  getStatus(): ProxyStatus {
+    const clients: ClientStatus[] = [];
+    for (const [connectionId, connection] of this.activeConnections) {
+      if (!connection.authenticated) continue;
+      clients.push({
+        connectionId,
+        deviceId: connection.deviceId,
+        transport: this.connectionTransport.get(connectionId) ?? connection.transport ?? 'relay',
+        connectedAt: connection.connectedAt,
+        ready: !!connection.handshakeComplete,
+        pingMs: connection.pingMs ?? null,
+      });
+    }
+    return {
+      relayUrl: this.options.proxyServerUrl,
+      relayConnected: !!this.socket?.connected,
+      clientId: this.connectionSettings?.clientId,
+      fastLane: this.fastLaneState,
+      clients,
+    };
+  }
+
+  /**
+   * Subscribe to status changes. Returns an unsubscribe function.
+   */
+  onStatusChange(listener: () => void): () => void {
+    this.statusListeners.add(listener);
+    return () => this.statusListeners.delete(listener);
+  }
+
+  /**
+   * Editors attach their measured round trip to RPC requests as an optional,
+   * unsigned `latency` field; read only after the request's HMAC checked out.
+   */
+  private recordEditorLatency(connection: ActiveConnection, latency: unknown): void {
+    if (typeof latency !== 'number' || !Number.isFinite(latency) || latency < 0) return;
+    const pingMs = Math.round(latency);
+    if (connection.pingMs === pingMs) return;
+    connection.pingMs = pingMs;
+    this.notifyStatus();
+  }
+
+  private notifyStatus(): void {
+    for (const listener of this.statusListeners) {
+      try { listener(); } catch { /* a broken listener must not break the relay */ }
+    }
   }
 
   /**
    * Display QR code for client connection
    */
   private displayQRCode(): void {
-    if (!this.connectionSettings) return;
-
+    const url = this.getConnectUrl();
+    if (!url || !this.connectionSettings) return;
     const { clientId, secret } = this.connectionSettings;
-
-    // Build connection URL with relay server and optional server name
-    const relayServer = this.options.proxyServerUrl;
-    let url = `spck://connect?clientId=${clientId}&secret=${secret}&rs=${encodeURIComponent(relayServer)}`;
-    if (this.config.name) {
-      url += `&name=${encodeURIComponent(this.config.name)}`;
-    }
 
     console.log('\n' + '='.repeat(60));
     console.log(t('connection.scanQR'));
@@ -661,6 +756,7 @@ export class ProxyClient {
         deviceId,
         transport,
       });
+      this.notifyStatus();
 
       // Send success response. On Fast Lane, prove we hold the secret too and
       // saw the same DTLS fingerprints, so the editor can detect an impostor.
@@ -831,6 +927,7 @@ export class ProxyClient {
       connectionId,
       protocolVersion: version
     });
+    this.notifyStatus();
   }
 
   /**
@@ -873,6 +970,7 @@ export class ProxyClient {
         );
       }
       requireValidHMAC(message as JSONRPCRequest, this.connectionSettings.secret);
+      this.recordEditorLatency(connection, message.latency);
 
       // Route to appropriate service with socket wrapper
       const result = await RPCRouter.route(message as JSONRPCRequest, connection.socketWrapper as any);
@@ -1041,6 +1139,7 @@ export class ProxyClient {
     this.fastLane.close(data.connectionId, 'client_disconnected', false);
     this.connectionTransport.delete(data.connectionId);
     this.activeConnections.delete(data.connectionId);
+    this.notifyStatus();
   }
 
   /**
@@ -1191,6 +1290,7 @@ export class ProxyClient {
 
     console.warn(`\n⚠️  ${t('connection.disconnectedFromProxy', { reason })}`);
     this.closeAllFastLanes();
+    this.notifyStatus();
 
     // The relay rejects a reconnect carrying an expired Firebase token with
     // `expired_firebase_token` and then drops the socket. handleError is

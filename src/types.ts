@@ -104,6 +104,8 @@ export interface JSONRPCRequest {
   timestamp?: number;
   hmac: string;
   nonce: string;
+  // Editor's measured round trip in ms (optional, not covered by the HMAC)
+  latency?: number;
 }
 
 export interface JSONRPCResponse {

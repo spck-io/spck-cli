@@ -28,8 +28,12 @@ import { ProxyClient } from './proxy/ProxyClient.js';
 import { RPCRouter } from './rpc/router.js';
 import { ServerConfig, FirebaseCredentials, StoredCredentials } from './types.js';
 import { t, detectLocale, setLocale } from './i18n/index.js';
+import { Dashboard } from './dashboard/Dashboard.js';
+import { LogBuffer } from './dashboard/LogBuffer.js';
+import { WakeLock } from './dashboard/WakeLock.js';
 
 let proxyClient: ProxyClient | null = null;
+let dashboard: Dashboard | null = null;
 
 /**
  * Start the proxy client
@@ -41,8 +45,15 @@ export async function startProxyClient(
     disableRipgrep?: boolean;
     disableLanguageServer?: boolean;
     serverOverride?: string;
+    dashboard?: boolean;
   }
 ): Promise<void> {
+  // The dashboard needs an interactive terminal; piped / service runs keep
+  // plain log output. Capture starts now so the log view has startup history.
+  const useDashboard = (options?.dashboard ?? true) && !!process.stdout.isTTY && !!process.stdin.isTTY;
+  const logBuffer = useDashboard ? new LogBuffer() : null;
+  logBuffer?.install();
+
   console.log('\n' + '='.repeat(60));
   console.log('     ' + t('app.title'));
   console.log('='.repeat(60) + '\n');
@@ -262,8 +273,20 @@ export async function startProxyClient(
       }
     }
 
-    if (!connected) {
+    if (!connected || !proxyClient) {
       throw lastError ?? new Error(t('server.allRelaysFailed'));
+    }
+
+    if (logBuffer) {
+      dashboard = new Dashboard({
+        proxy: proxyClient,
+        config,
+        configPath,
+        logs: logBuffer,
+        wakeLock: new WakeLock(),
+        onQuit: () => shutdown('SIGINT'),
+      });
+      dashboard.start();
     }
 
   } catch (error: any) {
@@ -449,26 +472,34 @@ export async function showAccountInfo(): Promise<void> {
 }
 
 /**
+ * Graceful shutdown: leave the dashboard, disconnect, exit
+ */
+async function shutdown(signal: string): Promise<void> {
+  dashboard?.stop();
+  console.log(`\n\n${t('setup.received', { signal })}`);
+
+  // Abort any pending authentication (cancels in-flight fetch + closes callback server)
+  abortCurrentAuth();
+
+  if (proxyClient) {
+    try {
+      await proxyClient.disconnect();
+    } catch (error: any) {
+      console.error(t('errors.shutdownError', { message: error.message }));
+    }
+  }
+
+  console.log(t('app.goodbye') + ' 👋\n');
+  process.exit(0);
+}
+
+/**
  * Setup graceful shutdown
  */
 function setupGracefulShutdown(): void {
-  const shutdown = async (signal: string) => {
-    console.log(`\n\n${t('setup.received', { signal })}`);
-
-    // Abort any pending authentication (cancels in-flight fetch + closes callback server)
-    abortCurrentAuth();
-
-    if (proxyClient) {
-      try {
-        await proxyClient.disconnect();
-      } catch (error: any) {
-        console.error(t('errors.shutdownError', { message: error.message }));
-      }
-    }
-
-    console.log(t('app.goodbye') + ' 👋\n');
-    process.exit(0);
-  };
+  // Any other exit (relay terminated us, fatal error) happens while the
+  // dashboard owns the screen — restore it and show what led to the exit.
+  process.on('exit', () => dashboard?.stop({ printTail: true }));
 
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -553,6 +584,11 @@ export async function main(): Promise<void> {
       hidden: true,
       default: false,
     })
+    .option('dashboard', {
+      type: 'boolean',
+      description: 'Show the interactive status dashboard (TTY only). Use --no-dashboard for plain log output.',
+      default: true,
+    })
     .option('language-server', {
       type: 'boolean',
       description: 'Enable the remote language server (TypeScript / Python). Use --no-language-server to disable.',
@@ -602,6 +638,7 @@ export async function main(): Promise<void> {
       disableRipgrep: argv.__internal_disable_ripgrep as boolean | undefined,
       disableLanguageServer: argv['language-server'] === false ? true : undefined,
       serverOverride: argv.server as string | undefined,
+      dashboard: argv.dashboard as boolean,
     });
   }
 }

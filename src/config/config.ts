@@ -11,6 +11,28 @@ import { t } from '../i18n/index.js';
 const DEFAULT_CONFIG_FILENAME = 'spck-cli.config.json';
 
 /**
+ * A custom config path is resolved against cwd; otherwise the default
+ * location in the project directory is used.
+ */
+function resolveConfigPath(configPath?: string): string {
+  return configPath
+    ? path.resolve(process.cwd(), configPath)
+    : getProjectFilePath(process.cwd(), DEFAULT_CONFIG_FILENAME);
+}
+
+/**
+ * Apply a change to the config file as stored on disk. Used for settings
+ * changed at runtime, so in-memory overrides from CLI flags are never
+ * written back.
+ */
+export function updateConfigFile(mutate: (config: ServerConfig) => void, configPath?: string): void {
+  const fullPath = resolveConfigPath(configPath);
+  const config: ServerConfig = JSON.parse(fs.readFileSync(fullPath, 'utf8'));
+  mutate(config);
+  saveConfig(config, configPath);
+}
+
+/**
  * Load server configuration from file
  * If config file doesn't exist, runs setup wizard
  * @throws {ConfigNotFoundError} if file doesn't exist
@@ -19,9 +41,7 @@ const DEFAULT_CONFIG_FILENAME = 'spck-cli.config.json';
 export function loadConfig(configPath?: string): ServerConfig {
   // If a custom config path is provided, use it as-is
   // Otherwise use the default location in the project directory
-  const fullPath = configPath
-    ? path.resolve(process.cwd(), configPath)
-    : getProjectFilePath(process.cwd(), DEFAULT_CONFIG_FILENAME);
+  const fullPath = resolveConfigPath(configPath);
 
   if (!fs.existsSync(fullPath)) {
     console.log('\n' + t('config.fileNotFound', { path: fullPath }));
@@ -96,11 +116,7 @@ export class ConfigNotFoundError extends Error {
  * @throws {Error} with code 'ENOSPC' for disk full errors
  */
 export function saveConfig(config: ServerConfig, configPath?: string): void {
-  // If a custom config path is provided, use it as-is
-  // Otherwise use the default location in the project directory
-  const fullPath = configPath
-    ? path.resolve(process.cwd(), configPath)
-    : getProjectFilePath(process.cwd(), DEFAULT_CONFIG_FILENAME);
+  const fullPath = resolveConfigPath(configPath);
 
   try {
     // Ensure directory exists

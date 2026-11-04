@@ -65,6 +65,33 @@ export class RPCRouter {
   }
 
   /**
+   * Toggle a feature at runtime (from the dashboard). Takes effect for the
+   * next RPC; editors only re-read the advertised feature list when they
+   * reconnect, so their UI may lag until then.
+   */
+  static setFeatureEnabled(feature: 'terminal' | 'browserProxy' | 'acp', enabled: boolean): void {
+    switch (feature) {
+      case 'terminal':
+        this.terminalEnabled = enabled;
+        break;
+      case 'browserProxy':
+        this.browserProxyEnabled = enabled;
+        break;
+      case 'acp':
+        this.acpEnabled = enabled;
+        if (enabled && !this.acpService) {
+          this.acpService = new AcpService({ rootPath: this.rootPath });
+          if (this.broadcastCallback) this.acpService.setBroadcast(this.broadcastCallback);
+        } else if (!enabled && this.acpService) {
+          // Agents have indirect shell access — turning ACP off stops them now.
+          this.acpService.cleanup().catch(() => null);
+          this.acpService = undefined;
+        }
+        break;
+    }
+  }
+
+  /**
    * Register a callback that broadcasts JSON-RPC notifications to all connected clients.
    * Called by ProxyClient once it is ready to accept connections.
    */
