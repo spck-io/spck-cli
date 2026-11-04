@@ -722,6 +722,16 @@ describe('ProxyClient Security', () => {
       expect(client.getStatus().clients).toEqual([]);
     });
 
+    it('forgets editors when the relay connection drops, since the relay drops them too', async () => {
+      const client = await setupClient();
+      await connectEditor('conn-1', 'device-aaaaaaaa');
+
+      await triggerEvent('disconnect', 'transport close');
+
+      expect(client.getStatus().clients).toEqual([]);
+      client.forceCleanup();
+    });
+
     it('refuses Fast Lane offers once Fast Lane is turned off in the running config', async () => {
       const options = { ...defaultOptions, config: { ...defaultOptions.config, fastLane: { enabled: true } } };
       const client = await setupClient(options as any);

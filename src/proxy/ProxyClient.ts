@@ -49,7 +49,16 @@ function formatTimeUntilReset(resetTime?: number): string {
 }
 
 const KILL_TIMEOUT = 5000; // 5 seconds
-const SECRET_LENGTH = 33;
+const SECRET_LENGTH = 44; // ~262 bits of entropy
+const ALPHANUMERIC = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+
+// Alphanumeric only, so the secret survives double-click selection and copy/paste.
+// crypto.randomInt is uniform, so no modulo bias.
+function generateSecret(length: number): string {
+  let out = '';
+  for (let i = 0; i < length; i++) out += ALPHANUMERIC[crypto.randomInt(ALPHANUMERIC.length)];
+  return out;
+}
 // No default URL - proxyServerUrl must always be provided via options
 // (auto-selected by ping or overridden via --server flag)
 
@@ -268,15 +277,12 @@ export class ProxyClient {
       // persistent connect_error handler keep scheduling against the new
       // pre-auth socket. Reset everything so connect() starts clean.
       this.resetReconnectState();
-      this.closeAllFastLanes();
+      this.resetEditorSessions();
       if (this.socket) {
         this.socket.removeAllListeners();
         this.socket.disconnect();
         this.socket = null;
       }
-
-      // Preserve connection settings for secret reuse, clear active connections
-      this.activeConnections.clear();
 
       // Reconnect with new token
       logAuth('reconnect_with_new_token', { userId: this.userId });
@@ -428,7 +434,7 @@ export class ProxyClient {
       console.log(`   ${t('connection.reusingSecret')}`);
     } else {
       // New clientId or no existing settings - generate new secret
-      secret = crypto.randomBytes(SECRET_LENGTH).toString('base64url');
+      secret = generateSecret(SECRET_LENGTH);
       console.log(`   ${t('connection.generatedSecret')}`);
     }
 
@@ -1143,12 +1149,15 @@ export class ProxyClient {
   }
 
   /**
-   * Close every Fast Lane session. Peer sessions never outlive the relay
-   * control socket: the relay is what enforces account limits.
+   * Forget every editor session. Sessions never outlive the relay control
+   * socket: the relay drops its editors when our socket goes (its
+   * client_disconnected events can't reach a dead socket), and Fast Lane peers
+   * must not outlive it since the relay is what enforces account limits.
    */
-  private closeAllFastLanes(): void {
+  private resetEditorSessions(): void {
     this.fastLane.closeAll();
     this.connectionTransport.clear();
+    this.activeConnections.clear();
   }
 
   /**
@@ -1289,7 +1298,7 @@ export class ProxyClient {
     }
 
     console.warn(`\n⚠️  ${t('connection.disconnectedFromProxy', { reason })}`);
-    this.closeAllFastLanes();
+    this.resetEditorSessions();
     this.notifyStatus();
 
     // The relay rejects a reconnect carrying an expired Firebase token with
@@ -1410,12 +1419,11 @@ export class ProxyClient {
    */
   forceCleanup(): void {
     this.resetReconnectState();
-    this.closeAllFastLanes();
+    this.resetEditorSessions();
     if (!this.socket) return;
     this.socket.removeAllListeners();
     this.socket.disconnect();
     this.socket = null;
-    this.activeConnections.clear();
   }
 
   /**
@@ -1423,7 +1431,7 @@ export class ProxyClient {
    */
   async disconnect(): Promise<void> {
     this.resetReconnectState();
-    this.closeAllFastLanes();
+    this.resetEditorSessions();
     if (!this.socket) return;
 
     RPCRouter.cleanup();
