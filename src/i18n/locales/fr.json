@@ -109,7 +109,7 @@
     "disconnectedFromProxy": "Déconnecté du proxy : {{reason}}",
     "serverTerminated": "Le serveur a terminé la connexion. Fermeture...",
     "attemptingReconnect": "Tentative de reconnexion...",
-    "reconnectAttempt": "Tentative de reconnexion {{attempt}}/5...",
+    "reconnectAttempt": "Tentative de reconnexion {{attempt}}/{{max}}...",
     "reconnected": "Reconnecté après {{attempts}} tentatives",
     "reconnectFailed": "Échec de la reconnexion après 5 tentatives.",
     "exiting": "Fermeture...",

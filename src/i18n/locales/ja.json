@@ -109,7 +109,7 @@
     "disconnectedFromProxy": "プロキシから切断されました: {{reason}}",
     "serverTerminated": "サーバーが接続を終了しました。終了しています...",
     "attemptingReconnect": "再接続を試みています...",
-    "reconnectAttempt": "再接続試行 {{attempt}}/5...",
+    "reconnectAttempt": "再接続試行 {{attempt}}/{{max}}...",
     "reconnected": "{{attempts}} 回の試行後に再接続しました",
     "reconnectFailed": "5回の試行後に再接続に失敗しました。",
     "exiting": "終了しています...",

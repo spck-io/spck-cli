@@ -109,7 +109,7 @@
     "disconnectedFromProxy": "已从代理断开: {{reason}}",
     "serverTerminated": "服务器已终止连接。正在退出...",
     "attemptingReconnect": "正在尝试重新连接...",
-    "reconnectAttempt": "重新连接尝试 {{attempt}}/5...",
+    "reconnectAttempt": "重新连接尝试 {{attempt}}/{{max}}...",
     "reconnected": "在 {{attempts}} 次尝试后重新连接成功",
     "reconnectFailed": "5次尝试后重新连接失败。",
     "exiting": "正在退出...",

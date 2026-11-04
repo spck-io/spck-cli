@@ -658,4 +658,32 @@ describe('ProxyClient Security', () => {
       expect((client as any).activeConnections.get('fl-7').handshakeComplete).toBe(true);
     });
   });
+  describe('Token refresh during reconnect', () => {
+    it('does not exit when the relay drops the socket while a token refresh is in flight', async () => {
+      const client = await setupClient();
+      const exit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as any);
+      // Keep the refresh pending, as it is while refreshFirebaseToken hits the network
+      vi.spyOn(client as any, 'refreshTokenAndReconnect').mockReturnValue(new Promise(() => {}));
+      try {
+        // Relay order: error first, then disconnect(true)
+        await triggerEvent('error', { code: 'expired_firebase_token', message: 'Firebase token has expired' });
+        await triggerEvent('disconnect', 'io server disconnect');
+        expect((client as any).tokenRefreshState).toBe('refreshing');
+        expect(exit).not.toHaveBeenCalled();
+      } finally {
+        exit.mockRestore();
+      }
+    });
+
+    it('still exits on a server disconnect when no refresh is running', async () => {
+      await setupClient();
+      const exit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as any);
+      try {
+        await triggerEvent('disconnect', 'io server disconnect');
+        expect(exit).toHaveBeenCalledWith(1);
+      } finally {
+        exit.mockRestore();
+      }
+    });
+  });
 });

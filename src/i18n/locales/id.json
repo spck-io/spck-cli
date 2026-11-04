@@ -109,7 +109,7 @@
     "disconnectedFromProxy": "Terputus dari proxy: {{reason}}",
     "serverTerminated": "Server memutuskan koneksi. Keluar...",
     "attemptingReconnect": "Mencoba menghubungkan ulang...",
-    "reconnectAttempt": "Percobaan koneksi ulang {{attempt}}/5...",
+    "reconnectAttempt": "Percobaan koneksi ulang {{attempt}}/{{max}}...",
     "reconnected": "Terhubung kembali setelah {{attempts}} percobaan",
     "reconnectFailed": "Gagal menghubungkan ulang setelah 5 percobaan.",
     "exiting": "Keluar...",

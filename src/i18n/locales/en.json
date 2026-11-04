@@ -115,7 +115,7 @@
     "disconnectedFromProxy": "Disconnected from proxy: {{reason}}",
     "serverTerminated": "Server terminated connection. Exiting...",
     "attemptingReconnect": "Attempting to reconnect...",
-    "reconnectAttempt": "Reconnection attempt {{attempt}}/5...",
+    "reconnectAttempt": "Reconnection attempt {{attempt}}/{{max}}...",
     "reconnected": "Reconnected after {{attempts}} attempts",
     "reconnectFailed": "Failed to reconnect after 5 attempts.",
     "exiting": "Exiting...",

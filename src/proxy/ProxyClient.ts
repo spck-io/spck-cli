@@ -1187,6 +1187,12 @@ export class ProxyClient {
     console.warn(`\n⚠️  ${t('connection.disconnectedFromProxy', { reason })}`);
     this.closeAllFastLanes();
 
+    // The relay rejects a reconnect carrying an expired Firebase token with
+    // `expired_firebase_token` and then drops the socket. handleError is
+    // already refreshing and will open a fresh socket; exiting here would
+    // kill the process mid-refresh (e.g. after the machine slept > 1h).
+    if (this.tokenRefreshState === 'refreshing') return;
+
     if (reason === 'io server disconnect') {
       // Server forcefully disconnected us
       console.error(`${t('connection.serverTerminated')}\n`);
@@ -1273,7 +1279,7 @@ export class ProxyClient {
    * Handle reconnection attempt
    */
   private handleReconnectAttempt(attemptNumber: number): void {
-    console.log(`🔄 ${t('connection.reconnectAttempt', { attempt: attemptNumber })}`);
+    console.log(`🔄 ${t('connection.reconnectAttempt', { attempt: attemptNumber, max: ProxyClient.MAX_RECONNECT_ATTEMPTS })}`);
   }
 
   /**
