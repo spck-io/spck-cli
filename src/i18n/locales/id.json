@@ -330,7 +330,7 @@
     "keyTerminals": "Terminal",
     "fastLane": "Fast Lane",
     "fastLaneActive": "Aktif — koneksi WebRTC langsung ke editor",
-    "fastLaneAvailable": "Tersedia untuk akun Supporter dan Gold: koneksi WebRTC langsung antara Spck Editor dan CLI ini yang mengurangi latensi setidaknya 50%.",
+    "fastLaneAvailable": "Tersedia untuk akun Supporter dan Gold: koneksi WebRTC langsung antara Spck Editor dan CLI ini yang rata-rata 2x lebih cepat daripada relay.",
     "fastLaneUnsupported": "Tidak tersedia — dukungan WebRTC tidak dapat dimuat di platform ini, sehingga editor terhubung melalui relay.",
     "fastLaneOff": "Dinonaktifkan untuk proyek ini — tekan [f] untuk mengaktifkannya.",
     "fastLaneChecking": "Memeriksa dukungan WebRTC…",

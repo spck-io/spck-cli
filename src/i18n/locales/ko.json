@@ -330,7 +330,7 @@
     "keyTerminals": "터미널",
     "fastLane": "Fast Lane",
     "fastLaneActive": "활성 — 에디터와 WebRTC로 직접 연결됨",
-    "fastLaneAvailable": "Supporter 및 Gold 계정에서 사용 가능: Spck Editor와 이 CLI를 WebRTC로 직접 연결하여 지연 시간을 50% 이상 줄입니다.",
+    "fastLaneAvailable": "Supporter 및 Gold 계정에서 사용 가능: Spck Editor와 이 CLI를 WebRTC로 직접 연결하여 릴레이보다 평균 2배 빠릅니다.",
     "fastLaneUnsupported": "사용 불가 — 이 플랫폼에서 WebRTC 지원을 불러올 수 없어 에디터가 릴레이를 통해 연결됩니다.",
     "fastLaneOff": "이 프로젝트에서 꺼져 있습니다 — [f]를 눌러 켜세요.",
     "fastLaneChecking": "WebRTC 지원 확인 중…",

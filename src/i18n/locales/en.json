@@ -140,7 +140,7 @@
     "unhandledError": "Unhandled error in handleError:",
     "freeTierNotice": "Free account: {{used}} / {{limit}} min used today ({{remaining}} min remaining)",
     "freeTierUpgrade": "Upgrade for unlimited CLI access.",
-    "fastLaneAvailable": "Fast Lane: available for Supporter and Gold accounts. A direct connection between Spck Editor and this CLI using WebRTC technology, reducing latency by 75% on average.",
+    "fastLaneAvailable": "Fast Lane: available for Supporter and Gold accounts. A direct connection between Spck Editor and this CLI using WebRTC technology, 2x faster than the relay on average.",
     "fastLaneUnavailable": "Relay: Fast Lane (direct WebRTC) is unavailable on this platform",
     "fastLaneDisabled": "Relay: Fast Lane is disabled in project config"
   },
@@ -353,7 +353,7 @@
     "keyTerminals": "Terminals",
     "fastLane": "Fast Lane",
     "fastLaneActive": "Active — direct WebRTC connection to the editor",
-    "fastLaneAvailable": "Available for Supporter and Gold accounts: a direct WebRTC connection between Spck Editor and this CLI that reduces latency by 75% on average.",
+    "fastLaneAvailable": "Available for Supporter and Gold accounts: a direct WebRTC connection between Spck Editor and this CLI that is 2x faster than the relay on average.",
     "fastLaneUnsupported": "Unavailable — WebRTC support could not be loaded on this platform, so editors connect through the relay.",
     "fastLaneOff": "Turned off for this project — press [f] to turn it on.",
     "fastLaneChecking": "Checking WebRTC support…",

@@ -330,7 +330,7 @@
     "keyTerminals": "终端",
     "fastLane": "Fast Lane",
     "fastLaneActive": "已启用 — 与编辑器直接通过 WebRTC 连接",
-    "fastLaneAvailable": "适用于 Supporter 和 Gold 账户：通过 WebRTC 在 Spck Editor 与此 CLI 之间建立直接连接，延迟至少降低 50%。",
+    "fastLaneAvailable": "适用于 Supporter 和 Gold 账户：通过 WebRTC 在 Spck Editor 与此 CLI 之间建立直接连接，平均速度是中继的 2 倍。",
     "fastLaneUnsupported": "不可用 — 无法在此平台上加载 WebRTC 支持，因此编辑器将通过中继连接。",
     "fastLaneOff": "此项目已关闭 — 按 [f] 开启。",
     "fastLaneChecking": "正在检查 WebRTC 支持…",
