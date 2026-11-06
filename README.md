@@ -176,10 +176,27 @@ spck --version
 spck --config /path/to/config.json
 spck -c /path/to/config.json
 
-# Override root directory
+# Override root directory for this run (the config file is not changed)
 spck --root /path/to/project
 spck -r /path/to/project
+
+# Print plain logs instead of showing the dashboard
+spck --no-dashboard
 ```
+
+### Dashboard
+
+In an interactive terminal, the CLI shows a full-screen dashboard once it connects. When its output is piped or run as a service, it prints plain logs instead.
+
+| View | Keys |
+|------|------|
+| Main | `l` logs, `c` connection QR code, `m` manage terminals, `q` `q` quit |
+| Settings (main view) | `t` terminal, `b` browser proxy, `a` AI agents, `s` language server, `u` user verification, `f` Fast Lane, `w` keep computer awake |
+| Logs | `↑` `↓` / `j` `k` scroll, `PgUp` `PgDn` page, `←` `→` pan long lines, `g` `G` first / last line, `Esc` back |
+| Terminals | `↑` `↓` / `j` `k` select, `x` `x` kill (or remove an exited terminal), `Esc` back |
+| QR code | `c` / `Esc` back |
+
+`Ctrl+L` redraws the screen and `Ctrl+C` quits from any view. Pressing `Ctrl+C` again while the CLI is disconnecting exits immediately.
 
 ## Configuration
 

@@ -16,7 +16,7 @@ import { t } from '../i18n/index.js';
 import { LogBuffer, LogEntry } from './LogBuffer.js';
 import { WakeLock } from './WakeLock.js';
 import { SETTINGS, SettingDef, toggleSetting } from './settings.js';
-import { fit, formatBytes, formatDuration, stripAnsi, truncate, visibleWidth, wrap } from './screen.js';
+import { ESCAPE_TIMEOUT_MS, fit, formatBytes, formatDuration, skipColumns, stripAnsi, truncate, visibleWidth, wrap } from './screen.js';
 import { RPCRouter } from '../rpc/router.js';
 import type { TerminalSummary } from '../services/TerminalService.js';
 
@@ -35,9 +35,15 @@ export interface DashboardOptions {
 
 const LABEL_WIDTH = 24;
 const QUIT_CONFIRM_MS = 3000;
+const QR_SIDE_GAP = 3;
+const QR_MIN_SIDE_WIDTH = 24;
 
-const ENTER_ALT_SCREEN = '\x1b[?1049h\x1b[?25l';
-const LEAVE_ALT_SCREEN = '\x1b[?25h\x1b[?1049l';
+// Alternate screen, hidden cursor, and no auto-wrap: a line that a terminal
+// measures wider than we do (emoji widths vary) is clipped instead of pushing
+// the whole frame down a row.
+const ENTER_ALT_SCREEN = '\x1b[?1049h\x1b[?25l\x1b[?7l';
+const LEAVE_ALT_SCREEN = '\x1b[?7h\x1b[?25h\x1b[?1049l';
+const CLEAR_SCREEN = '\x1b[2J';
 
 export class Dashboard {
   private view: View = 'main';
@@ -50,9 +56,11 @@ export class Dashboard {
   private readonly initialValues = new Map<string, boolean>();
   private readonly changedThisSession = new Set<string>();
   private logScroll = 0; // lines scrolled up from the bottom
+  private logPan = 0; // columns scrolled right, for reading long lines
+  private lastFrame: string | null = null;
   private quitArmedAt = 0;
   private flash: { text: string; at: number } | null = null;
-  private qrCache: { url: string; lines: string[] } | null = null;
+  private qrCache: { url: string; lines: string[]; width: number } | null = null;
   // Show the pairing QR until the first editor connects, since entering the
   // alternate screen hides the one printed during startup.
   private autoQr = false;
@@ -77,19 +85,19 @@ export class Dashboard {
     this.options.logs.setPassthrough(false);
     stdout.write(ENTER_ALT_SCREEN);
 
-    readline.emitKeypressEvents(stdin);
+    readline.emitKeypressEvents(stdin, { escapeCodeTimeout: ESCAPE_TIMEOUT_MS } as unknown as readline.Interface);
     stdin.setRawMode(true);
     stdin.resume();
     const onKey = (str: string | undefined, key: readline.Key) => this.handleKey(str, key);
     stdin.on('keypress', onKey);
-    const onResize = () => this.render();
+    const onResize = () => this.repaint();
     stdout.on('resize', onResize);
 
     this.unsubscribers.push(
       () => stdin.off('keypress', onKey),
       () => stdout.off('resize', onResize),
       this.options.proxy.onStatusChange(() => this.onStatusChange()),
-      this.options.logs.onAppend(() => this.onLogAppend()),
+      this.options.logs.onAppend((added) => this.onLogAppend(added)),
       this.options.wakeLock.onChange(() => this.scheduleRender()),
     );
 
@@ -138,6 +146,13 @@ export class Dashboard {
       this.options.onQuit();
       return;
     }
+    if (key?.ctrl && key.name === 'l') {
+      this.repaint();
+      return;
+    }
+    // Hotkeys are plain letters: Ctrl+U must not flip user verification. Esc
+    // is excluded because readline reports it with the meta flag set.
+    if ((key?.ctrl || key?.meta) && key.name !== 'escape') return;
     const name = key?.name ?? str;
 
     if (this.view === 'logs') {
@@ -201,6 +216,12 @@ export class Dashboard {
       case 'g':
         this.logScroll = key?.shift ? 0 : Infinity;
         break;
+      case 'left':
+        this.logPan = Math.max(0, this.logPan - this.logPanStep());
+        break;
+      case 'right':
+        this.logPan += this.logPanStep();
+        break;
     }
     this.clampLogScroll();
   }
@@ -220,9 +241,11 @@ export class Dashboard {
         this.handleQuitKey();
         break;
       case 'up':
+      case 'k':
         this.selectTerminal(terminals[Math.max(0, index - 1)]);
         break;
       case 'down':
+      case 'j':
         this.selectTerminal(terminals[Math.min(terminals.length - 1, index + 1)]);
         break;
       case 'x':
@@ -276,6 +299,7 @@ export class Dashboard {
     this.killArmed = null;
     this.autoQr = false;
     this.logScroll = 0;
+    this.logPan = 0;
   }
 
   private toggle(setting: SettingDef): void {
@@ -304,9 +328,9 @@ export class Dashboard {
     this.scheduleRender();
   }
 
-  private onLogAppend(): void {
+  private onLogAppend(added: number): void {
     // Keep the log view anchored where the user scrolled to.
-    if (this.view === 'logs' && this.logScroll > 0) this.logScroll++;
+    if (this.view === 'logs' && this.logScroll > 0) this.logScroll += added;
     this.scheduleRender();
   }
 
@@ -326,77 +350,102 @@ export class Dashboard {
 
     let lines: string[];
     if (this.view === 'logs') lines = this.renderLogs(width, height);
-    else if (this.view === 'qr') lines = this.renderQr(width);
-    else if (this.view === 'terminals') lines = this.renderTerminalsView(width);
-    else lines = this.renderMain(width);
+    else if (this.view === 'qr') lines = this.renderQr(width, height);
+    else if (this.view === 'terminals') lines = this.renderTerminalsView(width, height);
+    else lines = this.renderMain(width, height);
 
     const body = lines.slice(0, height - 1).map((line) => truncate(line, width));
     while (body.length < height - 1) body.push('');
     body.push(this.renderFooter(width));
-    process.stdout.write('\x1b[H' + body.map((line) => line + '\x1b[K').join('\r\n'));
+    const frame = body.map((line) => line + '\x1b[K').join('\r\n');
+    // The tick re-renders every second; don't redraw an unchanged screen (this
+    // matters over SSH, and when the uptime only changes once a minute).
+    if (frame === this.lastFrame) return;
+    this.lastFrame = frame;
+    process.stdout.write('\x1b[H' + frame);
+  }
+
+  /** Redraw from a blank screen, after a resize or when the user asks (Ctrl+L). */
+  private repaint(): void {
+    this.lastFrame = null;
+    if (this.active) process.stdout.write(CLEAR_SCREEN);
+    this.render();
   }
 
   // ------------------------------------------------------------ main view
 
-  private renderMain(width: number): string[] {
+  private renderMain(width: number, height: number): string[] {
     const status = this.options.proxy.getStatus();
-    const lines: string[] = [];
+    const available = height - 1; // the footer takes the last row
     const inner = Math.max(20, width - 4);
-
-    lines.push(this.renderHeader(width));
-    lines.push('');
 
     // Relay
     const relayState = status.relayConnected
       ? chalk.green('● ' + t('dashboard.relayConnected'))
       : chalk.yellow('● ' + t('dashboard.relayReconnecting'));
-    lines.push(this.row(t('dashboard.relay'), `${relayState}  ${chalk.gray(formatServerName(status.relayUrl))}`));
-    lines.push('');
+    const relay = [this.row(t('dashboard.relay'), `${relayState}  ${chalk.gray(formatServerName(status.relayUrl))}`)];
 
     // Clients
-    lines.push(chalk.bold(t('dashboard.clients')));
+    const clients = [chalk.bold(t('dashboard.clients'))];
     if (status.clients.length === 0) {
-      lines.push('  ' + chalk.gray(t('dashboard.noClients')));
+      clients.push('  ' + chalk.gray(t('dashboard.noClients')));
     } else {
       for (const client of status.clients) {
-        lines.push('  ' + this.renderClient(client, status.relayConnected));
+        clients.push('  ' + this.renderClient(client, status.relayConnected));
       }
-    }
-    lines.push('');
-
-    // Terminals
-    if (this.terminalsEnabled()) {
-      const terminals = this.terminalRows();
-      const manage = terminals.length > 0 ? chalk.gray('  ' + t('dashboard.terminalsManageHint')) : '';
-      lines.push(chalk.bold(t('dashboard.terminals')) + manage);
-      lines.push(...this.terminalLines(terminals, status, null));
-      lines.push('');
     }
 
     // Fast Lane
-    lines.push(chalk.bold(t('dashboard.fastLane')));
-    for (const line of this.fastLaneLines(status, inner)) lines.push('  ' + line);
-    lines.push('');
+    const fastLane = [chalk.bold(t('dashboard.fastLane'))];
+    for (const line of this.fastLaneLines(status, inner)) fastLane.push('  ' + line);
 
     // Settings
-    lines.push(chalk.bold(t('dashboard.settings')));
+    const settings = [chalk.bold(t('dashboard.settings'))];
     for (const setting of SETTINGS) {
       const enabled = setting.get(this.options.config);
-      lines.push('  ' + this.settingRow(setting.hotkey, t(setting.labelKey), enabled, this.settingHint(setting, enabled, status)));
+      settings.push('  ' + this.settingRow(setting.hotkey, t(setting.labelKey), enabled, this.settingHint(setting, enabled, status)));
     }
     const wake = this.options.wakeLock;
     const wakeHint = wake.state === 'unavailable'
       ? chalk.red(t('dashboard.wakeUnavailable', { reason: wake.error ?? '' }))
       : chalk.gray(t('dashboard.wakeHint'));
-    lines.push('  ' + this.settingRow('w', t('dashboard.settingKeepAwake'), wake.state === 'on', wakeHint));
+    settings.push('  ' + this.settingRow('w', t('dashboard.settingKeepAwake'), wake.state === 'on', wakeHint));
 
     // Latest warning / error, so problems are noticed without opening logs
-    const notice = this.options.logs.lastNotice();
-    if (notice) {
-      lines.push('');
-      lines.push(this.renderNotice(notice));
+    const latest = this.options.logs.lastNotice();
+    const notice = latest ? [this.renderNotice(latest)] : [];
+
+    // Terminals are the one section that can grow large
+    const terminals = this.terminalsEnabled() ? this.terminalRows() : null;
+    const terminalLines = terminals ? this.terminalLines(terminals, status, null) : [];
+    const terminalSection = terminals ? [
+      chalk.bold(t('dashboard.terminals')) + (terminals.length > 0 ? chalk.gray('  ' + t('dashboard.terminalsManageHint')) : ''),
+      ...terminalLines,
+    ] : null;
+
+    const sections = [
+      [this.renderHeader(width)],
+      relay,
+      clients,
+      ...(terminalSection ? [terminalSection] : []),
+      fastLane,
+      settings,
+    ];
+    const rows = sections.reduce((sum, section) => sum + section.length, notice.length);
+    // Give up the blank lines between sections before hiding any content
+    const compact = rows + sections.length - 1 + notice.length > available;
+
+    const overflow = rows - available;
+    if (terminalSection && overflow > 0 && terminalLines.length > 1) {
+      const shown = Math.max(0, terminalLines.length - overflow - 1);
+      const more = '  ' + chalk.gray(t('dashboard.moreTerminals', { count: terminalLines.length - shown }));
+      terminalSection.splice(1 + shown, terminalLines.length - shown, more);
     }
-    return lines;
+
+    const body = sections.flatMap((section, i) => (compact || i === 0 ? section : ['', ...section]));
+    // The latest problem stays visible even if something else has to be cut
+    if (compact) return [...body.slice(0, Math.max(0, available - notice.length)), ...notice];
+    return [...body, ...notice.flatMap((line) => ['', line])];
   }
 
   private renderHeader(width: number): string {
@@ -457,7 +506,7 @@ export class Dashboard {
     });
   }
 
-  private renderTerminalsView(width: number): string[] {
+  private renderTerminalsView(width: number, height: number): string[] {
     const status = this.options.proxy.getStatus();
     const terminals = this.terminalRows();
     const index = this.selectedTerminalIndex(terminals);
@@ -465,11 +514,20 @@ export class Dashboard {
     if (terminals[index]) this.selectedTerminal = { deviceId: terminals[index].deviceId, id: terminals[index].id };
     else this.selectedTerminal = null;
 
-    const lines: string[] = [this.renderHeader(width), '', chalk.bold(t('dashboard.terminals'))];
-    lines.push(...this.terminalLines(terminals, status, terminals.length > 0 ? index : null));
-    lines.push('');
-    lines.push(chalk.gray('  ' + t('dashboard.terminalsViewHint')));
-    return lines;
+    const rows = this.terminalLines(terminals, status, terminals.length > 0 ? index : null);
+    const above = [this.renderHeader(width), ''];
+    const below = ['', chalk.gray('  ' + t('dashboard.terminalsViewHint'))];
+    // One row for the title, and one for the footer
+    const room = Math.max(1, height - above.length - below.length - 2);
+    const start = Math.max(0, Math.min(index - Math.floor(room / 2), rows.length - room));
+    const position = rows.length > room ? chalk.gray(`  ${index + 1}/${rows.length}`) : '';
+
+    return [
+      ...above,
+      chalk.bold(t('dashboard.terminals')) + position,
+      ...rows.slice(start, start + room),
+      ...below,
+    ];
   }
 
   private renderTerminal(terminal: TerminalRow, viewing: boolean): string {
@@ -549,33 +607,61 @@ export class Dashboard {
 
   // ------------------------------------------------------------- QR view
 
-  private renderQr(width: number): string[] {
-    const lines: string[] = [this.renderHeader(width), ''];
+  private renderQr(width: number, height: number): string[] {
+    const header = this.renderHeader(width);
     const url = this.options.proxy.getConnectUrl();
     const settings = this.options.proxy.getConnectionSettings();
     if (!url || !settings) {
-      lines.push('  ' + chalk.gray(t('dashboard.qrUnavailable')));
-      return lines;
+      return [header, '', '  ' + chalk.gray(t('dashboard.qrUnavailable'))];
     }
     if (this.qrCache?.url !== url) {
       let qr = '';
       qrcode.generate(url, { small: true }, (output: string) => { qr = output; });
-      this.qrCache = { url, lines: qr.split('\n') };
+      const lines = qr.split('\n').filter((line) => line.length > 0);
+      this.qrCache = { url, lines, width: Math.max(...lines.map((line) => visibleWidth(line))) };
     }
-    lines.push('  ' + chalk.bold(t('connection.scanQR')));
-    lines.push('');
-    for (const line of this.qrCache.lines) lines.push('  ' + line);
-    lines.push('');
-    lines.push('  ' + t('connection.clientId', { id: settings.clientId }));
-    lines.push('  ' + t('connection.secret', { secret: settings.secret }));
-    if (this.options.config.name) lines.push('  ' + t('connection.name', { name: this.options.config.name }));
-    return lines;
+    const { lines: qr, width: qrWidth } = this.qrCache;
+    const details = [t('connection.clientId', { id: settings.clientId }), t('connection.secret', { secret: settings.secret })];
+    if (this.options.config.name) details.push(t('connection.name', { name: this.options.config.name }));
+
+    const available = height - 1; // the footer takes the last row
+    const indented = (text: string, style: (line: string) => string = (line) => line) =>
+      wrap(text, Math.max(20, width - 2)).map((line) => '  ' + style(line));
+
+    // A clipped code can't be scanned, so never draw one that doesn't fit
+    if (qr.length + 1 > available || qrWidth + 2 > width) {
+      const message = t('dashboard.qrTooSmall', { cols: qrWidth + 2, rows: qr.length + 2 });
+      return [header, '', ...indented(message, chalk.yellow), '', ...details.flatMap((line) => indented(line))];
+    }
+
+    // Beside the code: the only layout that fits a default 80x24 terminal
+    const sideWidth = width - 2 - qrWidth - QR_SIDE_GAP;
+    if (sideWidth >= QR_MIN_SIDE_WIDTH) {
+      const side = [
+        ...wrap(t('connection.scanQR'), sideWidth).map((line) => chalk.bold(line)),
+        '',
+        ...details.flatMap((line) => wrap(line, sideWidth)),
+      ];
+      const top = Math.max(0, Math.floor((qr.length - side.length) / 2));
+      const rows = qr.map((line, i) => `  ${fit(line, qrWidth)}${' '.repeat(QR_SIDE_GAP)}${side[i - top] ?? ''}`);
+      return [header, ...(qr.length + 2 <= available ? [''] : []), ...rows];
+    }
+
+    // Narrow terminal: stack the details under the code, as far as they fit
+    const title = indented(t('connection.scanQR'), chalk.bold);
+    const below = details.flatMap((line) => indented(line));
+    const showTitle = 1 + title.length + qr.length + below.length <= available;
+    return [header, ...(showTitle ? title : []), ...qr.map((line) => '  ' + line), ...below];
   }
 
   // ------------------------------------------------------------ log view
 
   private logViewHeight(): number {
     return Math.max(1, (process.stdout.rows || 24) - 3);
+  }
+
+  private logPanStep(): number {
+    return Math.max(8, Math.floor((process.stdout.columns || 80) / 2));
   }
 
   private clampLogScroll(): void {
@@ -589,12 +675,21 @@ export class Dashboard {
     const viewHeight = this.logViewHeight();
     const end = entries.length - this.logScroll;
     const start = Math.max(0, end - viewHeight);
-    const position = this.logScroll > 0 ? chalk.yellow(t('dashboard.logsScrolled', { lines: this.logScroll })) : '';
+    const visible = entries.slice(start, end);
+    // Pan no further than the longest line on screen needs
+    if (this.logPan > 0) {
+      const longest = visible.reduce((max, entry) => Math.max(max, visibleWidth(entry.text)), 0);
+      this.logPan = Math.min(this.logPan, Math.max(0, longest - width));
+    }
+    const position = [
+      this.logScroll > 0 ? chalk.yellow(t('dashboard.logsScrolled', { lines: this.logScroll })) : '',
+      this.logPan > 0 ? chalk.yellow(`→ ${this.logPan}`) : '',
+    ].filter(Boolean).join('  ');
     const lines = [
       ' ' + chalk.bold.cyan(t('dashboard.logsTitle')) + '  ' + chalk.gray(t('dashboard.logsHint')) + '  ' + position,
       chalk.gray('─'.repeat(width)),
     ];
-    for (const entry of entries.slice(start, end)) lines.push(entry.text);
+    for (const entry of visible) lines.push(skipColumns(entry.text, this.logPan));
     return lines.slice(0, height - 1);
   }
 
@@ -607,7 +702,12 @@ export class Dashboard {
     const key = (k: string, label: string) => `${chalk.inverse(` ${k} `)} ${label}`;
     let items: string[];
     if (this.view === 'logs') {
-      items = [key('↑↓', t('dashboard.keyScroll')), key('l', t('dashboard.keyBack')), key('q', t('dashboard.keyQuit'))];
+      items = [
+        key('↑↓', t('dashboard.keyScroll')),
+        key('←→', t('dashboard.keyPan')),
+        key('l', t('dashboard.keyBack')),
+        key('q', t('dashboard.keyQuit')),
+      ];
     } else if (this.view === 'terminals') {
       const selected = this.terminalRows().find((row) => row.id === this.selectedTerminal?.id);
       items = [key('↑↓', t('dashboard.keySelect'))];

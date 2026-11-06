@@ -3,7 +3,6 @@
  */
 
 import jwt from 'jsonwebtoken';
-import fetch from 'node-fetch';
 import { JWTPayload, ErrorCode, createRPCError } from '../types.js';
 
 const FIREBASE_KEYS_URL =

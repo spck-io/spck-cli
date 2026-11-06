@@ -10,8 +10,6 @@ import osLocale from 'os-locale';
 
 type Translations = Record<string, any>;
 
-// Support both CJS (ts-jest) and ESM (runtime) contexts
-// eslint-disable-next-line no-eval
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const localesDir = join(__dirname, 'locales');
 

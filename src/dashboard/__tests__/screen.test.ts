@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fit, formatBytes, formatDuration, stripAnsi, truncate, visibleWidth, wrap } from '../screen.js';
+import { fit, formatBytes, formatDuration, sanitizeLine, skipColumns, stripAnsi, truncate, visibleWidth, wrap } from '../screen.js';
 
 const red = (s: string) => `\x1b[31m${s}\x1b[39m`;
 
@@ -27,6 +27,25 @@ describe('dashboard screen helpers', () => {
 
   it('wraps on word boundaries', () => {
     expect(wrap('one two three four', 9)).toEqual(['one two', 'three', 'four']);
+  });
+
+  it('splits text with no spaces instead of dropping it', () => {
+    expect(wrap('日本語のテキスト', 6)).toEqual(['日本語', 'のテキ', 'スト']);
+    expect(wrap('Secret: abcdefgh', 5)).toEqual(['Secre', 't:', 'abcde', 'fgh']);
+  });
+
+  it('keeps colors but removes anything else that could disturb the screen', () => {
+    expect(sanitizeLine(red('ok'))).toBe(red('ok'));
+    expect(sanitizeLine('a\x1b[2Jb\x1b[10;10Hc')).toBe('abc');
+    expect(sanitizeLine('a\x1b]0;title\x07b')).toBe('ab');
+    expect(sanitizeLine('a\rb\x07c\x1bd')).toBe('abcd');
+    expect(sanitizeLine('a\tb')).toBe('a    b');
+  });
+
+  it('skips columns while keeping colors and handling wide characters', () => {
+    expect(skipColumns(red('hello'), 2)).toBe(red('llo'));
+    expect(skipColumns('日本語', 1)).toBe(' 本語');
+    expect(skipColumns('abc', 0)).toBe('abc');
   });
 
   it('formats durations compactly', () => {

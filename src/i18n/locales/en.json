@@ -76,11 +76,9 @@
     "selectingBest": "Selecting best relay server...",
     "checkingLatency": "Checking server latency...",
     "selected": "Selected server: {{label}} ({{url}}) - {{ping}}ms",
-    "allUnreachable": "All servers unreachable, using default: {{url}}",
     "usingOverride": "Using server override: {{url}}",
     "usingSaved": "Using saved server: {{url}}",
     "failedSelect": "Failed to select relay server: {{message}}",
-    "usingDefault": "Using default: {{url}}",
     "unreachable": "unreachable",
     "attempting": "Connecting to {{url}}...",
     "relayFailed": "{{url}} failed: {{message}}",
@@ -217,7 +215,6 @@
     "failedToStart": "Failed to start proxy client: {{message}}",
     "rootNotFound": "Root directory not found: {{path}}",
     "rootNotFoundHint": "Please ensure the directory exists and is accessible, or run setup wizard:",
-    "rootNotFoundCmd": "spck --setup",
     "uncaughtException": "Uncaught exception: {{message}}",
     "unhandledRejection": "Unhandled rejection: {{message}}",
     "shutdownError": "Error during shutdown: {{message}}",
@@ -282,6 +279,7 @@
     "description3": "to your local filesystem, git, and terminal.",
     "projectConfig": "Project Configuration",
     "rootDirPrompt": "Root directory to serve [{{default}}]: ",
+    "rootDirInvalid": "Not a directory: {{path}}",
     "terminalConfig": "Terminal Configuration",
     "terminalDescription": "Terminal service allows remote shell access to your machine.",
     "terminalPrompt": "Enable terminal service? [Y/n]: ",
@@ -338,6 +336,7 @@
     "handshaking": "connecting…",
     "terminals": "Terminals",
     "noTerminals": "No terminals open",
+    "moreTerminals": "+{{count}} more",
     "terminalRunning": "running {{time}}",
     "terminalExited": "exited (code {{code}}) after {{time}}",
     "terminalViewing": "viewing now",
@@ -376,6 +375,7 @@
     "latest": "Latest:",
     "quitConfirm": "Press q again to quit",
     "qrUnavailable": "Not signed in to the relay yet.",
+    "qrTooSmall": "This terminal is too small for the QR code (it needs {{cols}}x{{rows}}). Enlarge the window, or enter these details in Spck Editor:",
     "logsTitle": "Logs",
     "logsHint": "also saved in .spck-editor/logs/",
     "logsScrolled": "↑ {{lines}} lines from the end",
@@ -383,6 +383,7 @@
     "keyQr": "Connect QR",
     "keyBack": "Back",
     "keyQuit": "Quit",
-    "keyScroll": "Scroll"
+    "keyScroll": "Scroll",
+    "keyPan": "Pan"
   }
 }

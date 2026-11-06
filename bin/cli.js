@@ -12,9 +12,9 @@ import { validateCurrentWorkingDirectory } from './validate-cwd.js';
 // if the current directory doesn't exist (deleted, network fs unmounted, etc.)
 validateCurrentWorkingDirectory();
 
-import('../dist/index.js').then((module) => {
-  module.main().catch((error) => {
+import('../dist/index.js')
+  .then((module) => module.main())
+  .catch((error) => {
     console.error('Error:', error.message);
     process.exit(1);
   });
-});

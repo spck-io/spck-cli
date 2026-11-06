@@ -39,6 +39,31 @@ describe('LogBuffer', () => {
     vi.restoreAllMocks();
   });
 
+  it('represents a multi-line problem by its first line with text', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    buffer = new LogBuffer();
+    buffer.install();
+    buffer.setPassthrough(false);
+
+    console.warn('relay failed\n');
+    expect(buffer.lastNotice()?.text).toBe('relay failed');
+    console.error('\nboom\n    at frame (file.js:1:1)');
+    expect(buffer.lastNotice()?.text).toBe('boom');
+    vi.restoreAllMocks();
+  });
+
+  it('removes control sequences from captured lines', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    buffer = new LogBuffer();
+    buffer.install();
+    buffer.setPassthrough(false);
+
+    console.log('before\x1b[2Jafter');
+    expect(buffer.entries[0].text).toBe('beforeafter');
+    vi.restoreAllMocks();
+  });
+
   it('restores the original console on uninstall', () => {
     const original = console.log;
     buffer = new LogBuffer();

@@ -5,9 +5,51 @@
 // CSI sequences (colors, cursor) and OSC sequences (hyperlinks, titles)
 const ANSI_PATTERN = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 const ANSI_AT_START = new RegExp('^(?:' + ANSI_PATTERN.source + ')');
+const SGR_SEQUENCE = /^\x1b\[[0-9;]*m$/;
+const CONTROL_CHARS = /[\x00-\x08\x0b-\x1a\x1c-\x1f\x7f-\x9f]/g;
+const UNSAFE_FOR_DISPLAY = /[\x00-\x09\x0b-\x1a\x1c-\x1f\x7f-\x9f]|\x1b(?!\[[0-9;]*m)/;
+
+/**
+ * How long a lone ESC byte waits to see if it starts a key sequence. Node's
+ * default of 500ms makes the Esc key feel broken.
+ */
+export const ESCAPE_TIMEOUT_MS = 100;
+
+/** Walk a string as escape sequences (width 0) and characters. */
+function* tokens(text: string): Generator<{ text: string; width: number; isEscape: boolean }> {
+  let i = 0;
+  while (i < text.length) {
+    const escape = text[i] === '\x1b' ? ANSI_AT_START.exec(text.slice(i)) : null;
+    if (escape) {
+      yield { text: escape[0], width: 0, isEscape: true };
+      i += escape[0].length;
+      continue;
+    }
+    const cp = text.codePointAt(i)!;
+    const ch = String.fromCodePoint(cp);
+    yield { text: ch, width: charWidth(cp), isEscape: false };
+    i += ch.length;
+  }
+}
 
 export function stripAnsi(text: string): string {
   return text.replace(ANSI_PATTERN, '');
+}
+
+/**
+ * Make captured output safe to draw inside the dashboard: colors are kept, but
+ * cursor movement, screen clears, titles and other control characters would
+ * corrupt the layout. Log text can include editor-supplied paths and the output
+ * of child processes, so it is not trusted to be well behaved.
+ */
+export function sanitizeLine(text: string): string {
+  // Runs for every log line, and nearly all of them only contain colors
+  if (!UNSAFE_FOR_DISPLAY.test(text)) return text;
+  return text
+    .replace(ANSI_PATTERN, (sequence) => (SGR_SEQUENCE.test(sequence) ? sequence : ''))
+    .replace(/\t/g, '    ')
+    .replace(CONTROL_CHARS, '')
+    .replace(/\x1b(?!\[[0-9;]*m)/g, ''); // an ESC left over from a malformed sequence
 }
 
 /** Terminal column width of a code point (wide East Asian / emoji = 2). */
@@ -47,23 +89,36 @@ export function truncate(text: string, width: number): string {
   let out = '';
   let used = 0;
   let hadAnsi = false;
-  let i = 0;
-  while (i < text.length) {
-    const escape = text[i] === '\x1b' ? ANSI_AT_START.exec(text.slice(i)) : null;
-    if (escape) {
-      out += escape[0];
+  for (const token of tokens(text)) {
+    if (token.isEscape) {
       hadAnsi = true;
-      i += escape[0].length;
-      continue;
+    } else {
+      if (used + token.width > width) break;
+      used += token.width;
     }
-    const ch = String.fromCodePoint(text.codePointAt(i)!);
-    const w = charWidth(ch.codePointAt(0)!);
-    if (used + w > width) break;
-    out += ch;
-    used += w;
-    i += ch.length;
+    out += token.text;
   }
   return hadAnsi ? out + '\x1b[0m' : out;
+}
+
+/**
+ * Drop the first `columns` columns of a (possibly colored) string, keeping its
+ * escape sequences so the remaining text has the right colors.
+ */
+export function skipColumns(text: string, columns: number): string {
+  if (columns <= 0) return text;
+  let out = '';
+  let skipped = 0;
+  for (const token of tokens(text)) {
+    if (token.isEscape || skipped >= columns) {
+      out += token.text;
+    } else {
+      skipped += token.width;
+      // A wide character straddling the edge leaves half of itself: show a gap
+      if (skipped > columns) out += ' ';
+    }
+  }
+  return out;
 }
 
 /** Pad (or truncate) to exactly `width` columns. */
@@ -72,7 +127,10 @@ export function fit(text: string, width: number): string {
   return cut + ' '.repeat(Math.max(0, width - visibleWidth(cut)));
 }
 
-/** Word-wrap plain text to `width` columns. */
+/**
+ * Word-wrap plain text to `width` columns. Text with no spaces to break on
+ * (Chinese, Japanese, long tokens) is split between characters, never dropped.
+ */
 export function wrap(text: string, width: number): string[] {
   if (width <= 0) return [text];
   const lines: string[] = [];
@@ -81,9 +139,20 @@ export function wrap(text: string, width: number): string[] {
     const candidate = line ? `${line} ${word}` : word;
     if (visibleWidth(candidate) <= width) {
       line = candidate;
-    } else {
-      if (line) lines.push(line);
-      line = visibleWidth(word) > width ? truncate(word, width) : word;
+      continue;
+    }
+    if (line) lines.push(line);
+    line = '';
+    let used = 0;
+    for (const ch of word) {
+      const w = charWidth(ch.codePointAt(0)!);
+      if (line && used + w > width) {
+        lines.push(line);
+        line = '';
+        used = 0;
+      }
+      line += ch;
+      used += w;
     }
   }
   if (line) lines.push(line);

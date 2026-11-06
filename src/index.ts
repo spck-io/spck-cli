@@ -4,6 +4,7 @@
  */
 
 import * as fs from 'fs';
+import * as path from 'path';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import jwt from 'jsonwebtoken';
@@ -23,7 +24,7 @@ import { fetchServerList, displayServerPings, getDefaultServerList, normalizeSer
 import { authenticateWithFirebase, getValidFirebaseToken, abortCurrentAuth } from './connection/firebase-auth.js';
 import { runSetup } from './setup/wizard.js';
 import { detectTools, displayFeatureSummary } from './utils/tool-detection.js';
-import { ensureProjectDir } from './utils/project-dir.js';
+import { ensureProjectDir, isDirectory } from './utils/project-dir.js';
 import { ProxyClient } from './proxy/ProxyClient.js';
 import { RPCRouter } from './rpc/router.js';
 import { ServerConfig, FirebaseCredentials, StoredCredentials } from './types.js';
@@ -34,6 +35,7 @@ import { WakeLock } from './dashboard/WakeLock.js';
 
 let proxyClient: ProxyClient | null = null;
 let dashboard: Dashboard | null = null;
+let shuttingDown = false;
 
 /**
  * Start the proxy client
@@ -45,6 +47,7 @@ export async function startProxyClient(
     disableRipgrep?: boolean;
     disableLanguageServer?: boolean;
     serverOverride?: string;
+    rootOverride?: string;
     dashboard?: boolean;
   }
 ): Promise<void> {
@@ -83,6 +86,11 @@ export async function startProxyClient(
       }
     }
 
+    // --root applies to this run only: the config file on disk keeps its root
+    if (options?.rootOverride) {
+      config.root = path.resolve(options.rootOverride);
+    }
+
     // Step 2: Authenticate with Firebase
     let storedCredentials: StoredCredentials | null = null;
     let credentials: FirebaseCredentials;
@@ -109,8 +117,7 @@ export async function startProxyClient(
     }
 
     // Step 3: Validate root directory
-    const fs = await import('fs');
-    if (!fs.existsSync(config.root)) {
+    if (!isDirectory(config.root)) {
       console.error(`\n❌ ${t('errors.rootNotFound', { path: config.root })}\n`);
       console.error(t('errors.rootNotFoundHint'));
       console.error('  spck --setup\n');
@@ -475,6 +482,10 @@ export async function showAccountInfo(): Promise<void> {
  * Graceful shutdown: leave the dashboard, disconnect, exit
  */
 async function shutdown(signal: string): Promise<void> {
+  // A second Ctrl+C while disconnecting means "stop waiting"
+  if (shuttingDown) process.exit(130);
+  shuttingDown = true;
+
   dashboard?.stop();
   console.log(`\n\n${t('setup.received', { signal })}`);
 
@@ -534,6 +545,7 @@ export async function main(): Promise<void> {
     .example('$0 --account', 'Show current account email and subscription status')
     .example('$0 --logout', 'Logout and clear all credentials')
     .example('$0 -c /path/to/config.json', 'Use a custom configuration file')
+    .example('$0 -r /path/to/project', 'Serve a different directory for this run')
     .option('config', {
       alias: 'c',
       type: 'string',
@@ -558,15 +570,10 @@ export async function main(): Promise<void> {
       type: 'string',
       description: 'Set locale for CLI output (e.g., en, es, fr, ja, ko, pt, zh-Hans)',
     })
-    .option('port', {
-      alias: 'p',
-      type: 'number',
-      description: 'Server port (overrides config)',
-    })
     .option('root', {
       alias: 'r',
       type: 'string',
-      description: 'Root directory to serve (overrides config)',
+      description: 'Root directory to serve for this run (overrides config)',
     })
     .option('server', {
       alias: 's',
@@ -638,6 +645,7 @@ export async function main(): Promise<void> {
       disableRipgrep: argv.__internal_disable_ripgrep as boolean | undefined,
       disableLanguageServer: argv['language-server'] === false ? true : undefined,
       serverOverride: argv.server as string | undefined,
+      rootOverride: argv.root as string | undefined,
       dashboard: argv.dashboard as boolean,
     });
   }

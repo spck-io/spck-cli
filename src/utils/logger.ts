@@ -208,6 +208,10 @@ function consoleLine(opts: {
   error?: string;
   device?: string;
   messageWidth?: number;
+  // Send warnings and errors to console.warn / console.error, so the dashboard
+  // surfaces them. Off for RPC lines: an editor probing for a missing file is
+  // an everyday failure, not something to alert the user about.
+  notice?: boolean;
 }): void {
   const parts = [
     chalk.gray(formatTimeCompact()),
@@ -219,7 +223,10 @@ function consoleLine(opts: {
   if (details) parts.push(chalk.gray(details));
   if (opts.error) parts.push(chalk.red(opts.error));
   if (opts.device) parts.push(chalk.gray(`[${formatUid(opts.device)}]`));
-  console.log(parts.join('  ').trimEnd());
+  const print = !opts.notice || opts.level === 'ok' || opts.level === 'info'
+    ? console.log
+    : opts.level === 'warn' ? console.warn : console.error;
+  print(parts.join('  ').trimEnd());
 }
 
 // Debounce state for browser proxy console output
@@ -428,13 +435,13 @@ export function logSearchRead(
   const extraTokens: string[] = [];
   if (params.searchTerm) {
     const trimmed = params.searchTerm.substring(0, 30) + (params.searchTerm.length > 30 ? '...' : '');
-    extraTokens.push(`"${trimmed}'"`);
+    extraTokens.push(`"${trimmed}"`);
   }
-  if (metadata?.matches !== undefined) extraTokens.push(`matches=${metadata.matches}`);
-  if (metadata?.method) extraTokens.push(metadata.method);
-  // matches/method are already pulled out into extraTokens — only forward
-  // remaining metadata to avoid duplicating those keys in the trailing JSON.
-  const cleanedMeta = metadata && !metadata.matches && !metadata.method ? metadata : undefined;
+  // matches/method are pulled out into extraTokens — only forward the remaining
+  // metadata to avoid duplicating those keys in the trailing JSON.
+  const { matches, method: searchMethod, ...cleanedMeta } = metadata ?? {};
+  if (matches !== undefined) extraTokens.push(`matches=${matches}`);
+  if (searchMethod) extraTokens.push(searchMethod);
   logRpc({
     category: 'SEARCH', color: chalk.green, methodLabel: method,
     detail: formatPath(params.path), extraTokens,
@@ -517,6 +524,7 @@ export function logAuth(
     message: AUTH_LABELS[event] ?? humanize(event),
     details: formatMeta(details),
     device: details.deviceId,
+    notice: true,
   });
   writeToFile(`[${level.toUpperCase()}] AUTH ${event} ${metaStr}`);
 }
@@ -559,6 +567,7 @@ export function logConnection(
     details,
     error: metadata?.error,
     device: deviceId,
+    notice: true,
   });
   writeToFile(`[${style.file}] CONN ${event} deviceId=${deviceId || 'unknown'}${plainMeta(metadata)}`);
 }

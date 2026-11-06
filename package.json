@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc && cp src/i18n/locales/*.json dist/i18n/locales/",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
+    "dev": "npm run build && node dist/index.js",
     "watch": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -43,7 +43,6 @@
     "default-shell": "2.2.0",
     "fossil-delta": "2.0.0",
     "jsonwebtoken": "9.0.3",
-    "node-fetch": "3.3.2",
     "node-pty": "1.2.0-beta.18",
     "open": "11.0.4",
     "os-locale": "8.0.0",
@@ -60,10 +59,8 @@
     "@types/node": "22.20.5",
     "@types/qrcode-terminal": "0.12.2",
     "@types/write-file-atomic": "4.0.3",
-    "@types/ws": "8.18.2",
     "@types/yargs": "17.0.35",
     "oxlint": "1.90.0",
-    "ts-node": "10.9.2",
     "vitest": "5.1.0"
   },
   "engines": {

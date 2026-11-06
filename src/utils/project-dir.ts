@@ -43,6 +43,11 @@ export function getProjectDataPath(projectRoot: string): string {
   return path.join(getHomeBaseDir(), projectId);
 }
 
+/** Whether a path exists and is a directory, following symlinks. */
+export function isDirectory(dirPath: string): boolean {
+  return !!fs.statSync(dirPath, { throwIfNoEntry: false })?.isDirectory();
+}
+
 /**
  * Get the .spck-editor directory path in the project
  */

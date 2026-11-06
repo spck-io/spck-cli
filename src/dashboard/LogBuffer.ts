@@ -5,6 +5,7 @@
  */
 
 import { format } from 'util';
+import { sanitizeLine } from './screen.js';
 
 export type LogLevel = 'info' | 'warn' | 'error';
 
@@ -27,7 +28,8 @@ const LEVELS: Record<ConsoleMethod, LogLevel> = {
 
 export class LogBuffer {
   readonly entries: LogEntry[] = [];
-  private listeners = new Set<() => void>();
+  private listeners = new Set<(added: number) => void>();
+  private notice: LogEntry | undefined;
   private originals: Partial<Record<ConsoleMethod, (...args: any[]) => void>> = {};
   private passthrough = true;
 
@@ -55,27 +57,30 @@ export class LogBuffer {
     this.passthrough = passthrough;
   }
 
-  /** Most recent warning or error, if any. */
+  /**
+   * Most recent warning or error, if any. A multi-line message is represented
+   * by its first line with text, not a stack frame or trailing blank line.
+   */
   lastNotice(): LogEntry | undefined {
-    for (let i = this.entries.length - 1; i >= 0; i--) {
-      if (this.entries[i].level !== 'info') return this.entries[i];
-    }
-    return undefined;
+    return this.notice;
   }
 
-  onAppend(listener: () => void): () => void {
+  /** The listener is told how many entries were added. */
+  onAppend(listener: (added: number) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
   private append(level: LogLevel, text: string): void {
     const time = Date.now();
-    for (const line of text.split('\n')) {
-      this.entries.push({ time, level, text: line });
-    }
+    const added = text.split('\n').map((line) => ({ time, level, text: sanitizeLine(line) }));
+    this.entries.push(...added);
     if (this.entries.length > MAX_ENTRIES) {
       this.entries.splice(0, this.entries.length - MAX_ENTRIES);
     }
-    for (const listener of this.listeners) listener();
+    if (level !== 'info') {
+      this.notice = added.find((entry) => entry.text.trim() !== '') ?? this.notice;
+    }
+    for (const listener of this.listeners) listener(added.length);
   }
 }

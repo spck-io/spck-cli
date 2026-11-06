@@ -3,14 +3,20 @@
  * Configures CLI to connect to proxy server
  */
 
+import * as os from 'os';
+import * as path from 'path';
 import * as readline from 'readline';
 import { ServerConfig } from '../types.js';
 import { saveConfig, createDefaultConfig } from '../config/config.js';
-import { ensureProjectDir } from '../utils/project-dir.js';
+import { ensureProjectDir, isDirectory } from '../utils/project-dir.js';
+import { ESCAPE_TIMEOUT_MS } from '../dashboard/screen.js';
 import { gitignoreExists, isSpckEditorIgnored, addSpckEditorToGitignore } from '../utils/gitignore.js';
 import { t } from '../i18n/index.js';
 
 const USER_AUTH_DOCS_URL = 'https://docs.spck.io/en/cli-config#user-authentication';
+
+/** Ctrl+C or Ctrl+D at a prompt, which closes the readline interface. */
+class SetupCancelled extends Error {}
 
 /**
  * Create readline interface
@@ -19,6 +25,9 @@ function createPrompt(): readline.Interface {
   return readline.createInterface({
     input: process.stdin,
     output: process.stdout,
+    // stdin keeps the timeout of whichever reader attaches first, and a first
+    // run reaches the dashboard after this prompt
+    escapeCodeTimeout: ESCAPE_TIMEOUT_MS,
   });
 }
 
@@ -26,8 +35,11 @@ function createPrompt(): readline.Interface {
  * Prompt user for input
  */
 function question(rl: readline.Interface, query: string): Promise<string> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    const onClose = () => reject(new SetupCancelled());
+    rl.once('close', onClose);
     rl.question(query, (answer) => {
+      rl.off('close', onClose);
       resolve(answer);
     });
   });
@@ -52,6 +64,33 @@ async function questionYesNo(
 }
 
 /**
+ * Turn a typed path into an absolute one. The shell doesn't expand ~ in an
+ * answer to a prompt, so that is done here.
+ */
+function resolveRootInput(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) return process.cwd();
+  if (trimmed === '~') return os.homedir();
+  if (trimmed.startsWith('~/')) return path.join(os.homedir(), trimmed.slice(2));
+  return path.resolve(trimmed);
+}
+
+async function questionRootDir(rl: readline.Interface): Promise<string> {
+  for (;;) {
+    const answer = await question(rl, t('setup.rootDirPrompt', { default: process.cwd() }));
+    const rootPath = resolveRootInput(answer);
+    if (isDirectory(rootPath)) return rootPath;
+    console.log(t('setup.rootDirInvalid', { path: rootPath }) + '\n');
+  }
+}
+
+/** A positive whole number, or the default for blank / invalid input. */
+function parsePositiveInt(input: string, defaultValue: number): number {
+  const value = parseInt(input, 10);
+  return value > 0 ? value : defaultValue;
+}
+
+/**
  * Run the setup wizard
  */
 export async function runSetup(configPath?: string): Promise<ServerConfig> {
@@ -69,16 +108,11 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
     // Step 1: Root directory
     console.log('--- ' + t('setup.projectConfig') + ' ---\n');
 
-    const root = await question(
-      rl,
-      t('setup.rootDirPrompt', { default: process.cwd() })
-    );
-    const rootPath = root.trim() || process.cwd();
+    const rootPath = await questionRootDir(rl);
 
-    // Step 1.5: Server name (for QR code identification)
     const defaultConfig = createDefaultConfig();
 
-    // Step 2: Terminal service
+    // Terminal service
     console.log('\n--- ' + t('setup.terminalConfig') + ' ---\n');
     console.log(t('setup.terminalDescription'));
 
@@ -91,7 +125,7 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
     let maxBufferedLines = 5000;
     let maxTerminals = 10;
 
-    // Step 4: Advanced terminal configuration
+    // Advanced terminal configuration
     if (terminalEnabled) {
       const advancedTerminal = await questionYesNo(
         rl,
@@ -105,7 +139,7 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
           rl,
           t('setup.maxBufferPrompt', { default: String(maxBufferedLines) })
         );
-        maxBufferedLines = parseInt(bufferInput) || 5000;
+        maxBufferedLines = parsePositiveInt(bufferInput, maxBufferedLines);
 
         console.log('   ' + t('setup.maxBufferHint') + '\n');
 
@@ -113,11 +147,11 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
           rl,
           t('setup.maxTerminalsPrompt', { default: String(maxTerminals) })
         );
-        maxTerminals = parseInt(maxTermInput) || 10;
+        maxTerminals = parsePositiveInt(maxTermInput, maxTerminals);
       }
     }
 
-    // Step 5: Browser proxy configuration
+    // Browser proxy configuration
     console.log('\n--- ' + t('setup.browserProxyConfig') + ' ---\n');
     console.log(t('setup.browserProxyDescription') + '\n');
 
@@ -127,7 +161,7 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
       true
     );
 
-    // Step 5.5: ACP (local AI agent) configuration
+    // ACP (local AI agent) configuration
     console.log('\n--- ' + t('setup.acpConfig') + ' ---\n');
     console.log(t('setup.acpDescription1'));
     console.log(t('setup.acpDescription2') + '\n');
@@ -138,7 +172,7 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
       true
     );
 
-    // Step 6: Security configuration
+    // Security configuration
     console.log('\n--- ' + t('setup.securityConfig') + ' ---\n');
     console.log(t('setup.securityDescription1'));
     console.log(t('setup.securityDescription2'));
@@ -151,7 +185,7 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
       false
     );
 
-    // Step 6: .gitignore configuration (advanced)
+    // .gitignore configuration (advanced)
     let shouldAddToGitignore = false;
 
     if (gitignoreExists(rootPath)) {
@@ -231,6 +265,11 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
 
   } catch (error: any) {
     rl.close();
+    // Nothing is saved until the last answer, so there is nothing to undo
+    if (error instanceof SetupCancelled) {
+      console.log('');
+      process.exit(130);
+    }
     console.error('\n❌ ' + t('setup.setupFailed', { message: error.message }));
     throw error;
   }
