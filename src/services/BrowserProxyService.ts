@@ -24,7 +24,6 @@ interface ProxyRequestParams {
 }
 
 interface ProxyResponse {
-  requestId: string;
   status: number;
   statusText: string;
   headers: Record<string, string>;
@@ -43,7 +42,7 @@ export class BrowserProxyService {
   }
 
   private async proxyRequest(params: ProxyRequestParams, uid: string): Promise<ProxyResponse> {
-    const { requestId, url, method, headers, body } = params;
+    const { url, method, headers, body } = params;
 
     // Validate method
     const upperMethod = (method || 'GET').toUpperCase();
@@ -92,7 +91,7 @@ export class BrowserProxyService {
         status: response.status,
         size: Buffer.byteLength(response.body, 'base64') * 3 / 4 | 0,
       });
-      return { requestId, ...response };
+      return response;
     } catch (error: any) {
       logBrowserProxy(params, uid, false, error);
       throw error;
@@ -104,7 +103,7 @@ export class BrowserProxyService {
     method: string,
     headers: Record<string, string>,
     body?: Buffer
-  ): Promise<Omit<ProxyResponse, 'requestId'>> {
+  ): Promise<ProxyResponse> {
     return new Promise((resolve, reject) => {
       const isHttps = url.protocol === 'https:';
       const lib = isHttps ? https : http;

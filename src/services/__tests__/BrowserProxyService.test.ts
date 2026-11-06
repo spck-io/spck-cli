@@ -78,6 +78,14 @@ describe('BrowserProxyService', () => {
     }
   });
 
+  it('does not echo requestId, which the app uses to match its own pending request', async () => {
+    const srv = await startServer((_req, res) => res.end('ok'));
+    const result: any = await service.handle('request', makeParams({ url: `http://localhost:${srv.port}/` }), makeSocket());
+    await srv.close();
+    expect(result.status).toBe(200);
+    expect(result).not.toHaveProperty('requestId');
+  });
+
   it('correctly encodes binary response body', async () => {
     const binary = Buffer.from([0x00, 0x01, 0xff, 0xfe]);
     const srv = await startServer((_req, res) => { res.writeHead(200); res.end(binary); });
