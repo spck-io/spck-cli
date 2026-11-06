@@ -773,4 +773,64 @@ describe('ProxyClient Security', () => {
       }
     });
   });
+
+  describe('Duplicate client ID handling', () => {
+    const buildAuth = (): Promise<any> => {
+      const auth = (io as Mock).mock.lastCall![1].auth;
+      return new Promise(resolve => auth(resolve));
+    };
+
+    it('asks the relay to prompt on the first connect, as requested', async () => {
+      const client = new ProxyClient({ ...defaultOptions, onDuplicate: 'ask' } as any);
+      client.connect().catch(() => {});
+      await new Promise(resolve => setImmediate(resolve));
+      const auth = await buildAuth();
+      expect(auth.onDuplicate).toBe('ask');
+      expect(auth.serverToken).toBe('existing-server-token');
+    });
+
+    it('reconnects with the renewed token and yields to another running CLI', async () => {
+      await setupClient({ ...defaultOptions, onDuplicate: 'ask' } as any);
+      const auth = await buildAuth();
+      expect(auth.onDuplicate).toBe('yield');
+      expect(auth.serverToken).toBe('mock-server-token');
+    });
+
+    it('answers the relay liveness check', async () => {
+      await setupClient();
+      const ack = vi.fn();
+      await triggerEvent('liveness_check', ack);
+      expect(ack).toHaveBeenCalledOnce();
+    });
+
+    it('rejects connect with client_id_in_use without exiting or complaining', async () => {
+      const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as any);
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const client = new ProxyClient({ ...defaultOptions, onDuplicate: 'ask' } as any);
+      const connecting = client.connect();
+      await new Promise(resolve => setImmediate(resolve));
+
+      await triggerEvent('error', { code: 'client_id_in_use', message: 'in use' });
+      await expect(connecting).rejects.toMatchObject({ code: 'client_id_in_use' });
+
+      await triggerEvent('disconnect', 'io server disconnect');
+      expect(exit).not.toHaveBeenCalled();
+      expect(consoleError).not.toHaveBeenCalled();
+      exit.mockRestore();
+      consoleError.mockRestore();
+    });
+
+    it('explains and exits cleanly when replaced, without retrying', async () => {
+      const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as any);
+      const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await setupClient();
+
+      await triggerEvent('error', { code: 'replaced_by_new_connection', message: 'replaced' });
+
+      expect(exit).toHaveBeenCalledWith(0);
+      expect(consoleWarn.mock.calls.flat().join(' ')).toContain('Another CLI started using this client ID');
+      exit.mockRestore();
+      consoleWarn.mockRestore();
+    });
+  });
 });

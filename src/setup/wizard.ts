@@ -64,6 +64,21 @@ async function questionYesNo(
 }
 
 /**
+ * Ask a one-off yes/no question. Ctrl+C or Ctrl+D counts as no.
+ */
+export async function confirm(query: string): Promise<boolean> {
+  const rl = createPrompt();
+  try {
+    return await questionYesNo(rl, query, false);
+  } catch (error) {
+    if (error instanceof SetupCancelled) return false;
+    throw error;
+  } finally {
+    rl.close();
+  }
+}
+
+/**
  * Turn a typed path into an absolute one. The shell doesn't expand ~ in an
  * answer to a prompt, so that is done here.
  */

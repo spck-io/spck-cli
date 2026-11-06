@@ -22,7 +22,7 @@ import {
 } from './config/credentials.js';
 import { fetchServerList, displayServerPings, getDefaultServerList, normalizeServerUrl, formatServerName } from './config/server-selection.js';
 import { authenticateWithFirebase, getValidFirebaseToken, abortCurrentAuth } from './connection/firebase-auth.js';
-import { runSetup } from './setup/wizard.js';
+import { confirm, runSetup } from './setup/wizard.js';
 import { detectTools, displayFeatureSummary } from './utils/tool-detection.js';
 import { ensureProjectDir, isDirectory } from './utils/project-dir.js';
 import { ProxyClient } from './proxy/ProxyClient.js';
@@ -197,6 +197,10 @@ export async function startProxyClient(
     const RATE_LIMIT_MAX_RETRIES = 3;
     const RATE_LIMIT_WAIT_CAP_SECONDS = 120;
 
+    // Only a person at a terminal can answer the prompt. Unattended runs take
+    // over, so a restarted service doesn't stay locked out by its old instance.
+    let onDuplicate: 'ask' | 'takeover' = process.stdin.isTTY && process.stdout.isTTY ? 'ask' : 'takeover';
+
     const tryConnect = async (url: string, useExistingToken: boolean): Promise<boolean> => {
       tried.add(url);
       console.log(`🌐 ${t('server.attempting', { url: formatServerName(url) })}`);
@@ -209,6 +213,7 @@ export async function startProxyClient(
           tools,
           existingConnectionSettings: useExistingToken ? (connectionSettings || undefined) : undefined,
           proxyServerUrl: url,
+          onDuplicate,
         });
 
         try {
@@ -219,6 +224,18 @@ export async function startProxyClient(
           lastError = error;
           proxyClient.forceCleanup();
           proxyClient = null;
+
+          if (error?.code === 'client_id_in_use') {
+            console.warn(`\n⚠️  ${t('proxyError.clientIdInUse')}`);
+            console.warn(t('proxyError.clientIdInUseHint'));
+            if (!await confirm(t('proxyError.clientIdInUsePrompt'))) {
+              console.log(`${t('proxyError.clientIdInUseDeclined')}\n`);
+              process.exit(0);
+            }
+            onDuplicate = 'takeover';
+            attempt--; // Doesn't use up a rate-limit retry
+            continue;
+          }
 
           // 'rate_limited' is an upstream signal (subscription API throttled us);
           // a different relay will hit the same upstream, so retry the same URL

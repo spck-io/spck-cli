@@ -69,6 +69,9 @@ interface ProxyClientOptions {
   tools: ToolDetectionResult;
   existingConnectionSettings?: ConnectionSettings;
   proxyServerUrl: string;
+  // What the relay should do on the first connect if another running CLI holds
+  // this client ID. 'ask' fails with client_id_in_use so the caller can prompt.
+  onDuplicate?: 'ask' | 'takeover';
 }
 
 /**
@@ -221,7 +224,12 @@ export class ProxyClient {
         }
         cb({
           firebaseToken: this.firebaseToken,
-          serverToken: existingToken,
+          // A first run has no stored token, and must keep the client ID it was
+          // given when it reconnects: the editor is already paired with that ID.
+          serverToken: this.connectionSettings?.serverToken ?? existingToken,
+          // Once authenticated, any connect is automatic. It replaces this
+          // process's own dead socket, but yields to a different running CLI.
+          onDuplicate: this.connectionSettings ? 'yield' : (this.options.onDuplicate ?? 'takeover'),
           // When Fast Lane is off, say why so the relay can tell the editor
           // something actionable. A CLI that sends no capabilities at all
           // predates Fast Lane and is reported as outdated.
@@ -335,6 +343,9 @@ export class ProxyClient {
       if (!msg?.connectionId) return;
       this.fastLane.handleSignal(msg.connectionId, msg.data).catch(() => {});
     });
+
+    // Lets the relay tell a running CLI from a dead socket it hasn't dropped yet
+    this.socket.on('liveness_check', (ack?: () => void) => ack?.());
 
     // Error handling (async wrapper for handleError)
     this.socket.on('error', (error: ProxyErrorEvent) => {
@@ -1184,6 +1195,20 @@ export class ProxyClient {
           // Fall through to regular error handling
         }
       }
+    }
+
+    // Not a failure of this attempt: the outer connect loop asks the user.
+    if (error.code === 'client_id_in_use') {
+      this.suppressServerDisconnectExit = true;
+      return;
+    }
+
+    // Exit 0: a service manager restarting on failure would otherwise start
+    // this CLI again, and the two would keep replacing each other.
+    if (error.code === 'replaced_by_new_connection') {
+      console.warn(`\n⚠️  ${t('proxyError.replacedByNewConnection')}`);
+      console.warn(`${t('proxyError.replacedByNewConnectionHint')}\n`);
+      process.exit(0);
     }
 
     // Regular error handling
