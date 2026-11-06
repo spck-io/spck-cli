@@ -3,14 +3,15 @@
  *
  * Logs are captured into a LogBuffer and only shown in the log view [l].
  * The main view shows the relay, connected editors (with ping), Fast Lane
- * status and toggleable settings, including a keep-awake wake lock.
+ * status, detected capabilities and toggleable settings, including a keep-awake
+ * wake lock.
  */
 
 import * as readline from 'readline';
 import chalk from 'chalk';
 import qrcode from 'qrcode-terminal';
 import { ProxyClient, ProxyStatus, ClientStatus } from '../proxy/ProxyClient.js';
-import { ServerConfig } from '../types.js';
+import { ServerConfig, ToolDetectionResult } from '../types.js';
 import { formatServerName } from '../config/server-selection.js';
 import { t } from '../i18n/index.js';
 import { LogBuffer, LogEntry } from './LogBuffer.js';
@@ -28,6 +29,7 @@ export interface DashboardOptions {
   proxy: ProxyClient;
   config: ServerConfig;
   configPath?: string;
+  tools: ToolDetectionResult;
   logs: LogBuffer;
   wakeLock: WakeLock;
   onQuit: () => void;
@@ -399,6 +401,10 @@ export class Dashboard {
     const fastLane = [chalk.bold(t('dashboard.fastLane'))];
     for (const line of this.fastLaneLines(status, inner)) fastLane.push('  ' + line);
 
+    // Capabilities
+    const capabilities = [chalk.bold(t('dashboard.capabilities'))];
+    for (const line of this.capabilityLines(inner)) capabilities.push('  ' + line);
+
     // Settings
     const settings = [chalk.bold(t('dashboard.settings'))];
     for (const setting of SETTINGS) {
@@ -423,15 +429,20 @@ export class Dashboard {
       ...terminalLines,
     ] : null;
 
-    const sections = [
+    const buildSections = (withCapabilities: boolean) => [
       [this.renderHeader(width)],
       relay,
       clients,
       ...(terminalSection ? [terminalSection] : []),
       fastLane,
+      ...(withCapabilities ? [capabilities] : []),
       settings,
     ];
-    const rows = sections.reduce((sum, section) => sum + section.length, notice.length);
+    const countRows = (list: string[][]) => list.reduce((sum, section) => sum + section.length, notice.length);
+    // Purely informational, so it goes first when the terminal is too short
+    const withCapabilities = buildSections(true);
+    const sections = countRows(withCapabilities) > available ? buildSections(false) : withCapabilities;
+    const rows = countRows(sections);
     // Give up the blank lines between sections before hiding any content
     const compact = rows + sections.length - 1 + notice.length > available;
 
@@ -446,6 +457,43 @@ export class Dashboard {
     // The latest problem stays visible even if something else has to be cut
     if (compact) return [...body.slice(0, Math.max(0, available - notice.length)), ...notice];
     return [...body, ...notice.flatMap((line) => ['', line])];
+  }
+
+  /** Tools found at startup, wrapped between items rather than inside one. */
+  private capabilityLines(inner: number): string[] {
+    const { tools, config } = this.options;
+    const item = (available: boolean, label: string, detail?: string) =>
+      available
+        ? `${chalk.green('●')} ${label}${detail ? ` ${chalk.gray(detail)}` : ''}`
+        : chalk.gray(`○ ${label}${detail ? ` (${detail})` : ''}`);
+
+    const agents = [
+      ...(tools.claude ? ['Claude Code'] : []),
+      ...(tools.codex ? ['Codex'] : []),
+      ...(tools.gemini ? ['Gemini CLI'] : []),
+    ];
+    const acpEnabled = config.acp?.enabled ?? true;
+    const items = [
+      item(tools.git, 'Git', tools.git ? undefined : t('dashboard.capabilityNotInstalled')),
+      item(tools.ripgrep, 'ripgrep', tools.ripgrep ? undefined : t('dashboard.capabilityBasicSearch')),
+      !acpEnabled
+        ? item(false, 'ACP', t('dashboard.capabilityOff'))
+        : agents.length > 0
+          ? item(true, 'ACP', agents.join(', '))
+          : item(false, 'ACP', t('dashboard.capabilityNoAgents')),
+    ];
+
+    const gap = '   ';
+    const lines: string[] = [];
+    for (const entry of items) {
+      const last = lines[lines.length - 1];
+      if (last !== undefined && visibleWidth(last) + gap.length + visibleWidth(entry) <= inner) {
+        lines[lines.length - 1] = last + gap + entry;
+      } else {
+        lines.push(entry);
+      }
+    }
+    return lines;
   }
 
   private renderHeader(width: number): string {

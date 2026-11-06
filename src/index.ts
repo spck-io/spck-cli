@@ -48,12 +48,11 @@ export async function startProxyClient(
     disableLanguageServer?: boolean;
     serverOverride?: string;
     rootOverride?: string;
-    dashboard?: boolean;
   }
 ): Promise<void> {
   // The dashboard needs an interactive terminal; piped / service runs keep
   // plain log output. Capture starts now so the log view has startup history.
-  const useDashboard = (options?.dashboard ?? true) && !!process.stdout.isTTY && !!process.stdin.isTTY;
+  const useDashboard = !!process.stdout.isTTY && !!process.stdin.isTTY;
   const logBuffer = useDashboard ? new LogBuffer() : null;
   logBuffer?.install();
 
@@ -306,6 +305,7 @@ export async function startProxyClient(
         proxy: proxyClient,
         config,
         configPath,
+        tools,
         logs: logBuffer,
         wakeLock: new WakeLock(),
         onQuit: () => shutdown('SIGINT'),
@@ -608,11 +608,6 @@ export async function main(): Promise<void> {
       hidden: true,
       default: false,
     })
-    .option('dashboard', {
-      type: 'boolean',
-      description: 'Show the interactive status dashboard (TTY only). Use --no-dashboard for plain log output.',
-      default: true,
-    })
     .option('language-server', {
       type: 'boolean',
       description: 'Enable the remote language server (TypeScript / Python). Use --no-language-server to disable.',
@@ -663,7 +658,6 @@ export async function main(): Promise<void> {
       disableLanguageServer: argv['language-server'] === false ? true : undefined,
       serverOverride: argv.server as string | undefined,
       rootOverride: argv.root as string | undefined,
-      dashboard: argv.dashboard as boolean,
     });
   }
 }

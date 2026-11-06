@@ -23,6 +23,7 @@ describe('Dashboard', () => {
   let config: any;
   let clients: any[];
   let frames: string[];
+  let tools: any;
   let onQuit: Mock<() => void>;
   let toggleWake: Mock<() => void>;
   const original = { columns: process.stdout.columns, rows: process.stdout.rows, setRawMode: process.stdin.setRawMode };
@@ -47,6 +48,7 @@ describe('Dashboard', () => {
         getConnectionSettings: () => ({ clientId: 'abcdefghijkl', secret: SECRET }),
       } as any,
       config,
+      tools,
       logs,
       wakeLock: { state: 'off', error: null, onChange: () => () => {}, toggle: toggleWake } as any,
       onQuit,
@@ -57,6 +59,7 @@ describe('Dashboard', () => {
   beforeEach(() => {
     frames = [];
     clients = [fakeClient('device-1')];
+    tools = { git: true, ripgrep: true, claude: true, codex: true, gemini: false };
     config = {
       version: 1, root: '/project', name: 'project',
       terminal: { enabled: true }, security: { userAuthenticationEnabled: false }, filesystem: {},
@@ -138,6 +141,42 @@ describe('Dashboard', () => {
       expect(text()).toContain('Keep computer awake');
       expect(text()).toContain('relay is slow');
       expect(text()).toMatch(/\+\d+ more/);
+    });
+
+    it('lists detected tools and agents under Capabilities', () => {
+      start(120, 40);
+      expect(text()).toContain('Capabilities');
+      expect(text()).toContain('● Git');
+      expect(text()).toContain('● ripgrep');
+      expect(text()).toContain('● ACP Claude Code, Codex');
+      expect(text()).not.toContain('Gemini CLI');
+    });
+
+    it('says briefly what a missing tool means', () => {
+      tools = { git: false, ripgrep: false, claude: false, codex: false, gemini: false };
+      start(120, 40);
+      expect(text()).toContain('○ Git (not installed)');
+      expect(text()).toContain('○ ripgrep (basic search)');
+      expect(text()).toContain('○ ACP (no agents found)');
+    });
+
+    it('shows ACP as off when it is turned off, even with agents installed', () => {
+      config.acp = { enabled: false };
+      start(120, 40);
+      expect(text()).toContain('○ ACP (off)');
+    });
+
+    it('wraps capabilities between items on a narrow terminal', () => {
+      tools = { git: true, ripgrep: false, claude: true, codex: true, gemini: true };
+      start(50, 40);
+      expect(text()).toContain('● Git   ○ ripgrep (basic search)');
+      expect(text()).toContain('● ACP Claude Code, Codex, Gemini CLI');
+    });
+
+    it('drops capabilities before settings on a short terminal', () => {
+      start(100, 18);
+      expect(text()).not.toContain('Capabilities');
+      expect(text()).toContain('Keep computer awake');
     });
 
     it('shows all terminals when they fit', async () => {

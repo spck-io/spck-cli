@@ -59,14 +59,14 @@ describe('--root', () => {
   });
 
   it('serves the given directory without changing the config file', async () => {
-    await startProxyClient(configPath, { rootOverride: otherRoot, dashboard: false });
+    await startProxyClient(configPath, { rootOverride: otherRoot });
 
     expect(vi.mocked(RPCRouter.initialize).mock.calls[0][0]).toBe(otherRoot);
     expect(JSON.parse(fs.readFileSync(configPath, 'utf8')).root).toBe(configRoot);
   });
 
   it('serves the configured directory by default', async () => {
-    await startProxyClient(configPath, { dashboard: false });
+    await startProxyClient(configPath);
 
     expect(vi.mocked(RPCRouter.initialize).mock.calls[0][0]).toBe(configRoot);
   });
@@ -77,7 +77,7 @@ describe('--root', () => {
       throw new Error(`exit ${code}`);
     }) as any);
 
-    await expect(startProxyClient(configPath, { rootOverride: configPath, dashboard: false })).rejects.toThrow('exit 1');
+    await expect(startProxyClient(configPath, { rootOverride: configPath })).rejects.toThrow('exit 1');
 
     expect(exit).toHaveBeenCalled();
     expect(RPCRouter.initialize).not.toHaveBeenCalled();

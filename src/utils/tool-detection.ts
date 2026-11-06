@@ -54,10 +54,12 @@ export async function detectTools(options?: {
         console.log(`✅ ${t('tools.gitDetectedShort')}`);
       }
     } else {
-      console.warn(`⚠️  ${t('tools.gitNotDetected')}`);
-      console.warn(`   ${t('tools.gitDisabledHint')}`);
-      console.warn(`   ${t('tools.gitInstallHint')}`);
-      console.warn(`   ${t('tools.gitInstallUrl')}\n`);
+      // Optional tools: logged as info so the install hints don't become the
+      // dashboard's "latest problem". Its Capabilities section shows the state.
+      console.log(`⚠️  ${t('tools.gitNotDetected')}`);
+      console.log(`   ${t('tools.gitDisabledHint')}`);
+      console.log(`   ${t('tools.gitInstallHint')}`);
+      console.log(`   ${t('tools.gitInstallUrl')}\n`);
     }
   }
 
@@ -76,10 +78,10 @@ export async function detectTools(options?: {
         console.log(`✅ ${t('tools.ripgrepDetectedShort')}`);
       }
     } else {
-      console.warn(`⚠️  ${t('tools.ripgrepNotDetected')}`);
-      console.warn(`   ${t('tools.ripgrepDisabledHint')}`);
-      console.warn(`   ${t('tools.ripgrepInstallHint')}`);
-      console.warn(`   ${t('tools.ripgrepInstallUrl')}\n`);
+      console.log(`⚠️  ${t('tools.ripgrepNotDetected')}`);
+      console.log(`   ${t('tools.ripgrepDisabledHint')}`);
+      console.log(`   ${t('tools.ripgrepInstallHint')}`);
+      console.log(`   ${t('tools.ripgrepInstallUrl')}\n`);
     }
   }
 
