@@ -1,6 +1,6 @@
 /**
- * Firebase authentication via relay with an optional local callback
- * Opens browser for OAuth flow, captures tokens via relay or localhost POST
+ * Firebase authentication with local callback server
+ * Opens browser for OAuth flow, captures token via localhost POST
  *
  * Security features:
  * - Token sent via POST body (not in URL) to prevent leaking via browser history/referrer
@@ -135,10 +135,8 @@ function parsePostBody(req: http.IncomingMessage): Promise<Record<string, string
 /**
  * Authenticate with Firebase using secure local callback server
  * Token is received via POST to prevent exposure in URLs
- * onInteractiveAuth lets quiet startup reveal the sign-in instructions.
  */
-export async function authenticateWithFirebase(onInteractiveAuth?: () => void): Promise<FirebaseCredentials> {
-  onInteractiveAuth?.();
+export async function authenticateWithFirebase(): Promise<FirebaseCredentials> {
   console.log('\n=== ' + t('auth.title') + ' ===\n');
 
   // 1. Select best proxy server
@@ -165,17 +163,16 @@ export async function authenticateWithFirebase(onInteractiveAuth?: () => void): 
   // 3. Generate code for both browser and manual flows
   const code = crypto.randomBytes(32).toString('hex');
 
-  // 4. Always include the relay parameters so localhost failures can fall back.
-  // The QR code/manual link uses only the relay, including on another device.
+  // 4. Build auth URLs
+  // Browser flow: localhost callback
+  const browserUrl = new URL(FIREBASE_AUTH_BASE_URL);
+  browserUrl.searchParams.set('redirect', redirectUrl);
+  browserUrl.searchParams.set('state', code);
+
+  // Manual flow: proxy server relay (server param is hostname only, https:// is assumed)
   const manualUrl = new URL(FIREBASE_AUTH_BASE_URL);
   manualUrl.searchParams.set('code', code);
   manualUrl.searchParams.set('server', proxyServerUrl);
-
-  // Auto mode lets Chrome try localhost first; other browsers use the relay.
-  const browserUrl = new URL(manualUrl);
-  browserUrl.searchParams.set('auto', '1');
-  browserUrl.searchParams.set('redirect', redirectUrl);
-  browserUrl.searchParams.set('state', code);
 
   // 5. Open browser (primary method)
   console.log(t('auth.openingBrowser') + '\n');
@@ -422,10 +419,10 @@ const FIREBASE_API_KEY = 'AIzaSyCFgtHhWiM-EdFBdiDw9ISHfcGOqbV3OCU';
  *
  * @see https://firebase.google.com/docs/reference/rest/auth#section-refresh-token
  */
-export async function refreshFirebaseToken(storedCredentials: StoredCredentials, onInteractiveAuth?: () => void): Promise<FirebaseCredentials> {
+export async function refreshFirebaseToken(storedCredentials: StoredCredentials): Promise<FirebaseCredentials> {
   if (!storedCredentials.refreshToken) {
     console.log('⚠️  ' + t('auth.noRefreshToken'));
-    return authenticateWithFirebase(onInteractiveAuth);
+    return authenticateWithFirebase();
   }
 
   try {
@@ -451,7 +448,7 @@ export async function refreshFirebaseToken(storedCredentials: StoredCredentials,
           reason: errorMessage
         }, 'warn');
         console.log('⚠️  ' + t('auth.refreshTokenExpired'));
-        return authenticateWithFirebase(onInteractiveAuth);
+        return authenticateWithFirebase();
       }
 
       throw new Error(`Token refresh failed: ${errorMessage}`);
@@ -493,7 +490,7 @@ export async function refreshFirebaseToken(storedCredentials: StoredCredentials,
     }, 'error');
     console.error(t('auth.tokenRefreshError', { message: error.message }));
     console.log('⚠️  ' + t('auth.tokenRefreshFailed'));
-    return authenticateWithFirebase(onInteractiveAuth);
+    return authenticateWithFirebase();
   }
 }
 
@@ -501,7 +498,7 @@ export async function refreshFirebaseToken(storedCredentials: StoredCredentials,
  * Get a valid Firebase ID token by refreshing from stored credentials
  * Always generates a fresh ID token using the refresh token
  */
-export async function getValidFirebaseToken(storedCredentials: StoredCredentials, onInteractiveAuth?: () => void): Promise<FirebaseCredentials> {
+export async function getValidFirebaseToken(storedCredentials: StoredCredentials): Promise<FirebaseCredentials> {
   console.log('🔄 ' + t('auth.generatingToken'));
-  return refreshFirebaseToken(storedCredentials, onInteractiveAuth);
+  return refreshFirebaseToken(storedCredentials);
 }
