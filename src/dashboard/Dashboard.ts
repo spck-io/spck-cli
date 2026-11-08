@@ -597,9 +597,16 @@ export class Dashboard {
   private formatPing(client: ClientStatus): string {
     if (client.pingMs === null) return chalk.gray(client.ready ? '— ms' : '');
     const text = `${client.pingMs} ms`;
-    if (client.pingMs < 80) return chalk.green(text);
-    if (client.pingMs < 200) return chalk.yellow(text);
-    return chalk.red(text);
+    // Solid green below 80 ms, blending through yellow at 175 ms to red at 300 ms.
+    const hue = client.pingMs <= 80 ? 140 : client.pingMs < 175
+      ? 140 - (client.pingMs - 80) * 92 / 95
+      : Math.max(0, 48 - (client.pingMs - 175) * 48 / 125);
+    // HSL (75% saturation, 50% lightness) converted to RGB for Chalk's color support.
+    const chroma = 0.75;
+    const x = chroma * (1 - Math.abs((hue / 60) % 2 - 1));
+    const channels = hue < 60 ? [chroma, x, 0] : hue < 120 ? [x, chroma, 0] : [0, chroma, x];
+    const [red, green, blue] = channels.map(channel => Math.round((channel + 0.125) * 255));
+    return chalk.rgb(red, green, blue)(text);
   }
 
   private fastLaneLines(status: ProxyStatus, width: number): string[] {
