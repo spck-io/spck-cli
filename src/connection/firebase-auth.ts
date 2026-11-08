@@ -1,6 +1,6 @@
 /**
- * Firebase authentication with local callback server
- * Opens browser for OAuth flow, captures token via localhost POST
+ * Firebase authentication via relay with an optional local callback
+ * Opens browser for OAuth flow, captures tokens via relay or localhost POST
  *
  * Security features:
  * - Token sent via POST body (not in URL) to prevent leaking via browser history/referrer
@@ -163,16 +163,17 @@ export async function authenticateWithFirebase(): Promise<FirebaseCredentials> {
   // 3. Generate code for both browser and manual flows
   const code = crypto.randomBytes(32).toString('hex');
 
-  // 4. Build auth URLs
-  // Browser flow: localhost callback
-  const browserUrl = new URL(FIREBASE_AUTH_BASE_URL);
-  browserUrl.searchParams.set('redirect', redirectUrl);
-  browserUrl.searchParams.set('state', code);
-
-  // Manual flow: proxy server relay (server param is hostname only, https:// is assumed)
+  // 4. Always include the relay parameters so localhost failures can fall back.
+  // The QR code/manual link uses only the relay, including on another device.
   const manualUrl = new URL(FIREBASE_AUTH_BASE_URL);
   manualUrl.searchParams.set('code', code);
   manualUrl.searchParams.set('server', proxyServerUrl);
+
+  // Auto mode lets Chrome try localhost first; other browsers use the relay.
+  const browserUrl = new URL(manualUrl);
+  browserUrl.searchParams.set('auto', '1');
+  browserUrl.searchParams.set('redirect', redirectUrl);
+  browserUrl.searchParams.set('state', code);
 
   // 5. Open browser (primary method)
   console.log(t('auth.openingBrowser') + '\n');
