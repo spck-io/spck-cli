@@ -9,6 +9,9 @@ import { describe, it, expect, beforeEach, vi, type Mock, type Mocked } from 'vi
  */
 
 import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { ErrorCode } from '../../types.js';
 
 // Mock dependencies
@@ -31,6 +34,11 @@ vi.mock('../../config/credentials.js', () => ({
   isServerTokenExpired: vi.fn(),
   loadGlobalConfig: vi.fn(() => ({ knownDeviceIds: [] })),
   saveGlobalConfig: vi.fn(),
+}));
+
+vi.mock('../../config/config.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../config/config.js')>(),
+  updateConfigFile: vi.fn(),
 }));
 
 vi.mock('../../rpc/router.js', () => ({
@@ -57,6 +65,8 @@ import { RPCRouter } from '../../rpc/router.js';
 import { validateHandshakeTimestamp } from '../handshake-validation.js';
 import { io } from 'socket.io-client';
 import { loadGlobalConfig, saveGlobalConfig } from '../../config/credentials.js';
+import { createDefaultConfig, loadConfig, updateConfigFile } from '../../config/config.js';
+import qrcode from 'qrcode-terminal';
 
 const mockRequireValidHMAC = requireValidHMAC as Mock;
 const mockRPCRouter = RPCRouter as Mocked<typeof RPCRouter>;
@@ -109,6 +119,7 @@ function createSignedRPCMessage(secret: string, method: string, params: any, id:
 describe('ProxyClient Security', () => {
   const defaultOptions = {
     config: {
+      hasConnectedEditor: false,
       security: { userAuthenticationEnabled: false },
       terminal: { enabled: true },
       filesystem: { maxFileSize: '100MB', watchIgnorePatterns: [] },
@@ -133,6 +144,8 @@ describe('ProxyClient Security', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(updateConfigFile).mockReset();
+    defaultOptions.config.hasConnectedEditor = false;
     eventHandlers = {};
 
     // Create fresh mock socket for each test
@@ -183,6 +196,70 @@ describe('ProxyClient Security', () => {
     return client;
   }
 
+  describe('Remembering a connected editor', () => {
+    it.each([undefined, 'custom.json'])('persists the first completed handshake with config path %s', async (configPath) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spck-pairing-'));
+      const cwd = vi.spyOn(process, 'cwd').mockReturnValue(dir);
+      try {
+        const actualConfig = await vi.importActual<typeof import('../../config/config.js')>('../../config/config.js');
+        vi.mocked(updateConfigFile).mockImplementation(actualConfig.updateConfigFile);
+        const storedConfig = createDefaultConfig({ root: dir });
+        actualConfig.saveConfig(storedConfig, configPath);
+        const config = { ...storedConfig, root: '/runtime/override', languageServer: { enabled: false } };
+        const client = await setupClient({ ...defaultOptions, config, configPath } as any);
+
+        expect(updateConfigFile).not.toHaveBeenCalled();
+        await triggerEvent('client_connecting', { connectionId: 'editor-1' });
+        await triggerEvent('client_message', {
+          connectionId: 'editor-1', data: createAuthMessage(TEST_SECRET, TEST_CLIENT_ID),
+        });
+        await triggerEvent('client_message', {
+          connectionId: 'editor-1', data: { type: 'protocol_selected', version: 2 },
+        });
+        expect(updateConfigFile).not.toHaveBeenCalled();
+        expect(loadConfig(configPath).hasConnectedEditor).toBeUndefined();
+
+        await triggerEvent('client_message', {
+          connectionId: 'editor-1', data: { type: 'protocol_selected', version: 1 },
+        });
+        expect(config.hasConnectedEditor).toBe(true);
+        expect(loadConfig(configPath)).toEqual({ ...storedConfig, hasConnectedEditor: true });
+        expect(client.getStatus().clients[0].ready).toBe(true);
+
+        await triggerEvent('client_message', {
+          connectionId: 'editor-1', data: { type: 'protocol_selected', version: 1 },
+        });
+        expect(updateConfigFile).toHaveBeenCalledExactlyOnceWith(expect.any(Function), configPath);
+        client.forceCleanup();
+      } finally {
+        cwd.mockRestore();
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it.each([undefined, false, true])('shows the startup QR only for an unpaired project (flag: %s)', async (hasConnectedEditor) => {
+      await setupClient({ ...defaultOptions, config: { ...defaultOptions.config, hasConnectedEditor } } as any);
+      expect(qrcode.generate).toHaveBeenCalledTimes(hasConnectedEditor ? 0 : 1);
+    });
+
+    it('keeps a successful connection usable if the preference cannot be saved', async () => {
+      vi.mocked(updateConfigFile).mockImplementationOnce(() => { throw new Error('Read-only config'); });
+      const client = await setupClient();
+      await triggerEvent('client_connecting', { connectionId: 'editor-1' });
+      await triggerEvent('client_message', {
+        connectionId: 'editor-1', data: createAuthMessage(TEST_SECRET, TEST_CLIENT_ID),
+      });
+      await triggerEvent('client_message', {
+        connectionId: 'editor-1', data: { type: 'protocol_selected', version: 1 },
+      });
+      expect(client.getStatus().clients[0].ready).toBe(true);
+      expect(defaultOptions.config.hasConnectedEditor).toBe(true);
+      expect(mockSocket.emit).toHaveBeenCalledWith('handshake', expect.objectContaining({
+        connectionId: 'editor-1', data: expect.objectContaining({ type: 'connected' }),
+      }));
+    });
+  });
+
   describe('Handshake Bypass Prevention', () => {
     it('should reject protocol_selected from unauthenticated connection', async () => {
       await setupClient();
@@ -207,6 +284,7 @@ describe('ProxyClient Security', () => {
           }),
         })
       );
+      expect(updateConfigFile).not.toHaveBeenCalled();
     });
 
     it('should reject RPC from connection without completed handshake', async () => {
@@ -335,6 +413,7 @@ describe('ProxyClient Security', () => {
           }),
         })
       );
+      expect(updateConfigFile).not.toHaveBeenCalled();
     });
   });
 

@@ -51,10 +51,29 @@ export async function startProxyClient(
   }
 ): Promise<void> {
   // The dashboard needs an interactive terminal; piped / service runs keep
-  // plain log output. Capture starts now so the log view has startup history.
+  // plain log output. Buffer routine startup output for the dashboard's log view.
   const useDashboard = !!process.stdout.isTTY && !!process.stdin.isTTY;
   const logBuffer = useDashboard ? new LogBuffer() : null;
   logBuffer?.install();
+  let startupOutputVisible = !logBuffer;
+  let dashboardStarted = false;
+  const showStartupOutput = () => {
+    startupOutputVisible = true;
+    logBuffer?.setPassthrough(true);
+  };
+  const hideStartupOutput = () => {
+    startupOutputVisible = false;
+    logBuffer?.setPassthrough(false);
+  };
+  hideStartupOutput();
+
+  // Some connection failures exit directly, before the startup catch runs.
+  const onStartupExit = () => {
+    if (logBuffer && !startupOutputVisible) {
+      process.stderr.write(logBuffer.entries.slice(-20).map((entry) => entry.text).join('\n') + '\n');
+    }
+  };
+  if (logBuffer) process.once('exit', onStartupExit);
 
   console.log('\n' + '='.repeat(60));
   console.log('     ' + t('app.title'));
@@ -73,13 +92,17 @@ export async function startProxyClient(
     } catch (error: any) {
       if (error instanceof ConfigNotFoundError) {
         // Run setup wizard for missing config
+        showStartupOutput();
         console.log(t('config.notFound') + '\n');
         config = await runSetup(configPath);
+        hideStartupOutput();
       } else if (error.code === 'CORRUPTED' || error instanceof SyntaxError) {
         // Config file is corrupted - trigger setup wizard
+        showStartupOutput();
         console.warn('⚠️  ' + t('config.corrupted'));
         console.warn('   ' + t('config.corruptedRunSetup') + '\n');
         config = await runSetup(configPath);
+        hideStartupOutput();
       } else {
         throw error;
       }
@@ -107,10 +130,13 @@ export async function startProxyClient(
 
     if (!storedCredentials) {
       // No stored credentials - full authentication required
-      credentials = await authenticateWithFirebase();
+      credentials = await authenticateWithFirebase(showStartupOutput);
     } else {
       // Have stored credentials - generate fresh ID token using refresh token
-      credentials = await getValidFirebaseToken(storedCredentials);
+      credentials = await getValidFirebaseToken(storedCredentials, showStartupOutput);
+    }
+    hideStartupOutput();
+    if (storedCredentials) {
       console.log('✅ ' + t('auth.credentialsLoaded'));
       console.log(`   ${t('auth.userId', { userId: credentials.userId })}\n`);
     }
@@ -207,6 +233,7 @@ export async function startProxyClient(
       for (let attempt = 0; attempt <= RATE_LIMIT_MAX_RETRIES; attempt++) {
         proxyClient = new ProxyClient({
           config,
+          configPath,
           firebaseToken: credentials.firebaseToken,
           userId: credentials.userId,
           tools,
@@ -225,12 +252,14 @@ export async function startProxyClient(
           proxyClient = null;
 
           if (error?.code === 'client_id_in_use') {
+            showStartupOutput();
             console.warn(`\n⚠️  ${t('proxyError.clientIdInUse')}`);
             console.warn(t('proxyError.clientIdInUseHint'));
             if (!await confirm(t('proxyError.clientIdInUsePrompt'))) {
               console.log(`${t('proxyError.clientIdInUseDeclined')}\n`);
               process.exit(0);
             }
+            hideStartupOutput();
             onDuplicate = 'takeover';
             attempt--; // Doesn't use up a rate-limit retry
             continue;
@@ -311,9 +340,11 @@ export async function startProxyClient(
         onQuit: () => shutdown('SIGINT'),
       });
       dashboard.start();
+      dashboardStarted = true;
     }
 
   } catch (error: any) {
+    showStartupOutput();
     // Handle specific error cases with helpful messages
     if (error.code === 'EACCES' || error.code === 'EPERM') {
       // Permission error
@@ -353,6 +384,9 @@ export async function startProxyClient(
 
       process.exit(1);
     }
+  } finally {
+    process.off('exit', onStartupExit);
+    if (!dashboardStarted) logBuffer?.uninstall();
   }
 }
 

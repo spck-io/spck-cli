@@ -9,6 +9,7 @@ import qrcode from 'qrcode-terminal';
 import { verifyFirebaseToken } from '../connection/auth.js';
 import { refreshFirebaseToken } from '../connection/firebase-auth.js';
 import { loadCredentials, loadGlobalConfig, saveGlobalConfig } from '../config/credentials.js';
+import { updateConfigFile } from '../config/config.js';
 import { ProxySocketWrapper } from './ProxySocketWrapper.js';
 import {
   ServerConfig,
@@ -64,6 +65,7 @@ function generateSecret(length: number): string {
 
 interface ProxyClientOptions {
   config: ServerConfig;
+  configPath?: string;
   firebaseToken: string;
   userId: string;
   tools: ToolDetectionResult;
@@ -471,8 +473,8 @@ export class ProxyClient {
       console.log(`   ${t('connection.freeTierUpgrade')}\n`);
     }
 
-    // Display QR code on new CLI session or if clientId changed (not on automatic reconnections)
-    if (isNewSession || this.connectionSettings.clientId !== existingSettings?.clientId) {
+    // Projects that have already connected an editor can go straight to the dashboard.
+    if (!this.config.hasConnectedEditor && (isNewSession || this.connectionSettings.clientId !== existingSettings?.clientId)) {
       this.displayQRCode();
     }
     this.notifyStatus();
@@ -944,6 +946,16 @@ export class ProxyClient {
       connectionId,
       protocolVersion: version
     });
+
+    if (!this.config.hasConnectedEditor) {
+      this.config.hasConnectedEditor = true;
+      try {
+        updateConfigFile((config) => { config.hasConnectedEditor = true; }, this.options.configPath);
+      } catch (error: any) {
+        // Saving this preference must not interrupt an established connection.
+        logAuth('editor_connection_state_save_failed', { error: error.message }, 'warn');
+      }
+    }
     this.notifyStatus();
   }
 

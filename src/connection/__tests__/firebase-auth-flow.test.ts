@@ -19,7 +19,7 @@ import open from 'open';
 import qrcode from 'qrcode-terminal';
 import jwt from 'jsonwebtoken';
 import { saveCredentials } from '../../config/credentials.js';
-import { abortCurrentAuth, authenticateWithFirebase } from '../firebase-auth.js';
+import { abortCurrentAuth, authenticateWithFirebase, getValidFirebaseToken } from '../firebase-auth.js';
 
 describe('authenticateWithFirebase()', () => {
   let callbackServer: EventEmitter & { close: ReturnType<typeof vi.fn> };
@@ -30,6 +30,7 @@ describe('authenticateWithFirebase()', () => {
     vi.clearAllMocks();
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.mocked(open).mockResolvedValue(undefined as never);
     vi.mocked(jwt.decode).mockReturnValue({ sub: 'user-123', exp: 2000000000 } as never);
     vi.mocked(http.createServer).mockImplementation(() => {
@@ -64,6 +65,24 @@ describe('authenticateWithFirebase()', () => {
   function completeViaRelay() {
     deliverRelayToken({ ok: true, json: async () => ({ idToken: 'id-token', refreshToken: 'refresh-token' }) });
   }
+
+  it.each(['missing', 'expired', 'failed'])('reveals interactive sign-in when token refresh is %s', async (mode) => {
+    if (mode === 'expired') {
+      fetchMock.mockResolvedValueOnce({
+        ok: false, json: async () => ({ error: { message: 'INVALID_REFRESH_TOKEN' } }),
+      });
+    } else if (mode === 'failed') {
+      fetchMock.mockRejectedValueOnce(new Error('Network unavailable'));
+    }
+    const onInteractiveAuth = vi.fn();
+    const result = getValidFirebaseToken({
+      userId: 'user-123', refreshToken: mode === 'missing' ? '' : 'old-refresh-token',
+    }, onInteractiveAuth);
+    await vi.waitFor(() => expect(open).toHaveBeenCalledOnce());
+    expect(onInteractiveAuth).toHaveBeenCalledOnce();
+    completeViaRelay();
+    await expect(result).resolves.toMatchObject({ firebaseToken: 'id-token' });
+  });
 
   it('opens an auto URL with relay parameters and keeps the manual QR relay-only', async () => {
     const { result, url } = await startAuth();

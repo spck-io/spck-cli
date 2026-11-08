@@ -24,6 +24,7 @@ describe('Dashboard', () => {
   let clients: any[];
   let frames: string[];
   let tools: any;
+  let statusChanged: () => void;
   let onQuit: Mock<() => void>;
   let toggleWake: Mock<() => void>;
   const original = { columns: process.stdout.columns, rows: process.stdout.rows, setRawMode: process.stdin.setRawMode };
@@ -43,7 +44,7 @@ describe('Dashboard', () => {
     dashboard = new Dashboard({
       proxy: {
         getStatus: () => ({ relayUrl: 'cli-na-1.spck.io', relayConnected: true, fastLane: 'available', clients }),
-        onStatusChange: () => () => {},
+        onStatusChange: (listener: () => void) => { statusChanged = listener; return () => {}; },
         getConnectUrl: () => `spck://connect?clientId=abcdefghijkl&secret=${SECRET}&rs=cli-na-1.spck.io&name=project`,
         getConnectionSettings: () => ({ clientId: 'abcdefghijkl', secret: SECRET }),
       } as any,
@@ -189,6 +190,41 @@ describe('Dashboard', () => {
 
   describe('QR view', () => {
     const qrRows = () => screen().filter((row) => /[█▀▄]/.test(row));
+
+    it('opens the dashboard for a previously connected project and lets c show the QR again', async () => {
+      config.hasConnectedEditor = true;
+      clients = [];
+      start(80, 24);
+      expect(qrRows()).toHaveLength(0);
+      expect(text()).toContain('Settings');
+
+      await press('c');
+      expect(qrRows().length).toBeGreaterThan(15);
+      clients = [fakeClient('device-1')];
+      statusChanged();
+      await settle();
+      expect(qrRows().length).toBeGreaterThan(15);
+    });
+
+    it('leaves the initial QR only after the editor finishes its handshake', async () => {
+      clients = [{ ...fakeClient('device-1'), ready: false }];
+      start(80, 24);
+      expect(qrRows().length).toBeGreaterThan(15);
+      statusChanged();
+      await settle();
+      expect(qrRows().length).toBeGreaterThan(15);
+
+      clients[0].ready = true;
+      statusChanged();
+      await settle();
+      expect(qrRows()).toHaveLength(0);
+      expect(text()).toContain('Settings');
+
+      clients = [];
+      statusChanged();
+      await settle();
+      expect(qrRows()).toHaveLength(0);
+    });
 
     it('fits the code and the details on a default 80x24 terminal', () => {
       clients = [];

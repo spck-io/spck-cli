@@ -1,7 +1,7 @@
 /**
  * Captures console output so the dashboard can keep logs off screen until
- * the user opens the log view. Before the dashboard starts (and after it
- * stops) output is passed through to the terminal as usual.
+ * the user opens the log view. Startup can buffer output too, enabling
+ * passthrough when setup or sign-in needs the user's attention.
  */
 
 import { format } from 'util';

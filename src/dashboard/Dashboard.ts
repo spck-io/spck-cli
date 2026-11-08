@@ -63,8 +63,7 @@ export class Dashboard {
   private quitArmedAt = 0;
   private flash: { text: string; at: number } | null = null;
   private qrCache: { url: string; lines: string[]; width: number } | null = null;
-  // Show the pairing QR until the first editor connects, since entering the
-  // alternate screen hides the one printed during startup.
+  // New projects show the pairing QR until an editor finishes connecting.
   private autoQr = false;
   // Terminals view: selected terminal and a pending kill awaiting a second [x]
   private selectedTerminal: { deviceId: string; id: string } | null = null;
@@ -103,7 +102,7 @@ export class Dashboard {
       this.options.wakeLock.onChange(() => this.scheduleRender()),
     );
 
-    if (this.options.proxy.getStatus().clients.length === 0) {
+    if (!this.options.config.hasConnectedEditor && !this.options.proxy.getStatus().clients.some((client) => client.ready)) {
       this.autoQr = true;
       this.view = 'qr';
     }
@@ -323,7 +322,7 @@ export class Dashboard {
 
   private onStatusChange(): void {
     // Leave the pairing QR on its own once an editor has connected.
-    if (this.autoQr && this.view === 'qr' && this.options.proxy.getStatus().clients.length > 0) {
+    if (this.autoQr && this.view === 'qr' && this.options.proxy.getStatus().clients.some((client) => client.ready)) {
       this.view = 'main';
       this.autoQr = false;
     }

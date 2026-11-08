@@ -22,6 +22,8 @@ export interface ServerConfig {
   version: number;
   root: string;
   name?: string; // Optional: Friendly name for QR code identification
+  // Skip the launch QR once an editor has completed the connection handshake.
+  hasConnectedEditor?: boolean;
 
   terminal: {
     enabled: boolean;
