@@ -232,7 +232,8 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
         maxTerminals
       },
       security: {
-        userAuthenticationEnabled: userAuthEnabled
+        userAuthenticationEnabled: userAuthEnabled,
+        requirePin: false,
       },
       browserProxy: {
         enabled: browserProxyEnabled

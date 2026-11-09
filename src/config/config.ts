@@ -7,6 +7,7 @@ import * as path from 'path';
 import { ServerConfig } from '../types.js';
 import { getProjectFilePath } from '../utils/project-dir.js';
 import { t } from '../i18n/index.js';
+import { validPinVerifier } from '../connection/pin.js';
 
 const DEFAULT_CONFIG_FILENAME = 'spck-cli.config.json';
 
@@ -168,6 +169,12 @@ function validateConfig(config: ServerConfig): void {
   if (!config.security || typeof config.security !== 'object') {
     throw new Error('Invalid or missing security configuration.');
   }
+  if (config.security.requirePin !== undefined && typeof config.security.requirePin !== 'boolean') {
+    throw new Error('Invalid security.requirePin: expected a boolean.');
+  }
+  if ((config.security.requirePin || config.security.pin !== undefined) && !validPinVerifier(config.security.pin)) {
+    throw new Error('Invalid security.pin: configure a PIN from the CLI dashboard.');
+  }
 
   if (!config.filesystem || typeof config.filesystem !== 'object') {
     throw new Error('Invalid or missing filesystem configuration.');
@@ -198,6 +205,7 @@ export function createDefaultConfig(overrides: Partial<ServerConfig> = {}): Serv
     },
     security: {
       userAuthenticationEnabled: false,
+      requirePin: false,
     },
     filesystem: {
       maxFileSize: '10MB',

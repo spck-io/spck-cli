@@ -34,6 +34,8 @@ export interface ServerConfig {
 
   security: {
     userAuthenticationEnabled: boolean;
+    requirePin?: boolean;
+    pin?: { salt: string; hash: string; iterations: number };
   };
 
   filesystem: {

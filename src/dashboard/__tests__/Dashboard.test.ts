@@ -3,6 +3,7 @@ import { Dashboard } from '../Dashboard.js';
 import { LogBuffer } from '../LogBuffer.js';
 import { stripAnsi, visibleWidth } from '../screen.js';
 import { RPCRouter } from '../../rpc/router.js';
+import * as pinSettings from '../pin-settings.js';
 
 const SECRET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQR';
 
@@ -88,6 +89,38 @@ describe('Dashboard', () => {
   });
 
   describe('keys', () => {
+    it('requires local PIN confirmation before enabling protection and never renders digits', async () => {
+      const save = vi.spyOn(pinSettings, 'saveConnectionPin').mockImplementation((config) => { config.security.requirePin = true; });
+      start(80, 24);
+      expect(text()).toContain('Require PIN to connect');
+      await press('i');
+      for (const digit of '0123') await press(digit);
+      expect(text()).not.toContain('0123');
+      expect(save).not.toHaveBeenCalled();
+      await press('return');
+      expect(text()).toContain('Confirm your PIN');
+      for (const digit of '1234') await press(digit);
+      await press('return');
+      expect(text()).toContain('do not match');
+      expect(save).not.toHaveBeenCalled();
+      for (const digit of '0123') await press(digit);
+      await press('return');
+      expect(save).toHaveBeenCalledWith(config, '0123', undefined);
+      expect(config.security.requirePin).toBe(true);
+      expect(text()).toContain('Require PIN to connect');
+      expect(text()).not.toContain('0123');
+    });
+
+    it('leaves PIN protection off when local setup is cancelled', async () => {
+      start(80, 24);
+      await press('i');
+      for (const digit of '1234') await press(digit);
+      await press('escape', { meta: true });
+      expect(config.security.requirePin).not.toBe(true);
+      expect(text()).toContain('Settings');
+      await press('i');
+      expect(text()).not.toContain('●');
+    });
     it('ignores hotkeys pressed with Ctrl or Alt', async () => {
       start(80, 24);
       await press('u', { ctrl: true });

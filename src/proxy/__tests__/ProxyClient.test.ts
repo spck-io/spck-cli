@@ -63,6 +63,7 @@ import { ProxyClient } from '../ProxyClient.js';
 import { requireValidHMAC } from '../../connection/hmac.js';
 import { RPCRouter } from '../../rpc/router.js';
 import { validateHandshakeTimestamp } from '../handshake-validation.js';
+import { createPinVerifier } from '../../connection/pin.js';
 import { io } from 'socket.io-client';
 import { loadGlobalConfig, saveGlobalConfig } from '../../config/credentials.js';
 import { createDefaultConfig, loadConfig, updateConfigFile } from '../../config/config.js';
@@ -214,6 +215,60 @@ describe('ProxyClient Security', () => {
     await new Promise(resolve => setImmediate(resolve));
     return client;
   }
+
+  describe('PIN protection', () => {
+    const pin = createPinVerifier('123456');
+    const options = () => ({ ...defaultOptions, config: { ...defaultOptions.config, security: { userAuthenticationEnabled: false, requirePin: true, pin } } });
+    const messages = (id: string) => mockSocket.emit.mock.calls.filter(([event, message]: any[]) => event === 'handshake' && message.connectionId === id).map(([, message]: any[]) => message.data);
+    const auth = async (id: string) => {
+      await triggerEvent('client_message', { connectionId: id, data: createAuthMessage(TEST_SECRET, TEST_CLIENT_ID, id) });
+      return messages(id).findLast((message: any) => message.type === 'request_pin');
+    };
+
+    it('requires PIN before protocol selection or RPC, then accepts a valid proof', async () => {
+      const client = await setupClient(options() as any);
+      const challenge = await auth('pin-1');
+      expect(challenge).toMatchObject({ salt: pin.salt, iterations: pin.iterations });
+      expect(messages('pin-1').some((message: any) => message.type === 'protocol_info')).toBe(false);
+      await triggerEvent('client_message', { connectionId: 'pin-1', data: { type: 'protocol_selected', version: 1 } });
+      expect(messages('pin-1').at(-1)).toMatchObject({ code: 'pin_required' });
+      expect(client.getStatus().clients[0].ready).toBe(false);
+      const route = vi.spyOn(RPCRouter, 'route');
+      await triggerEvent('client_message', { connectionId: 'pin-1', data: createSignedRPCMessage(TEST_SECRET, 'terminal.create', {}) });
+      expect(route).not.toHaveBeenCalled();
+      const proof = crypto.createHmac('sha256', Buffer.from(pin.hash, 'hex')).update('spck-pin-v1:' + challenge.challenge).digest('hex');
+      await triggerEvent('client_message', { connectionId: 'pin-1', data: { type: 'pin_verification', proof } });
+      expect(messages('pin-1').at(-1)).toMatchObject({ type: 'protocol_info' });
+      await triggerEvent('client_message', { connectionId: 'pin-1', data: { type: 'protocol_selected', version: 1 } });
+      expect(client.getStatus().clients[0].ready).toBe(true);
+      route.mockRestore();
+      client.forceCleanup();
+    });
+
+    it('does not reset the retry limit for a new connection or device ID', async () => {
+      const client = await setupClient(options() as any);
+      for (let i = 0; i < 5; i++) {
+        const id = 'wrong-pin-' + i;
+        await auth(id);
+        await triggerEvent('client_message', { connectionId: id, data: { type: 'pin_verification', proof: '00'.repeat(32) } });
+      }
+      expect(await auth('another-device')).toMatchObject({ retryAfter: 60 });
+      client.forceCleanup();
+    });
+
+    it('rejects proofs from a previous challenge and fails closed without a configured PIN', async () => {
+      const client = await setupClient(options() as any);
+      const old = await auth('old-challenge');
+      const proof = crypto.createHmac('sha256', Buffer.from(pin.hash, 'hex')).update('spck-pin-v1:' + old.challenge).digest('hex');
+      await auth('old-challenge');
+      await triggerEvent('client_message', { connectionId: 'old-challenge', data: { type: 'pin_verification', proof } });
+      expect(messages('old-challenge').at(-1)).toMatchObject({ type: 'request_pin', incorrect: true });
+      client.forceCleanup();
+      await setupClient({ ...options(), config: { ...options().config, security: { requirePin: true } } } as any);
+      await auth('unconfigured');
+      expect(messages('unconfigured').at(-1)).toMatchObject({ type: 'error', code: 'pin_not_configured' });
+    });
+  });
 
   describe('Remembering a connected editor', () => {
     it.each([undefined, 'custom.json'])('persists the first completed handshake with config path %s', async (configPath) => {

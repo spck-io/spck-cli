@@ -92,6 +92,12 @@ describe('config', () => {
       expect(() => loadConfig()).toThrow('Configuration file is corrupted');
     });
 
+    it('refuses PIN protection without a valid verifier instead of silently allowing connections', () => {
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ ...validConfig, security: { ...validConfig.security, requirePin: true } }));
+      expect(() => loadConfig()).toThrow('Configuration file is corrupted');
+    });
+
     it('should throw CORRUPTED error for invalid JSON', () => {
       mockFs.existsSync.mockReturnValue(true);
       mockFs.readFileSync.mockReturnValue('not valid json{');
@@ -281,6 +287,7 @@ describe('config', () => {
       expect(config.terminal.enabled).toBe(true);
       expect(config.terminal.compactPrompt).toBe(true);
       expect(config.security.userAuthenticationEnabled).toBe(false);
+      expect(config.security.requirePin).toBe(false);
     });
 
     it('should merge overrides with defaults', () => {

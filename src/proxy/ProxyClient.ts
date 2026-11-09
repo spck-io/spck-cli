@@ -34,6 +34,7 @@ import { logAuth, logConnection } from '../utils/logger.js';
 import { RPCRouter } from '../rpc/router.js';
 import { validateHandshakeTimestamp } from './handshake-validation.js';
 import { requireValidHMAC } from '../connection/hmac.js';
+import { PinGate, PinChallenge, PinVerifier, validPinVerifier } from '../connection/pin.js';
 import { needsChunking, chunkMessage } from './chunking.js';
 import { FastLaneManager, FastLaneSignal, FRAMING_VERSION } from './transport/FastLane.js';
 
@@ -83,6 +84,11 @@ interface ActiveConnection {
   authenticated: boolean;
   userVerified?: boolean;
   userVerificationRequired?: boolean;
+  pinRequired?: boolean;
+  pinVerified?: boolean;
+  pinVerifier?: PinVerifier;
+  pinChallenge?: PinChallenge;
+  authNonce?: string;
   handshakeComplete?: boolean;
   connectedAt: number;
   socketWrapper?: ProxySocketWrapper;
@@ -114,6 +120,7 @@ export interface ProxyStatus {
 }
 
 export class ProxyClient {
+  private pinGate = new PinGate();
   private socket: Socket | null = null;
   private config: ServerConfig;
   private connectionSettings: ConnectionSettings | null = null;
@@ -653,6 +660,10 @@ export class ProxyClient {
         await this.handleUserVerification(connectionId, data.firebaseToken);
         break;
 
+      case 'pin_verification':
+        this.handlePinVerification(connectionId, data.proof);
+        break;
+
       case 'protocol_selected':
         await this.handleProtocolSelection(connectionId, data.version);
         break;
@@ -770,6 +781,9 @@ export class ProxyClient {
         authenticated: true,
         userVerified: false,
         userVerificationRequired,
+        pinRequired: this.config.security.requirePin === true,
+        pinVerifier: this.config.security.pin,
+        authNonce: nonce,
         connectedAt: Date.now(),
         socketWrapper,
         deviceId,
@@ -797,7 +811,7 @@ export class ProxyClient {
         });
       } else {
         // Skip to protocol negotiation
-        this.sendProtocolInfo(connectionId);
+        this.continueAfterVerification(connectionId);
       }
 
     } catch (error: any) {
@@ -847,7 +861,7 @@ export class ProxyClient {
       connection.userVerified = true;
 
       // Continue to protocol negotiation
-      this.sendProtocolInfo(connectionId);
+      this.continueAfterVerification(connectionId);
 
     } catch (error: any) {
       console.error(`❌ ${t('connection.userVerifyFailed', { deviceId: displayId, message: error.message })}`);
@@ -864,13 +878,51 @@ export class ProxyClient {
 
       console.log(`   ${t('connection.userVerifyOptional')}`);
       // Continue to protocol negotiation
-      this.sendProtocolInfo(connectionId);
+      this.continueAfterVerification(connectionId);
     }
   }
 
   /**
    * Send protocol information to client
    */
+  private continueAfterVerification(connectionId: string, incorrect = false): void {
+    const connection = this.activeConnections.get(connectionId);
+    if (!connection?.authenticated) return;
+    if (connection.userVerificationRequired && !connection.userVerified) return;
+    if (connection.pinRequired && !connection.pinVerified) {
+      if (!validPinVerifier(connection.pinVerifier)) {
+        this.sendToClient(connectionId, 'handshake', { type: 'error', code: 'pin_not_configured', message: 'Set a connection PIN in the CLI dashboard.' });
+        return;
+      }
+      const { salt, iterations } = connection.pinVerifier;
+      connection.pinChallenge = this.pinGate.challenge();
+      const request = {
+        type: 'request_pin', salt, iterations, challenge: connection.pinChallenge.challenge,
+        incorrect, retryAfter: this.pinGate.retryAfter(), authNonce: connection.authNonce, timestamp: Date.now(),
+      };
+      this.sendToClient(connectionId, 'handshake', {
+        ...request, hmac: this.computeHMAC(request, this.connectionSettings!.secret),
+      });
+      return;
+    }
+    this.sendProtocolInfo(connectionId);
+  }
+
+  private handlePinVerification(connectionId: string, proof: unknown): void {
+    const connection = this.activeConnections.get(connectionId);
+    if (!connection?.authenticated || !connection.pinRequired || connection.pinVerified
+      || !connection.pinVerifier || !connection.pinChallenge) return;
+    const challenge = connection.pinChallenge;
+    // Consume every challenge, including failures, before processing another message.
+    connection.pinChallenge = undefined;
+    if (!this.pinGate.verify(connection.pinVerifier, challenge, proof)) {
+      this.continueAfterVerification(connectionId, true);
+      return;
+    }
+    connection.pinVerified = true;
+    this.continueAfterVerification(connectionId);
+  }
+
   private sendProtocolInfo(connectionId: string): void {
     const features = {
       terminal: this.config.terminal.enabled,
@@ -916,6 +968,11 @@ export class ProxyClient {
         code: 'user_verification_required',
         message: 'User verification required before protocol selection',
       });
+      return;
+    }
+
+    if (connection.pinRequired && !connection.pinVerified) {
+      this.sendToClient(connectionId, 'handshake', { type: 'error', code: 'pin_required', message: 'PIN verification required before protocol selection' });
       return;
     }
 

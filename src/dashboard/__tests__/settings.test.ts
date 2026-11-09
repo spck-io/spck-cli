@@ -6,6 +6,8 @@ import { SETTINGS, toggleSetting } from '../settings.js';
 import { createDefaultConfig } from '../../config/config.js';
 import { RPCRouter } from '../../rpc/router.js';
 import { ErrorCode, ServerConfig } from '../../types.js';
+import { saveConnectionPin } from '../pin-settings.js';
+import * as configFile from '../../config/config.js';
 
 const setting = (id: string) => SETTINGS.find(s => s.id === id)!;
 
@@ -29,6 +31,25 @@ describe('dashboard settings', () => {
   });
 
   const readFile = (): ServerConfig => JSON.parse(fs.readFileSync(configPath, 'utf8'));
+
+  it('defaults PIN protection off and enables it only with a locally configured PIN', () => {
+    expect(setting('requirePin').get(config)).toBe(false);
+    expect(() => toggleSetting(setting('requirePin'), config, configPath)).toThrow();
+    saveConnectionPin(config, '012345', configPath);
+    const stored = readFile();
+    expect(stored.security.requirePin).toBe(true);
+    expect(stored.security.pin?.hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(fs.readFileSync(configPath, 'utf8')).not.toContain('012345');
+    expect(toggleSetting(setting('requirePin'), config, configPath)).toBe(false);
+    expect(readFile().security.requirePin).toBe(false);
+  });
+
+  it('keeps protection unchanged if saving the new PIN fails', () => {
+    vi.spyOn(configFile, 'updateConfigFile').mockImplementationOnce(() => { throw new Error('read-only'); });
+    expect(() => saveConnectionPin(config, '1234', configPath)).toThrow('read-only');
+    expect(config.security.requirePin).toBe(false);
+    expect(config.security.pin).toBeUndefined();
+  });
 
   it('defaults to compact prompts for older configs and saves dashboard changes for new terminals', () => {
     delete config.terminal.compactPrompt;

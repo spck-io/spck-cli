@@ -20,8 +20,9 @@ import { SETTINGS, SettingDef, toggleSetting, newTerminalsHint } from './setting
 import { ESCAPE_TIMEOUT_MS, fit, formatBytes, formatDuration, skipColumns, stripAnsi, truncate, visibleWidth, wrap } from './screen.js';
 import { RPCRouter } from '../rpc/router.js';
 import type { TerminalSummary } from '../services/TerminalService.js';
+import { pinSettingLabel, pinSetupText, saveConnectionPin } from './pin-settings.js';
 
-type View = 'main' | 'logs' | 'qr' | 'terminals';
+type View = 'main' | 'logs' | 'qr' | 'terminals' | 'pinSetup';
 
 type TerminalRow = TerminalSummary & { deviceId: string };
 
@@ -71,6 +72,7 @@ export class Dashboard {
   // Stable "#n" labels, so numbers don't shift when a terminal goes away
   private readonly terminalNumbers = new Map<string, number>();
   private nextTerminalNumber = 1;
+  private pinSetup: { digits: string; first: string; confirming: boolean; error: string } | null = null;
 
   constructor(private options: DashboardOptions) {
     for (const setting of SETTINGS) {
@@ -120,6 +122,7 @@ export class Dashboard {
   stop(options: { printTail?: boolean } = {}): void {
     if (!this.active) return;
     this.active = false;
+    this.pinSetup = null;
     if (this.tick) clearInterval(this.tick);
     for (const unsubscribe of this.unsubscribers) unsubscribe();
     this.unsubscribers = [];
@@ -156,7 +159,9 @@ export class Dashboard {
     if ((key?.ctrl || key?.meta) && key.name !== 'escape') return;
     const name = key?.name ?? str;
 
-    if (this.view === 'logs') {
+    if (this.view === 'pinSetup') {
+      this.handlePinKey(str, name);
+    } else if (this.view === 'logs') {
       this.handleLogKey(name, key);
     } else if (this.view === 'terminals') {
       this.handleTerminalsKey(name);
@@ -180,7 +185,57 @@ export class Dashboard {
       return;
     }
     const setting = SETTINGS.find((s) => s.hotkey === name);
-    if (setting) this.toggle(setting);
+    if (setting?.id === 'requirePin' && !setting.get(this.options.config)) {
+      this.pinSetup = { digits: '', first: '', confirming: false, error: '' };
+      this.setView('pinSetup');
+    } else if (setting) this.toggle(setting);
+  }
+
+  private handlePinKey(str: string | undefined, name: string | undefined): void {
+    const setup = this.pinSetup;
+    if (!setup) return;
+    if (name === 'escape') {
+      this.pinSetup = null;
+      this.setView('main');
+    } else if (name === 'backspace') {
+      setup.digits = setup.digits.slice(0, -1);
+    } else if (name === 'return') {
+      if (!/^\d{4,6}$/.test(setup.digits)) setup.error = pinSetupText.invalid;
+      else if (!setup.confirming) {
+        setup.first = setup.digits;
+        setup.digits = '';
+        setup.confirming = true;
+        setup.error = '';
+      } else if (setup.first !== setup.digits) {
+        setup.digits = '';
+        setup.error = pinSetupText.mismatch;
+      } else {
+        try {
+          saveConnectionPin(this.options.config, setup.digits, this.options.configPath);
+          this.changedThisSession.add('requirePin');
+          this.pinSetup = null;
+          this.setView('main');
+          console.log(`[Dashboard] ${pinSettingLabel()}: on`);
+        } catch (error: any) {
+          setup.error = t('dashboard.saveFailed', { message: error.message });
+          setup.digits = '';
+        }
+      }
+    } else if (str && /^\d+$/.test(str)) {
+      setup.digits = (setup.digits + str).slice(0, 6);
+      setup.error = '';
+    }
+  }
+
+  private renderPinSetup(): string[] {
+    const setup = this.pinSetup!;
+    return [
+      ' ' + chalk.bold.cyan(pinSetupText.title), '',
+      '  ' + chalk.bold(setup.confirming ? pinSetupText.confirm : pinSetupText.enter),
+      '  ' + chalk.gray(setup.confirming ? pinSetupText.confirmHelp : pinSetupText.help), '',
+      '  ' + chalk.cyan('● '.repeat(setup.digits.length) + '○ '.repeat(6 - setup.digits.length)), '',
+      '  ' + chalk.red(setup.error),
+    ];
   }
 
   private handleLogKey(name: string | undefined, key: readline.Key): void {
@@ -351,6 +406,7 @@ export class Dashboard {
 
     let lines: string[];
     if (this.view === 'logs') lines = this.renderLogs(width, height);
+    else if (this.view === 'pinSetup') lines = this.renderPinSetup();
     else if (this.view === 'qr') lines = this.renderQr(width, height);
     else if (this.view === 'terminals') lines = this.renderTerminalsView(width, height);
     else lines = this.renderMain(width, height);
@@ -755,6 +811,7 @@ export class Dashboard {
   // -------------------------------------------------------------- footer
 
   private renderFooter(width: number): string {
+    if (this.view === 'pinSetup') return truncate(' ' + pinSetupText.keys, width);
     if (this.flash && Date.now() - this.flash.at < QUIT_CONFIRM_MS) {
       return chalk.inverse(fit(' ' + this.flash.text, width));
     }

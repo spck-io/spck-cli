@@ -8,6 +8,7 @@ import { ServerConfig } from '../types.js';
 import { updateConfigFile } from '../config/config.js';
 import { RPCRouter } from '../rpc/router.js';
 import { getLocale, t } from '../i18n/index.js';
+import { pinSettingLabel, setRequirePin } from './pin-settings.js';
 
 // These strings belong only to the compact-prompt setting.
 const promptText: Record<string, { label: string; hint: string }> = {
@@ -72,6 +73,11 @@ export const SETTINGS: SettingDef[] = [
     id: 'userAuth', hotkey: 'u', label: () => t('dashboard.settingUserAuth'), apply: 'newConnections',
     get: (c) => c.security.userAuthenticationEnabled,
     set: (c, v) => { c.security.userAuthenticationEnabled = v; },
+  },
+  {
+    id: 'requirePin', hotkey: 'i', label: pinSettingLabel, apply: 'newConnections',
+    get: (c) => c.security.requirePin ?? false,
+    set: setRequirePin,
   },
   {
     // Turning it off refuses new offers right away; turning it on needs the
