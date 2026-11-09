@@ -135,8 +135,10 @@ function parsePostBody(req: http.IncomingMessage): Promise<Record<string, string
 /**
  * Authenticate with Firebase using secure local callback server
  * Token is received via POST to prevent exposure in URLs
+ * onInteractiveAuth lets quiet startup reveal the sign-in instructions.
  */
-export async function authenticateWithFirebase(): Promise<FirebaseCredentials> {
+export async function authenticateWithFirebase(onInteractiveAuth?: () => void): Promise<FirebaseCredentials> {
+  onInteractiveAuth?.();
   console.log('\n=== ' + t('auth.title') + ' ===\n');
 
   // 1. Select best proxy server
@@ -419,10 +421,10 @@ const FIREBASE_API_KEY = 'AIzaSyCFgtHhWiM-EdFBdiDw9ISHfcGOqbV3OCU';
  *
  * @see https://firebase.google.com/docs/reference/rest/auth#section-refresh-token
  */
-export async function refreshFirebaseToken(storedCredentials: StoredCredentials): Promise<FirebaseCredentials> {
+export async function refreshFirebaseToken(storedCredentials: StoredCredentials, onInteractiveAuth?: () => void): Promise<FirebaseCredentials> {
   if (!storedCredentials.refreshToken) {
     console.log('⚠️  ' + t('auth.noRefreshToken'));
-    return authenticateWithFirebase();
+    return authenticateWithFirebase(onInteractiveAuth);
   }
 
   try {
@@ -448,7 +450,7 @@ export async function refreshFirebaseToken(storedCredentials: StoredCredentials)
           reason: errorMessage
         }, 'warn');
         console.log('⚠️  ' + t('auth.refreshTokenExpired'));
-        return authenticateWithFirebase();
+        return authenticateWithFirebase(onInteractiveAuth);
       }
 
       throw new Error(`Token refresh failed: ${errorMessage}`);
@@ -490,7 +492,7 @@ export async function refreshFirebaseToken(storedCredentials: StoredCredentials)
     }, 'error');
     console.error(t('auth.tokenRefreshError', { message: error.message }));
     console.log('⚠️  ' + t('auth.tokenRefreshFailed'));
-    return authenticateWithFirebase();
+    return authenticateWithFirebase(onInteractiveAuth);
   }
 }
 
@@ -498,7 +500,7 @@ export async function refreshFirebaseToken(storedCredentials: StoredCredentials)
  * Get a valid Firebase ID token by refreshing from stored credentials
  * Always generates a fresh ID token using the refresh token
  */
-export async function getValidFirebaseToken(storedCredentials: StoredCredentials): Promise<FirebaseCredentials> {
+export async function getValidFirebaseToken(storedCredentials: StoredCredentials, onInteractiveAuth?: () => void): Promise<FirebaseCredentials> {
   console.log('🔄 ' + t('auth.generatingToken'));
-  return refreshFirebaseToken(storedCredentials);
+  return refreshFirebaseToken(storedCredentials, onInteractiveAuth);
 }

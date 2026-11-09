@@ -84,19 +84,19 @@ describe('authenticateWithFirebase()', () => {
     await expect(result).resolves.toMatchObject({ firebaseToken: 'id-token' });
   });
 
-  it('opens an auto URL with relay parameters and keeps the manual QR relay-only', async () => {
+  it('opens a localhost callback URL and keeps the manual QR relay-only', async () => {
     const { result, url } = await startAuth();
     expect(url.origin + url.pathname).toBe('https://spck.io/auth');
-    expect(url.searchParams.get('auto')).toBe('1');
-    expect(url.searchParams.get('server')).toBe('cli-na-1.spck.io');
-    const code = url.searchParams.get('code');
+    expect(url.searchParams.has('auto')).toBe(false);
+    expect(url.searchParams.has('server')).toBe(false);
+    expect(url.searchParams.has('code')).toBe(false);
+    const code = url.searchParams.get('state');
     expect(code).toMatch(/^[a-f0-9]{64}$/);
-    expect(url.searchParams.get('state')).toBe(code);
     expect(url.searchParams.get('redirect')).toBe('http://localhost:45678/callback');
 
     const manualUrl = new URL(vi.mocked(qrcode.generate).mock.calls[0][0]);
     expect(manualUrl.searchParams.get('code')).toBe(code);
-    expect(manualUrl.searchParams.get('server')).toBe(url.searchParams.get('server'));
+    expect(manualUrl.searchParams.get('server')).toBe('cli-na-1.spck.io');
     expect(manualUrl.searchParams.has('auto')).toBe(false);
     expect(manualUrl.searchParams.has('redirect')).toBe(false);
     expect(fetchMock.mock.calls[0][0]).toBe('https://cli-na-1.spck.io/api/auth/token/poll');
