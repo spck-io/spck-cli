@@ -23,7 +23,7 @@ describe('detectTools', () => {
     expect(tools.ripgrep).toBe(false);
     expect(warn).not.toHaveBeenCalled();
     expect(log.mock.calls.flat().join('\n')).toContain('BurntSushi/ripgrep');
-    expect(log.mock.calls.flat().join('\n')).toContain('npm install -g @agentclientprotocol/codex-acp');
+    expect(log.mock.calls.flat().join('\n')).toContain('Codex (via codex-acp) not bundled');
   });
 
   it('detects ACP executables even when --version fails', async () => {
@@ -36,5 +36,14 @@ describe('detectTools', () => {
     expect(tools.codex).toBe(true);
     expect(tools.gemini).toBe(true);
     expect(tools.claude).toBe(false);
+  });
+
+  it('reports bundled Codex availability and version without a global executable', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.mocked(resolveAcpAgents).mockReturnValueOnce([
+      { name: 'codex', binary: process.execPath, args: ['/bundled/codex-acp/dist/index.js'], version: '2.6.0' },
+    ]);
+    expect((await detectTools()).codex).toBe(true);
+    expect(log.mock.calls.flat().join('\n')).toContain('Codex (via codex-acp) bundled: 2.6.0');
   });
 });

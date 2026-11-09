@@ -36,6 +36,7 @@
   "license": "MIT",
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "0.100.0",
+    "@agentclientprotocol/codex-acp": "2.6.0",
     "@xterm/addon-serialize": "0.14.0",
     "@xterm/headless": "6.0.0",
     "chalk": "6.0.1",

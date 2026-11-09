@@ -85,59 +85,32 @@ export async function detectTools(options?: {
     }
   }
 
-  // Probe each ACP-capable agent binary in parallel — they're on the cold
-  // startup path. None of these are required; the Source switcher in the
-  // editor hides agents that aren't on PATH and the client falls back to the
-  // server-routed path when none are available.
-  // Claude rides on @agentclientprotocol/claude-agent-acp, which is bundled
-  // as a dep of this cli — the native `claude acp` binary doesn't advertise
-  // its model catalogue in the ACP `initialize` response, so the editor
-  // wouldn't be able to render a model picker.
-  // Share discovery with the RPC service. ACP wrappers need not implement
-  // --version, so their availability must come from executable lookup.
+  // Share discovery with the RPC service. Claude and Codex adapters ship as
+  // dependencies; Gemini and fallback executables are resolved on PATH.
+  // Availability does not depend on adapters implementing --version.
   const resolvedAgents = resolveAcpAgents();
-  const pathAgents: Array<{ key: 'codex' | 'gemini'; binary: string; label: string }> = [
-    { key: 'codex',  binary: 'codex-acp',  label: 'Codex (codex-acp)' },
-    { key: 'gemini', binary: 'gemini',     label: 'Gemini CLI' }
+  const agents: Array<{
+    key: 'claude' | 'codex' | 'gemini'; binary: string; label: string; bundled: boolean;
+  }> = [
+    { key: 'claude', binary: 'claude-agent-acp', label: 'Claude', bundled: true },
+    { key: 'codex', binary: 'codex-acp', label: 'Codex', bundled: true },
+    { key: 'gemini', binary: 'gemini', label: 'Gemini CLI', bundled: false },
   ];
-  const probes = await Promise.all(pathAgents.map(async (agent) => {
-    const available = resolvedAgents.some((resolved) => resolved.name === agent.key);
-    if (!available) return { agent, available, version: '' };
-    // Thin wrappers (e.g. codex-acp) don't always implement --version; ACP
-    // still works without it, so version is best-effort.
-    let version = '';
-    try {
-      const { stdout } = await execAsync(`${agent.binary} --version`, { timeout: 3000 });
-      version = stdout.trim();
-    } catch {
-      // ignore
-    }
-    return { agent, available, version };
-  }));
-
-  const claudeAgent = resolvedAgents.find((agent) => agent.name === 'claude');
-  const claudeVersion = claudeAgent?.version ?? '';
-  result.claude = !!claudeAgent;
 
   console.log(`\n--- ACP Agents (local AI coding agents) ---`);
-  if (result.claude) {
-    console.log(claudeVersion
-      ? `✅ Claude (via claude-agent-acp) bundled: ${claudeVersion} (ACP transport available)`
-      : `✅ Claude (via claude-agent-acp) bundled (ACP transport available)`);
-  } else {
-    console.log(`⚪ Claude (via claude-agent-acp) not bundled — run \`npm install\` to enable`);
-  }
-  for (const { agent, available, version } of probes) {
-    result[agent.key] = available;
-    if (available) {
-      console.log(version
-        ? `✅ ${agent.label} detected: ${version} (ACP transport available)`
-        : `✅ ${agent.label} detected (ACP transport available)`);
+  for (const agent of agents) {
+    const resolved = resolvedAgents.find((entry) => entry.name === agent.key);
+    result[agent.key] = !!resolved;
+    if (resolved) {
+      const source = resolved.binary === process.execPath
+        ? `(via ${agent.binary}) bundled`
+        : 'detected';
+      const version = resolved.version ? `: ${resolved.version}` : '';
+      console.log(`✅ ${agent.label} ${source}${version} (ACP transport available)`);
+    } else if (agent.bundled) {
+      console.log(`⚪ ${agent.label} (via ${agent.binary}) not bundled — run \`npm install\` to enable`);
     } else {
       console.log(`⚪ ${agent.label} not detected (binary: ${agent.binary})`);
-      if (agent.key === 'codex') {
-        console.log('   Codex requires its ACP adapter, even when `codex` is installed: npm install -g @agentclientprotocol/codex-acp');
-      }
     }
   }
   if (!result.claude && !result.codex && !result.gemini) {

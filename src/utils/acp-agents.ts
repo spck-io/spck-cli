@@ -27,10 +27,11 @@ export interface ResolvedAgent {
 //                the ACP `initialize` response, so the editor can't render a
 //                model picker; the wrapper does. Auth still uses claude-code's
 //                own login (`claude login` or ANTHROPIC_API_KEY).
-//   codex        OpenAI Codex via the @agentclientprotocol/codex-acp wrapper
-//                (install: `npm i -g @agentclientprotocol/codex-acp`). The
-//                wrapper exposes a `codex-acp` binary; uses Codex CLI auth
-//                under the hood (`codex login` or OPENAI_API_KEY).
+//   codex        OpenAI Codex via @agentclientprotocol/codex-acp, also bundled
+//                and launched with the current node binary. The adapter ships
+//                a compatible Codex runtime and uses the existing Codex login.
+//                A global codex-acp binary remains a fallback if the bundled
+//                package is missing.
 //   gemini       Google's gemini-cli native ACP mode: `gemini --acp`. Auth
 //                via interactive OAuth on first run, or GEMINI_API_KEY env.
 //                (The older --experimental-acp flag is a deprecated alias.)
@@ -38,8 +39,7 @@ export interface ResolvedAgent {
 // Resolve the path to a JS entrypoint inside a bundled package's `bin` field,
 // along with the package's declared version. Returns null if the package isn't
 // installed so the agent gets dropped from the registry rather than crashing
-// the cli at startup. Version is best-effort — packages may omit it, but the
-// claude-agent-acp dep we care about always sets it.
+// the cli at startup. Version is best-effort — packages may omit it.
 function resolveBundledBin(
   pkgName: string,
   binName?: string
@@ -72,6 +72,7 @@ type PathAgent = { name: string; binary: string; args: string[] };
 
 const BUNDLED_AGENTS: ReadonlyArray<BundledAgent> = [
   { name: 'claude', pkg: '@agentclientprotocol/claude-agent-acp', binName: 'claude-agent-acp' },
+  { name: 'codex', pkg: '@agentclientprotocol/codex-acp', binName: 'codex-acp' },
 ];
 const PATH_AGENTS: ReadonlyArray<PathAgent> = [
   { name: 'codex', binary: 'codex-acp', args: [] },
@@ -79,7 +80,7 @@ const PATH_AGENTS: ReadonlyArray<PathAgent> = [
 ];
 
 // Probe each agent: bundled ones come from node_modules and launch with the
-// current `node`; PATH-based ones (codex, gemini) resolve their binary via
+// current `node`; PATH-based fallbacks resolve their binary via
 // `which`/`where`. The actual ACP handshake — including the real model list
 // — happens later via probeAgentModels() in capabilities().
 export function resolveAcpAgents(): ResolvedAgent[] {
@@ -96,6 +97,7 @@ export function resolveAcpAgents(): ResolvedAgent[] {
   }
   const lookup = process.platform === 'win32' ? 'where' : 'which';
   for (const candidate of PATH_AGENTS) {
+    if (resolved.some((agent) => agent.name === candidate.name)) continue;
     const which = spawnSync(lookup, [candidate.binary], { encoding: 'utf8' });
     if (which.status !== 0) continue;
     const binary = (which.stdout || '').split('\n')[0]?.trim();

@@ -26,6 +26,10 @@ To skip `npx` next time, install the CLI with `npm install -g spck` and run `spc
 
 A free Spck Editor account includes 30 minutes a day of remote use. A Premium subscription removes the limit.
 
+The Claude and Codex ACP adapters are bundled with Spck CLI. Sign in with the
+agent's own login on the CLI host; no global ACP adapter installation is needed.
+Gemini CLI is detected separately on PATH.
+
 ## Documentation
 
 - [Getting started](https://docs.spck.io/en/cli-start)
