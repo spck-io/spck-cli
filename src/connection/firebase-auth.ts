@@ -1,6 +1,6 @@
 /**
- * Firebase authentication with local callback server
- * Opens browser for OAuth flow, captures token via localhost POST
+ * Firebase authentication via relay with an optional local callback
+ * Opens browser for OAuth flow, captures tokens via relay or localhost POST
  *
  * Security features:
  * - Token sent via POST body (not in URL) to prevent leaking via browser history/referrer
@@ -133,8 +133,8 @@ function parsePostBody(req: http.IncomingMessage): Promise<Record<string, string
 }
 
 /**
- * Authenticate with Firebase using secure local callback server
- * Token is received via POST to prevent exposure in URLs
+ * Authenticate with Firebase using relay or a secure local callback server
+ * Tokens are sent via POST to prevent exposure in URLs
  * onInteractiveAuth lets quiet startup reveal the sign-in instructions.
  */
 export async function authenticateWithFirebase(onInteractiveAuth?: () => void): Promise<FirebaseCredentials> {
@@ -165,16 +165,19 @@ export async function authenticateWithFirebase(onInteractiveAuth?: () => void): 
   // 3. Generate code for both browser and manual flows
   const code = crypto.randomBytes(32).toString('hex');
 
-  // 4. Build auth URLs
-  // Browser flow: localhost callback
-  const browserUrl = new URL(FIREBASE_AUTH_BASE_URL);
-  browserUrl.searchParams.set('redirect', redirectUrl);
-  browserUrl.searchParams.set('state', code);
-
-  // Manual flow: proxy server relay (server param is hostname only, https:// is assumed)
+  // 4. Include relay parameters in both links so the browser can authenticate
+  // even when localhost is blocked or upgraded to HTTPS. QR/manual links
+  // remain relay-only so they also work from another device.
   const manualUrl = new URL(FIREBASE_AUTH_BASE_URL);
   manualUrl.searchParams.set('code', code);
   manualUrl.searchParams.set('server', proxyServerUrl);
+
+  // Chrome can try localhost first and fall back; Safari and other browsers
+  // use the relay directly, as selected by the auth page.
+  const browserUrl = new URL(manualUrl);
+  browserUrl.searchParams.set('auto', '1');
+  browserUrl.searchParams.set('redirect', redirectUrl);
+  browserUrl.searchParams.set('state', code);
 
   // 5. Open browser (primary method)
   console.log(t('auth.openingBrowser') + '\n');
