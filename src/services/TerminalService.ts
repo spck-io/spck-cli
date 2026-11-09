@@ -8,6 +8,7 @@ import SerializeAddonModule from '@xterm/addon-serialize';
 import defaultShell from 'default-shell';
 import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types.js';
 import { logTerminalRead, logTerminalWrite } from '../utils/logger.js';
+import { createShellLaunch } from './shell-prompt.js';
 
 const { Terminal: XtermHeadless } = XtermHeadlessModule as any;
 const { SerializeAddon } = SerializeAddonModule as any;
@@ -33,6 +34,7 @@ interface TerminalSession {
   bufferBytes: number;
   bufferDirty: boolean;
   bufferMeasuredAt: number;
+  cleanupPrompt(): void;
 }
 
 export interface TerminalSummary {
@@ -60,7 +62,8 @@ export class TerminalService {
     private getSocket: () => AuthenticatedSocket,
     private maxTerminals: number = 10,
     private maxBufferedLines: number = 10000,
-    private rootPath: string = process.cwd()
+    private rootPath: string = process.cwd(),
+    private getCompactPrompt: () => boolean = () => true
   ) {
     // Enforce hard limit on buffer size to prevent memory exhaustion
     if (this.maxBufferedLines > MAX_BUFFER_LINES_HARD_LIMIT) {
@@ -167,15 +170,17 @@ export class TerminalService {
 
     // Spawn PTY process
     let ptyProcess: pty.IPty;
+    const launch = createShellLaunch(shell, this.getCompactPrompt());
     try {
-      ptyProcess = pty.spawn(shell, [], {
+      ptyProcess = pty.spawn(shell, launch.args, {
         name: 'xterm-256color',
         cols: params.cols || 80,
         rows: params.rows || 24,
         cwd: this.rootPath,
-        env: process.env,
+        env: launch.env,
       });
     } catch (error: any) {
+      launch.cleanup();
       // Log full error details server-side for debugging
       console.error('Failed to spawn terminal:', {
         error: error.message,
@@ -232,6 +237,7 @@ export class TerminalService {
 
     // Handle process exit
     ptyProcess.onExit(({ exitCode }) => {
+      launch.cleanup();
       const session = this.sessions.get(terminalId);
       if (session) {
         session.exited = true;
@@ -263,6 +269,7 @@ export class TerminalService {
       bufferBytes: 0,
       bufferDirty: true,
       bufferMeasuredAt: 0,
+      cleanupPrompt: launch.cleanup,
     });
 
     // Send initial buffer
@@ -289,6 +296,7 @@ export class TerminalService {
     if (!session.exited) {
       session.pty.kill();
     }
+    session.cleanupPrompt();
 
     // Clean up
     this.sessions.delete(params.terminalId);
@@ -516,6 +524,7 @@ export class TerminalService {
       if (!session.exited) {
         session.pty.kill();
       }
+      session.cleanupPrompt();
     }
     this.sessions.clear();
   }

@@ -5,6 +5,13 @@ import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
 
 import { TerminalService } from '../TerminalService.js';
 import { ErrorCode } from '../../types.js';
+import { createShellLaunch } from '../shell-prompt.js';
+
+vi.mock('../shell-prompt.js', () => ({
+  createShellLaunch: vi.fn((_shell: string, compact: boolean) => ({
+    args: compact ? ['--test-compact-prompt'] : [], env: { ...process.env }, cleanup: vi.fn(),
+  })),
+}));
 
 // Mock node-pty
 vi.mock('node-pty', () => {
@@ -120,7 +127,7 @@ describe('TerminalService', () => {
       expect(result).toMatch(/^term-/);
       expect(pty.spawn).toHaveBeenCalledWith(
         expect.any(String),
-        [],
+        ['--test-compact-prompt'],
         expect.objectContaining({
           name: 'xterm-256color',
           cols: 80,
@@ -142,7 +149,7 @@ describe('TerminalService', () => {
       expect(result).toMatch(/^term-/);
       expect(pty.spawn).toHaveBeenCalledWith(
         expect.any(String),
-        [],
+        ['--test-compact-prompt'],
         expect.objectContaining({
           cols: 80,
           rows: 24,
@@ -163,6 +170,23 @@ describe('TerminalService', () => {
           }),
         })
       );
+    });
+
+    it('reads the prompt setting for each new terminal without changing existing sessions', async () => {
+      let compact = true;
+      service = new TerminalService(() => mockSocket, 10, 10000, '/test/root', () => compact);
+      const first = await service.handle('create', {});
+      compact = false;
+      await service.handle('create', {});
+      expect(pty.spawn).toHaveBeenLastCalledWith(expect.any(String), [], expect.any(Object));
+      await service.handle('send', { terminalId: first, data: 'echo still-running\r' });
+      expect(mockPtyProcess.write).toHaveBeenCalledWith('echo still-running\r');
+    });
+
+    it('cleans up temporary startup files if the PTY cannot start', async () => {
+      (pty.spawn as Mock).mockImplementationOnce(() => { throw new Error('spawn failed'); });
+      await expect(service.handle('create', {})).rejects.toMatchObject({ code: ErrorCode.INTERNAL_ERROR });
+      expect(vi.mocked(createShellLaunch).mock.results[0].value.cleanup).toHaveBeenCalledOnce();
     });
 
     it('should set up PTY data handler', async () => {

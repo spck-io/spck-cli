@@ -27,6 +27,7 @@ export interface ServerConfig {
 
   terminal: {
     enabled: boolean;
+    compactPrompt?: boolean; // Defaults to true; applies to new terminal sessions
     maxBufferedLines: number;
     maxTerminals: number;
   };

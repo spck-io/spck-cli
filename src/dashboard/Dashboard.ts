@@ -16,7 +16,7 @@ import { formatServerName } from '../config/server-selection.js';
 import { t } from '../i18n/index.js';
 import { LogBuffer, LogEntry } from './LogBuffer.js';
 import { WakeLock } from './WakeLock.js';
-import { SETTINGS, SettingDef, toggleSetting } from './settings.js';
+import { SETTINGS, SettingDef, toggleSetting, newTerminalsHint } from './settings.js';
 import { ESCAPE_TIMEOUT_MS, fit, formatBytes, formatDuration, skipColumns, stripAnsi, truncate, visibleWidth, wrap } from './screen.js';
 import { RPCRouter } from '../rpc/router.js';
 import type { TerminalSummary } from '../services/TerminalService.js';
@@ -307,7 +307,7 @@ export class Dashboard {
     try {
       const enabled = toggleSetting(setting, this.options.config, this.options.configPath);
       this.changedThisSession.add(setting.id);
-      console.log(`[Dashboard] ${t(setting.labelKey)}: ${enabled ? 'on' : 'off'}`);
+      console.log(`[Dashboard] ${setting.label()}: ${enabled ? 'on' : 'off'}`);
     } catch (error: any) {
       this.setFlash(chalk.red(t('dashboard.saveFailed', { message: error.message })));
       console.error(`[Dashboard] ${t('dashboard.saveFailed', { message: error.message })}`);
@@ -408,7 +408,7 @@ export class Dashboard {
     const settings = [chalk.bold(t('dashboard.settings'))];
     for (const setting of SETTINGS) {
       const enabled = setting.get(this.options.config);
-      settings.push('  ' + this.settingRow(setting.hotkey, t(setting.labelKey), enabled, this.settingHint(setting, enabled, status)));
+      settings.push('  ' + this.settingRow(setting.hotkey, setting.label(), enabled, this.settingHint(setting, enabled, status)));
     }
     const wake = this.options.wakeLock;
     const wakeHint = wake.state === 'unavailable'
@@ -441,6 +441,10 @@ export class Dashboard {
     // Purely informational, so it goes first when the terminal is too short
     const withCapabilities = buildSections(true);
     const sections = countRows(withCapabilities) > available ? buildSections(false) : withCapabilities;
+    // An empty terminal list can yield its space to the settings on short screens.
+    if (terminalSection && terminals?.length === 0 && countRows(sections) > available) {
+      sections.splice(sections.indexOf(terminalSection), 1);
+    }
     const rows = countRows(sections);
     // Give up the blank lines between sections before hiding any content
     const compact = rows + sections.length - 1 + notice.length > available;
@@ -643,6 +647,7 @@ export class Dashboard {
       return enabled !== this.initialValues.get(setting.id) ? chalk.yellow(t('dashboard.restartToApply')) : '';
     }
     if (!this.changedThisSession.has(setting.id)) return '';
+    if (setting.apply === 'newTerminals') return chalk.gray(newTerminalsHint());
     if (setting.apply === 'reconnect' && status.clients.length > 0) {
       return chalk.yellow(t('dashboard.reconnectToApply'));
     }

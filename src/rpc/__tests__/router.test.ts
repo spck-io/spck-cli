@@ -129,6 +129,15 @@ describe('RPCRouter', () => {
   });
 
   describe('Route Method Parsing', () => {
+    it('uses the latest compact prompt setting for new terminals on an existing device', async () => {
+      await RPCRouter.route(createRequest('terminal.create', {}), mockSocket);
+      const getCompactPrompt = MockTerminalService.mock.calls[0][4]!;
+      expect(getCompactPrompt()).toBe(true);
+      RPCRouter.setCompactPrompt(false);
+      expect(getCompactPrompt()).toBe(false);
+      await RPCRouter.route(createRequest('terminal.create', {}), mockSocket);
+      expect(MockTerminalService).toHaveBeenCalledTimes(1);
+    });
     it('should parse method correctly for fs service', async () => {
       await RPCRouter.route(
         createRequest('fs.readFile', { path: '/test.txt' }, 1),

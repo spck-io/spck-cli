@@ -80,6 +80,18 @@ describe('config', () => {
       expect(result).toEqual(validConfig);
     });
 
+    it.each([true, false])('loads an explicit compactPrompt setting of %s', (compactPrompt) => {
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ ...validConfig, terminal: { ...validConfig.terminal, compactPrompt } }));
+      expect(loadConfig().terminal.compactPrompt).toBe(compactPrompt);
+    });
+
+    it('rejects invalid compactPrompt values', () => {
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ ...validConfig, terminal: { ...validConfig.terminal, compactPrompt: 'false' } }));
+      expect(() => loadConfig()).toThrow('Configuration file is corrupted');
+    });
+
     it('should throw CORRUPTED error for invalid JSON', () => {
       mockFs.existsSync.mockReturnValue(true);
       mockFs.readFileSync.mockReturnValue('not valid json{');
@@ -267,6 +279,7 @@ describe('config', () => {
       expect(config.version).toBe(1);
       expect(config.root).toBe(mockCwd);
       expect(config.terminal.enabled).toBe(true);
+      expect(config.terminal.compactPrompt).toBe(true);
       expect(config.security.userAuthenticationEnabled).toBe(false);
     });
 

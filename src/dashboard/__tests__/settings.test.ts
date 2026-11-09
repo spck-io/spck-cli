@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -23,10 +23,24 @@ describe('dashboard settings', () => {
 
   afterEach(() => {
     RPCRouter.setFeatureEnabled('terminal', true);
+    RPCRouter.setCompactPrompt(true);
+    vi.restoreAllMocks();
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
   const readFile = (): ServerConfig => JSON.parse(fs.readFileSync(configPath, 'utf8'));
+
+  it('defaults to compact prompts for older configs and saves dashboard changes for new terminals', () => {
+    delete config.terminal.compactPrompt;
+    const apply = vi.spyOn(RPCRouter, 'setCompactPrompt');
+    expect(setting('compactPrompt').get(config)).toBe(true);
+    expect(setting('compactPrompt').apply).toBe('newTerminals');
+    expect(toggleSetting(setting('compactPrompt'), config, configPath)).toBe(false);
+    expect(apply).toHaveBeenCalledWith(false);
+    expect(readFile().terminal.compactPrompt).toBe(false);
+    expect(toggleSetting(setting('compactPrompt'), config, configPath)).toBe(true);
+    expect(readFile().terminal.compactPrompt).toBe(true);
+  });
 
   it('turns the terminal off for the running CLI and saves it', async () => {
     expect(toggleSetting(setting('terminal'), config, configPath)).toBe(false);

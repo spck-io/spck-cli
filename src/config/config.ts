@@ -161,6 +161,9 @@ function validateConfig(config: ServerConfig): void {
   if (typeof config.terminal.enabled !== 'boolean') {
     throw new Error('Terminal enabled must be a boolean.');
   }
+  if (config.terminal.compactPrompt !== undefined && typeof config.terminal.compactPrompt !== 'boolean') {
+    throw new Error('Invalid terminal.compactPrompt: expected a boolean.');
+  }
 
   if (!config.security || typeof config.security !== 'object') {
     throw new Error('Invalid or missing security configuration.');
@@ -189,6 +192,7 @@ export function createDefaultConfig(overrides: Partial<ServerConfig> = {}): Serv
     name: getDefaultServerName(),
     terminal: {
       enabled: true,
+      compactPrompt: true,
       maxBufferedLines: 5000,
       maxTerminals: 10,
     },

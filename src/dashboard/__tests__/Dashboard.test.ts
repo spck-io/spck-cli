@@ -140,6 +140,7 @@ describe('Dashboard', () => {
       console.warn('relay is slow');
       start(100, 24);
       expect(text()).toContain('Keep computer awake');
+      expect(text()).toContain('[p] Compact shell prompt');
       expect(text()).toContain('relay is slow');
       expect(text()).toMatch(/\+\d+ more/);
     });
@@ -178,6 +179,7 @@ describe('Dashboard', () => {
       start(100, 18);
       expect(text()).not.toContain('Capabilities');
       expect(text()).toContain('Keep computer awake');
+      expect(text()).toContain('[p] Compact shell prompt');
     });
 
     it('shows all terminals when they fit', async () => {

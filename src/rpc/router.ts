@@ -25,6 +25,7 @@ export class RPCRouter {
   private static rootPath: string;
   private static tools: ToolDetectionResult;
   private static terminalEnabled: boolean;
+  private static compactPrompt = true;
   private static browserProxyEnabled: boolean;
   private static languageServerEnabled: boolean;
   private static acpEnabled: boolean;
@@ -38,6 +39,7 @@ export class RPCRouter {
     this.rootPath = rootPath;
     this.tools = tools;
     this.terminalEnabled = config.terminal?.enabled ?? true;
+    this.compactPrompt = config.terminal?.compactPrompt ?? true;
     this.browserProxyEnabled = config.browserProxy?.enabled ?? true;
     this.languageServerEnabled = config.languageServer?.enabled ?? true;
     // ACP is opt-out per project. Default true for back-compat with configs
@@ -89,6 +91,10 @@ export class RPCRouter {
         }
         break;
     }
+  }
+
+  static setCompactPrompt(enabled: boolean): void {
+    this.compactPrompt = enabled;
   }
 
   /**
@@ -179,7 +185,7 @@ export class RPCRouter {
         }
         return currentSocket;
       };
-      this.terminalServices.set(deviceId, new TerminalService(getSocket, 10, 10000, this.rootPath));
+      this.terminalServices.set(deviceId, new TerminalService(getSocket, 10, 10000, this.rootPath, () => this.compactPrompt));
     }
 
     return this.terminalServices.get(deviceId)!;

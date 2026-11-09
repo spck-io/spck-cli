@@ -227,6 +227,7 @@ export async function runSetup(configPath?: string): Promise<ServerConfig> {
       name: defaultConfig.name,
       terminal: {
         enabled: terminalEnabled,
+        compactPrompt: true,
         maxBufferedLines,
         maxTerminals
       },
