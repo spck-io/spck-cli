@@ -8,21 +8,23 @@
 // uses). Server-initiated requests (session/request_permission) use the
 // socket.emit/socket.on('rpc') pattern from GitService.requestAuth.
 
-import { spawnSync } from 'child_process';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { createRequire } from 'module';
+import { resolveAcpAgents, type ResolvedAgent } from '../utils/acp-agents.js';
 import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types.js';
 import { AcpProcess } from './AcpProcess.js';
 import { logAcp } from '../utils/logger.js';
 import {
   ACP_PROTOCOL_VERSION,
   ACP_ERROR_AUTH_REQUIRED,
+  AcpConfigOption,
   AcpModelInfo,
   InitializeResult,
   NewSessionResult,
   SessionUpdateNotification,
 } from '../types/acp.js';
+
+export type { ResolvedAgent } from '../utils/acp-agents.js';
 
 type BroadcastFn = (method: string, params: any) => void;
 
@@ -56,17 +58,6 @@ interface ManagedSession {
   socketTeardownWired: boolean;
 }
 
-// One ACP-capable CLI agent on the host. We model this as a list so adding
-// codex/aider/etc. is purely a registry change — no call sites to update.
-export interface ResolvedAgent {
-  name: string;
-  binary: string;
-  version: string;
-  // The argv to launch the agent's ACP loop. Most agents follow `<binary> acp`,
-  // but some may differ; keep it explicit per-entry.
-  args: string[];
-}
-
 export interface AcpServiceOptions {
   rootPath: string;
   // Override for tests; defaults to probing the built-in registry on PATH.
@@ -92,7 +83,7 @@ export class AcpService {
 
   constructor(opts: AcpServiceOptions) {
     this.rootPath = opts.rootPath;
-    this.resolveAgents = opts.resolveAgents ?? defaultResolveAgents;
+    this.resolveAgents = opts.resolveAgents ?? resolveAcpAgents;
   }
 
   setBroadcast(fn: BroadcastFn): void {
@@ -228,7 +219,7 @@ export class AcpService {
         { cwd: this.rootPath, mcpServers: [] },
         15000
       );
-      return normalizeModelsPayload(session?.models);
+      return modelsFromSession(session);
     } finally {
       await proc.stop().catch(() => null);
     }
@@ -338,6 +329,16 @@ export class AcpService {
     let result: NewSessionResult;
     try {
       result = await proc.request<NewSessionResult>('session/new', newSessionParams);
+      // Current agents expose model selection through configOptions. Passing
+      // `model` to session/new alone is ignored by these agents.
+      const modelOption = findModelConfigOption(result.configOptions);
+      if (args.model && modelOption && modelOption.currentValue !== args.model) {
+        await proc.request('session/set_config_option', {
+          sessionId: result.sessionId,
+          configId: modelOption.id,
+          value: args.model,
+        });
+      }
     } catch (err: any) {
       await proc.stop().catch(() => null);
       if (err?.code === ACP_ERROR_AUTH_REQUIRED) {
@@ -374,8 +375,8 @@ export class AcpService {
     if (session.model === params.model) {
       return { sessionId: session.agentSessionId };
     }
-    // ACP doesn't standardize model switching mid-session. We recreate the
-    // session under the same chatId; the client is responsible for replaying
+    // Recreate the session under the same chatId to support cross-agent
+    // switches; the client is responsible for replaying
     // history if needed (or accepting a cold start). Cross-agent switches
     // (e.g. claude -> codex) are supported because the target agent is
     // resolved from the model id, not pinned to the previous session.
@@ -678,30 +679,28 @@ export class AcpService {
   }
 }
 
-// Built-in registry of ACP-capable CLI agents. Each entry names the PATH
-// binary plus the argv that launches its ACP loop. Adding a new agent is a
-// one-line change here — capabilities() and newSession() are agent-agnostic.
-//
-// Conventions used by each agent's ACP entrypoint:
-//   claude       Anthropic's Claude via @agentclientprotocol/claude-agent-acp,
-//                bundled as a direct dependency of this cli. We resolve the
-//                package's bin script through node_modules and spawn it with
-//                the current `node` binary — no PATH lookup, no npx download
-//                cost at runtime, no global install required. The native
-//                `claude acp` binary doesn't advertise its model catalogue in
-//                the ACP `initialize` response, so the editor can't render a
-//                model picker; the wrapper does. Auth still uses claude-code's
-//                own login (`claude login` or ANTHROPIC_API_KEY).
-//   codex        OpenAI Codex via the @agentclientprotocol/codex-acp wrapper
-//                (install: `npm i -g @agentclientprotocol/codex-acp`). The
-//                wrapper exposes a `codex-acp` binary; uses Codex CLI auth
-//                under the hood (`codex login` or OPENAI_API_KEY).
-//   gemini       Google's gemini-cli native ACP mode: `gemini --acp`. Auth
-//                via interactive OAuth on first run, or GEMINI_API_KEY env.
-//                (The older --experimental-acp flag is a deprecated alias.)
+// Current agents expose model selectors through session configOptions.
+function findModelConfigOption(options?: AcpConfigOption[]): AcpConfigOption | undefined {
+  return options?.find((o) => o.type === 'select' && o.category === 'model')
+    ?? options?.find((o) => o.type === 'select' && o.id === 'model');
+}
 
-// Two shapes seen in the wild: a flat array (codex/gemini-style), or
-// claude-agent-acp's `{availableModels:[{modelId,name,description}], currentModelId}`.
+function modelsFromSession(session: NewSessionResult): AcpModelInfo[] {
+  const option = findModelConfigOption(session.configOptions);
+  if (option) {
+    const values = (option.options ?? []).flatMap((entry) => 'group' in entry ? entry.options : [entry]);
+    const models = values.map((entry) => normalizeModelEntry({
+      id: entry.value,
+      name: entry.name,
+      description: entry.description,
+    }, typeof option.currentValue === 'string' ? option.currentValue : null))
+      .filter((model): model is AcpModelInfo => model !== null);
+    if (models.length) return models;
+  }
+  return normalizeModelsPayload(session.models);
+}
+
+// Legacy agents expose a flat array or an availableModels/currentModelId object.
 function normalizeModelsPayload(payload: unknown): AcpModelInfo[] {
   if (!payload) return [];
   if (Array.isArray(payload)) {
@@ -734,79 +733,4 @@ function normalizeModelEntry(raw: unknown, currentModelId: string | null = null)
   if (description) out.description = description;
   if (isDefault) out.default = true;
   return out;
-}
-
-// Resolve the path to a JS entrypoint inside a bundled package's `bin` field,
-// along with the package's declared version. Returns null if the package isn't
-// installed so the agent gets dropped from the registry rather than crashing
-// the cli at startup. Version is best-effort — packages may omit it, but the
-// claude-agent-acp dep we care about always sets it.
-function resolveBundledBin(
-  pkgName: string,
-  binName?: string
-): { binPath: string; version: string } | null {
-  try {
-    const require = createRequire(import.meta.url);
-    const pkgJsonPath = require.resolve(`${pkgName}/package.json`);
-    const pkgJson = require(pkgJsonPath) as {
-      bin?: string | Record<string, string>;
-      version?: string;
-    };
-    const pkgDir = path.dirname(pkgJsonPath);
-    let rel: string | undefined;
-    if (typeof pkgJson.bin === 'string') {
-      rel = pkgJson.bin;
-    } else if (pkgJson.bin && binName) {
-      rel = pkgJson.bin[binName];
-    } else if (pkgJson.bin) {
-      rel = Object.values(pkgJson.bin)[0];
-    }
-    if (!rel) return null;
-    return { binPath: path.join(pkgDir, rel), version: pkgJson.version ?? '' };
-  } catch {
-    return null;
-  }
-}
-
-type BundledAgent = { name: string; pkg: string; binName?: string };
-type PathAgent = { name: string; binary: string; args: string[] };
-
-const BUNDLED_AGENTS: ReadonlyArray<BundledAgent> = [
-  { name: 'claude', pkg: '@agentclientprotocol/claude-agent-acp', binName: 'claude-agent-acp' },
-];
-const PATH_AGENTS: ReadonlyArray<PathAgent> = [
-  { name: 'codex', binary: 'codex-acp', args: [] },
-  { name: 'gemini', binary: 'gemini', args: ['--acp'] },
-];
-
-// Probe each agent: bundled ones come from node_modules and launch with the
-// current `node`; PATH-based ones (codex, gemini) resolve their binary via
-// `which`/`where`. The actual ACP handshake — including the real model list
-// — happens later via probeAgentModels() in capabilities().
-function defaultResolveAgents(): ResolvedAgent[] {
-  const resolved: ResolvedAgent[] = [];
-  for (const agent of BUNDLED_AGENTS) {
-    const bundled = resolveBundledBin(agent.pkg, agent.binName);
-    if (!bundled) continue;
-    resolved.push({
-      name: agent.name,
-      binary: process.execPath,
-      args: [bundled.binPath],
-      version: bundled.version,
-    });
-  }
-  const lookup = process.platform === 'win32' ? 'where' : 'which';
-  for (const candidate of PATH_AGENTS) {
-    const which = spawnSync(lookup, [candidate.binary], { encoding: 'utf8' });
-    if (which.status !== 0) continue;
-    const binary = (which.stdout || '').split('\n')[0]?.trim();
-    if (!binary) continue;
-    resolved.push({
-      name: candidate.name,
-      binary,
-      args: candidate.args,
-      version: '',
-    });
-  }
-  return resolved;
 }

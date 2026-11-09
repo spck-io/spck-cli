@@ -55,6 +55,7 @@ export interface NewSessionParams {
 
 export interface NewSessionResult {
   sessionId: string;
+  configOptions?: AcpConfigOption[];
   // Models the agent can switch to in this session (Claude Code extension).
   // Two shapes seen in the wild: a flat AcpModelInfo[], or claude-agent-acp's
   // `{ availableModels: [{modelId, name, description}], currentModelId }`.
@@ -63,6 +64,20 @@ export interface NewSessionResult {
     availableModels: Array<{ modelId: string; name?: string; description?: string }>;
     currentModelId?: string;
   };
+}
+
+export interface AcpConfigValue {
+  value: string;
+  name: string;
+  description?: string;
+}
+
+export interface AcpConfigOption {
+  id: string;
+  category?: string;
+  type: string;
+  currentValue: string | boolean;
+  options?: Array<AcpConfigValue | { group: string; name: string; options: AcpConfigValue[] }>;
 }
 
 export interface LoadSessionParams {

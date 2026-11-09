@@ -5,7 +5,7 @@
 
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { createRequire } from 'module';
+import { resolveAcpAgents } from './acp-agents.js';
 import { ToolDetectionResult } from '../types.js';
 import { t } from '../i18n/index.js';
 
@@ -93,18 +93,21 @@ export async function detectTools(options?: {
   // as a dep of this cli — the native `claude acp` binary doesn't advertise
   // its model catalogue in the ACP `initialize` response, so the editor
   // wouldn't be able to render a model picker.
+  // Share discovery with the RPC service. ACP wrappers need not implement
+  // --version, so their availability must come from executable lookup.
+  const resolvedAgents = resolveAcpAgents();
   const pathAgents: Array<{ key: 'codex' | 'gemini'; binary: string; label: string }> = [
     { key: 'codex',  binary: 'codex-acp',  label: 'Codex (codex-acp)' },
     { key: 'gemini', binary: 'gemini',     label: 'Gemini CLI' }
   ];
   const probes = await Promise.all(pathAgents.map(async (agent) => {
-    const available = await isCommandAvailable(agent.binary);
+    const available = resolvedAgents.some((resolved) => resolved.name === agent.key);
     if (!available) return { agent, available, version: '' };
     // Thin wrappers (e.g. codex-acp) don't always implement --version; ACP
     // still works without it, so version is best-effort.
     let version = '';
     try {
-      const { stdout } = await execAsync(`${agent.binary} --version`);
+      const { stdout } = await execAsync(`${agent.binary} --version`, { timeout: 3000 });
       version = stdout.trim();
     } catch {
       // ignore
@@ -112,15 +115,9 @@ export async function detectTools(options?: {
     return { agent, available, version };
   }));
 
-  let claudeVersion = '';
-  try {
-    const require = createRequire(import.meta.url);
-    const pkg = require('@agentclientprotocol/claude-agent-acp/package.json') as { version?: string };
-    claudeVersion = pkg.version ?? '';
-    result.claude = true;
-  } catch {
-    result.claude = false;
-  }
+  const claudeAgent = resolvedAgents.find((agent) => agent.name === 'claude');
+  const claudeVersion = claudeAgent?.version ?? '';
+  result.claude = !!claudeAgent;
 
   console.log(`\n--- ACP Agents (local AI coding agents) ---`);
   if (result.claude) {
@@ -138,6 +135,9 @@ export async function detectTools(options?: {
         : `✅ ${agent.label} detected (ACP transport available)`);
     } else {
       console.log(`⚪ ${agent.label} not detected (binary: ${agent.binary})`);
+      if (agent.key === 'codex') {
+        console.log('   Codex requires its ACP adapter, even when `codex` is installed: npm install -g @agentclientprotocol/codex-acp');
+      }
     }
   }
   if (!result.claude && !result.codex && !result.gemini) {

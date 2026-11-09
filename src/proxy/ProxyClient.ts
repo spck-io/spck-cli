@@ -877,10 +877,10 @@ export class ProxyClient {
       git: this.tools.git,
       fastSearch: this.tools.ripgrep,
       browserProxy: this.config.browserProxy?.enabled ?? true,
-      // ACP transport (local Claude Code). The client uses this to decide
-      // whether to expose the "Local Claude Code" transport switcher.
+      // Advertise all supported agents, respecting the project's ACP switch.
       // Model list is fetched separately via the `acp.capabilities` RPC.
-      acp: this.tools.claude,
+      acp: (this.config.acp?.enabled ?? true)
+        && !!(this.tools.claude || this.tools.codex || this.tools.gemini),
     };
 
     this.sendToClient(connectionId, 'handshake', {

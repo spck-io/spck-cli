@@ -142,6 +142,25 @@ describe('ProxyClient Security', () => {
     proxyServerUrl: 'cli-na-1.spck.io',
   };
 
+  it.each([
+    [{ claude: true }, undefined, true],
+    [{ codex: true }, undefined, true],
+    [{ gemini: true }, undefined, true],
+    [{}, undefined, false],
+    [{ claude: true, codex: true, gemini: true }, false, false],
+  ])('advertises ACP for tools %j with enabled=%s', (tools, enabled, expected) => {
+    const client = new ProxyClient({
+      ...defaultOptions,
+      config: { ...defaultOptions.config, acp: { enabled } },
+      tools,
+    } as any);
+    const send = vi.spyOn(client as any, 'sendToClient').mockImplementation(() => {});
+    (client as any).sendProtocolInfo('connection-1');
+    expect(send).toHaveBeenCalledWith('connection-1', 'handshake', expect.objectContaining({
+      features: expect.objectContaining({ acp: expected }),
+    }));
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(updateConfigFile).mockReset();
