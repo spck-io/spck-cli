@@ -20,6 +20,7 @@ import qrcode from 'qrcode-terminal';
 import jwt from 'jsonwebtoken';
 import { saveCredentials } from '../../config/credentials.js';
 import { abortCurrentAuth, authenticateWithFirebase, getValidFirebaseToken } from '../firebase-auth.js';
+import { sealForCli } from './seal-helper.js';
 
 describe('authenticateWithFirebase()', () => {
   let callbackServer: EventEmitter & { close: ReturnType<typeof vi.fn> };
@@ -98,12 +99,14 @@ describe('authenticateWithFirebase()', () => {
     expect(params.get('state')).toMatch(/^[a-f0-9]{64}$/);
     expect(params.get('state')).not.toBe(code);
     expect(params.get('redirect')).toBe('http://localhost:45678/callback');
+    expect(params.get('pk')).toMatch(/^[A-Za-z0-9_-]{87}$/);
 
     const manualUrl = new URL(vi.mocked(qrcode.generate).mock.calls[0][0]);
     expect(manualUrl.search).toBe('');
     const manualParams = linkParams(manualUrl);
     expect(manualParams.get('code')).toBe(code);
     expect(manualParams.get('server')).toBe('cli-na-1.spck.io');
+    expect(manualParams.get('pk')).toBe(params.get('pk'));
     expect(manualParams.has('auto')).toBe(false);
     expect(manualParams.has('redirect')).toBe(false);
     expect(manualParams.has('state')).toBe(false);
@@ -151,6 +154,15 @@ describe('authenticateWithFirebase()', () => {
 
     await expect(result).rejects.toThrow('Invalid state parameter');
     expect(saveCredentials).not.toHaveBeenCalled();
+  });
+
+  it('decrypts a sealed refresh token from the relay before saving it', async () => {
+    const { result, url } = await startAuth();
+    const params = linkParams(url);
+    const refreshToken = await sealForCli(params.get('pk')!, params.get('code')!, 'real-refresh-token');
+    deliverRelayToken({ ok: true, json: async () => ({ idToken: 'id-token', refreshToken }) });
+    await expect(result).resolves.toMatchObject({ refreshToken: 'real-refresh-token' });
+    expect(saveCredentials).toHaveBeenCalledWith(expect.objectContaining({ refreshToken: 'real-refresh-token' }));
   });
 
   it('still accepts relay tokens if the browser cannot be opened', async () => {

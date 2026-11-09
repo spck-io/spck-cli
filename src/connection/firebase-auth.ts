@@ -18,6 +18,7 @@ import { saveCredentials } from '../config/credentials.js';
 import { logAuth } from '../utils/logger.js';
 import { t } from '../i18n/index.js';
 import { fetchServerList, selectBestServer, isValidDomain } from '../config/server-selection.js';
+import { createAuthKeyPair } from './auth-seal.js';
 
 const AUTH_TIMEOUT = 10 * 60 * 1000; // 10 minutes
 const FIREBASE_AUTH_BASE_URL = 'https://spck.io/auth';
@@ -67,7 +68,12 @@ interface TokenResult {
  * The server holds the connection open until the browser posts the token (up to 30s),
  * then returns 202 on timeout so we reconnect immediately — minimal round-trips.
  */
-async function pollServerForToken(serverUrl: string, code: string, signal: AbortSignal): Promise<TokenResult | null> {
+async function pollServerForToken(
+  serverUrl: string,
+  code: string,
+  openRefreshToken: (value: string) => string,
+  signal: AbortSignal,
+): Promise<TokenResult | null> {
   while (!signal.aborted) {
     try {
       const response = await fetch(`https://${serverUrl}/api/auth/token/poll`, {
@@ -90,7 +96,8 @@ async function pollServerForToken(serverUrl: string, code: string, signal: Abort
 
       const result = await response.json();
       if (result.idToken && result.refreshToken) {
-        return { token: result.idToken, refreshToken: result.refreshToken };
+        // A token that fails to open is ignored, so a bad submission can't end sign-in.
+        return { token: result.idToken, refreshToken: openRefreshToken(result.refreshToken) };
       }
 
       // Unexpected successful response without tokens — brief pause
@@ -165,12 +172,13 @@ export async function authenticateWithFirebase(onInteractiveAuth?: () => void): 
   // 3. Generate independent secrets for the relay and the localhost callback
   const code = crypto.randomBytes(32).toString('hex');
   const state = crypto.randomBytes(32).toString('hex');
+  const keyPair = createAuthKeyPair(code);
 
   // 4. Include relay parameters in both links so the browser can authenticate
   // even when localhost is blocked or upgraded to HTTPS. QR/manual links
   // remain relay-only so they also work from another device.
   // Secrets go in the URL fragment, which browsers never send to the server.
-  const manualParams = new URLSearchParams({ code, server: proxyServerUrl });
+  const manualParams = new URLSearchParams({ code, server: proxyServerUrl, pk: keyPair.publicKey });
   const manualUrl = `${FIREBASE_AUTH_BASE_URL}#${manualParams}`;
 
   // Chrome can try localhost first and fall back; Safari and other browsers
@@ -212,7 +220,7 @@ export async function authenticateWithFirebase(onInteractiveAuth?: () => void): 
     }, AUTH_TIMEOUT);
 
     // Start polling server API (manual flow)
-    const serverPolling = pollServerForToken(proxyServerUrl, code, abortController.signal).then(token => {
+    const serverPolling = pollServerForToken(proxyServerUrl, code, keyPair.openRefreshToken, abortController.signal).then(token => {
       if (token) {
         abortController.abort();
         callbackServer.close();
