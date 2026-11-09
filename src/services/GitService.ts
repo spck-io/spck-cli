@@ -498,13 +498,7 @@ export class GitService {
    * Get HEAD tree oid
    */
   private async getHeadTree(dir: string, _params: any): Promise<any> {
-    try {
-      const { stdout } = await this.execGit(['rev-parse', 'HEAD^{tree}'], { cwd: dir });
-      return { oid: stdout.trim() };
-    } catch (error) {
-      // No commits yet
-      return { oid: null };
-    }
+    return this.resolveRef(dir, { ref: 'HEAD^{tree}' });
   }
 
   /**
@@ -577,8 +571,12 @@ export class GitService {
   private async resolveRef(dir: string, params: any): Promise<any> {
     const { ref } = params;
     try {
-      const { stdout } = await this.execGit(['rev-parse', ref], { cwd: dir });
-      return { oid: stdout.trim() };
+      // Missing refs (including an unset upstream or unborn HEAD) are routine.
+      const { stdout, code } = await this.execGit(
+        ['rev-parse', '--verify', '--quiet', '--end-of-options', ref],
+        { cwd: dir, acceptExitCodes: [1] }
+      );
+      return { oid: code === 0 ? stdout.trim() : null };
     } catch (error) {
       return { oid: null };
     }
@@ -590,10 +588,10 @@ export class GitService {
   private async currentBranch(dir: string, params: any): Promise<any> {
     try {
       const args = params.fullname
-        ? ['symbolic-ref', 'HEAD']
-        : ['symbolic-ref', '--short', 'HEAD'];
-      const { stdout } = await this.execGit(args, { cwd: dir });
-      return { branch: stdout.trim() };
+        ? ['symbolic-ref', '--quiet', 'HEAD']
+        : ['symbolic-ref', '--quiet', '--short', 'HEAD'];
+      const { stdout, code } = await this.execGit(args, { cwd: dir, acceptExitCodes: [1] });
+      return { branch: code === 0 ? stdout.trim() : null };
     } catch {
       return { branch: null }; // Detached HEAD
     }
@@ -1004,16 +1002,11 @@ export class GitService {
    */
   private async getConfig(dir: string, params: any): Promise<any> {
     this.validateConfigKey(params.path);
-    try {
-      const { stdout } = await this.execGit(['config', '--get', params.path], { cwd: dir });
-      return { value: stdout.trim() };
-    } catch (error: any) {
-      // Git returns exit code 1 if config key doesn't exist
-      if (error.message.includes('code 1')) {
-        return { value: undefined };
-      }
-      throw error;
-    }
+    // Git returns exit code 1 if the config key doesn't exist.
+    const { stdout, code } = await this.execGit(['config', '--get', params.path], {
+      cwd: dir, acceptExitCodes: [1],
+    });
+    return { value: code === 0 ? stdout.trim() : undefined };
   }
 
   /**
@@ -1024,15 +1017,8 @@ export class GitService {
     this.validateConfigKey(path);
 
     if (value === undefined) {
-      // Delete the config entry
-      try {
-        await this.execGit(['config', '--unset', path], { cwd: dir });
-      } catch (error: any) {
-        // Ignore error if key doesn't exist
-        if (!error.message.includes('code 5')) {
-          throw error;
-        }
-      }
+      // Deleting an absent config entry is already satisfied (exit code 5).
+      await this.execGit(['config', '--unset', path], { cwd: dir, acceptExitCodes: [5] });
     } else if (append) {
       // Append to existing value (for multi-valued config options)
       await this.execGit(['config', '--add', path, String(value)], { cwd: dir });

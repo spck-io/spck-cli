@@ -57,6 +57,7 @@ describe('GitService', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     // Clean up test directory
     try {
       await fs.rm(testRoot, { recursive: true, force: true });
@@ -195,6 +196,7 @@ describe('GitService', () => {
     });
 
     it('should return null for detached HEAD', async () => {
+      const errorLog = vi.spyOn(console, 'error');
       // Get commit hash and checkout to detach HEAD
       const oid = await execGit(['rev-parse', 'HEAD'], repoPath);
       await execGit(['checkout', oid], repoPath);
@@ -206,6 +208,7 @@ describe('GitService', () => {
       );
 
       expect(result.branch).toBeNull();
+      expect(errorLog).not.toHaveBeenCalled();
     });
   });
 
@@ -646,6 +649,7 @@ describe('GitService', () => {
     });
 
     it('should wrap git command errors', async () => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
       await execGit(['init'], repoPath);
 
       // Try to read non-existent commit
@@ -659,6 +663,7 @@ describe('GitService', () => {
         code: ErrorCode.GIT_OPERATION_FAILED,
         message: expect.stringContaining('Git operation failed'),
       });
+      expect(errorLog).toHaveBeenCalled();
     });
 
     it('should handle invalid git directories', async () => {
@@ -830,13 +835,25 @@ describe('GitService', () => {
     });
 
     it('should return undefined for non-existent config key', async () => {
+      const errorLog = vi.spyOn(console, 'error');
       const result = await service.handle(
         'getConfig',
-        { dir: '/repo', path: 'core.pager' },
+        { dir: '/repo', path: 'remote.missing-for-test.url' },
         mockSocket
       );
 
       expect(result.value).toBeUndefined();
+      expect(errorLog).not.toHaveBeenCalled();
+    });
+
+    it('should report malformed config as an error', async () => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+      await fs.appendFile(path.join(repoPath, '.git', 'config'), '\n[broken\n');
+
+      await expect(service.handle(
+        'getConfig', { dir: '/repo', path: 'user.name' }, mockSocket
+      )).rejects.toMatchObject({ code: ErrorCode.GIT_OPERATION_FAILED });
+      expect(errorLog).toHaveBeenCalled();
     });
 
     it('should set config value', async () => {
@@ -906,6 +923,7 @@ describe('GitService', () => {
     });
 
     it('should handle unsetting non-existent key gracefully', async () => {
+      const errorLog = vi.spyOn(console, 'error');
       const result = await service.handle(
         'setConfig',
         { dir: '/repo', path: 'core.pager', value: undefined },
@@ -913,6 +931,7 @@ describe('GitService', () => {
       );
 
       expect(result.success).toBe(true);
+      expect(errorLog).not.toHaveBeenCalled();
     });
   });
 
@@ -1124,6 +1143,31 @@ describe('GitService', () => {
   });
 
   describe('Git Operations - resolveRef', () => {
+    it.each(['refs/remotes/origin/missing', '@{upstream}', 'HEAD'])(
+      'should return null without error logging for absent %s', async (ref) => {
+        const errorLog = vi.spyOn(console, 'error');
+        await execGit(['init', '-b', 'main'], repoPath);
+        if (ref !== 'HEAD') {
+          await execGit(['-c', 'user.name=Test', '-c', 'user.email=test@example.com',
+            'commit', '--allow-empty', '-m', 'Initial'], repoPath);
+        }
+
+        const result = await service.handle('resolveRef', { dir: '/repo', ref }, mockSocket);
+
+        expect(result.oid).toBeNull();
+        expect(errorLog).not.toHaveBeenCalled();
+      }
+    );
+
+    it('should retain diagnostics for a ref lookup outside a repository', async () => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const result = await service.handle('resolveRef', { dir: '/repo', ref: 'HEAD' }, mockSocket);
+
+      expect(result.oid).toBeNull();
+      expect(errorLog).toHaveBeenCalled();
+    });
+
     it('should resolve HEAD to commit oid', async () => {
       await execGit(['init'], repoPath);
       await execGit(['config', 'user.email', 'test@example.com'], repoPath);

@@ -106,9 +106,8 @@ export class TerminalService {
           logTerminalWrite(method, params, uid, true);
           return result;
         case 'send':
-          result = await this.send(params);
-          logTerminalWrite(method, params, uid, true);
-          return result;
+          // Input arrives on every keystroke; only failures need a log entry.
+          return await this.send(params);
         case 'resize':
           result = await this.resize(params);
           logTerminalWrite(method, params, uid, true);
