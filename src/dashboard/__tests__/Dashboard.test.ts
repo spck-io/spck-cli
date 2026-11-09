@@ -4,7 +4,9 @@ import { LogBuffer } from '../LogBuffer.js';
 import { stripAnsi, visibleWidth } from '../screen.js';
 import { RPCRouter } from '../../rpc/router.js';
 import * as pinSettings from '../pin-settings.js';
+import { createRequire } from 'module';
 
+const pkg = createRequire(import.meta.url)('../../../package.json') as { version: string };
 const SECRET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQR';
 
 function fakeClient(id: string) {
@@ -308,6 +310,21 @@ describe('Dashboard', () => {
       expect(text()).toContain('THE-END');
       await press('left');
       expect(text()).not.toContain('THE-END');
+    });
+  });
+
+  describe('version', () => {
+    const footer = () => screen().filter((line) => line.includes('Quit') || line.includes('quit')).pop()!;
+
+    it('shows the package version in the bottom-right corner without overflowing', () => {
+      start(100, 24);
+      expect(footer().endsWith(`v${pkg.version}`)).toBe(true);
+      expect(visibleWidth(footer())).toBe(100);
+    });
+
+    it('gives narrow terminals the key hints instead of the version', () => {
+      start(30, 24);
+      expect(text()).not.toContain(`v${pkg.version}`);
     });
   });
 

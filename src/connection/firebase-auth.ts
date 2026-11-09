@@ -162,28 +162,30 @@ export async function authenticateWithFirebase(onInteractiveAuth?: () => void): 
 
   const redirectUrl = `http://localhost:${port}/callback`;
 
-  // 3. Generate code for both browser and manual flows
+  // 3. Generate independent secrets for the relay and the localhost callback
   const code = crypto.randomBytes(32).toString('hex');
+  const state = crypto.randomBytes(32).toString('hex');
 
   // 4. Include relay parameters in both links so the browser can authenticate
   // even when localhost is blocked or upgraded to HTTPS. QR/manual links
   // remain relay-only so they also work from another device.
-  const manualUrl = new URL(FIREBASE_AUTH_BASE_URL);
-  manualUrl.searchParams.set('code', code);
-  manualUrl.searchParams.set('server', proxyServerUrl);
+  // Secrets go in the URL fragment, which browsers never send to the server.
+  const manualParams = new URLSearchParams({ code, server: proxyServerUrl });
+  const manualUrl = `${FIREBASE_AUTH_BASE_URL}#${manualParams}`;
 
   // Chrome can try localhost first and fall back; Safari and other browsers
   // use the relay directly, as selected by the auth page.
-  const browserUrl = new URL(manualUrl);
-  browserUrl.searchParams.set('auto', '1');
-  browserUrl.searchParams.set('redirect', redirectUrl);
-  browserUrl.searchParams.set('state', code);
+  const browserParams = new URLSearchParams(manualParams);
+  browserParams.set('auto', '1');
+  browserParams.set('redirect', redirectUrl);
+  browserParams.set('state', state);
+  const browserUrl = `${FIREBASE_AUTH_BASE_URL}#${browserParams}`;
 
   // 5. Open browser (primary method)
   console.log(t('auth.openingBrowser') + '\n');
 
   try {
-    await open(browserUrl.toString());
+    await open(browserUrl);
   } catch (error: any) {
     console.warn('⚠️  ' + t('auth.couldNotOpenBrowser', { message: error.message }) + '\n');
   }
@@ -192,9 +194,9 @@ export async function authenticateWithFirebase(onInteractiveAuth?: () => void): 
   console.log(t('auth.manualAuthHint') + '\n');
 
   // Display QR code
-  qrcode.generate(manualUrl.toString(), { small: true });
+  qrcode.generate(manualUrl, { small: true });
 
-  console.log('\n' + t('auth.visitUrl', { url: manualUrl.toString() }) + '\n');
+  console.log('\n' + t('auth.visitUrl', { url: manualUrl }) + '\n');
   console.log(t('auth.waiting') + '\n');
 
   // 7. Wait for authentication from either source (browser or manual)
@@ -267,8 +269,8 @@ export async function authenticateWithFirebase(onInteractiveAuth?: () => void): 
         return;
       }
 
-      // Verify state/code (CSRF protection)
-      if (receivedState !== code) {
+      // Verify state (CSRF protection)
+      if (receivedState !== state) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: false, error: 'Invalid state parameter' }));
         reject(new Error('Invalid state parameter'));

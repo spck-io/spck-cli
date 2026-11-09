@@ -8,6 +8,7 @@
  */
 
 import * as readline from 'readline';
+import { createRequire } from 'module';
 import chalk from 'chalk';
 import qrcode from 'qrcode-terminal';
 import { ProxyClient, ProxyStatus, ClientStatus } from '../proxy/ProxyClient.js';
@@ -36,6 +37,7 @@ export interface DashboardOptions {
   onQuit: () => void;
 }
 
+const { version: CLI_VERSION } = createRequire(import.meta.url)('../../package.json') as { version: string };
 const LABEL_WIDTH = 24;
 const QUIT_CONFIRM_MS = 3000;
 const QR_SIDE_GAP = 3;
@@ -836,6 +838,11 @@ export class Dashboard {
       if (this.terminalsEnabled()) items.push(key('m', t('dashboard.keyTerminals')));
       items.push(key('q', t('dashboard.keyQuit')));
     }
-    return truncate(' ' + items.join('   '), width);
+    const keys = ' ' + items.join('   ');
+    const version = `v${CLI_VERSION}`;
+    // Key hints matter more than the version on narrow terminals.
+    const gap = width - visibleWidth(keys) - visibleWidth(version);
+    if (gap < 2) return truncate(keys, width);
+    return keys + ' '.repeat(gap) + chalk.gray(version);
   }
 }
