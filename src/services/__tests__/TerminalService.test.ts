@@ -527,6 +527,46 @@ describe('TerminalService', () => {
     });
   });
 
+  describe('Mouse encoding restoration', () => {
+    for (const method of ['refresh', 'activate']) {
+      it.each([
+        { name: 'SGR', setup: '\x1b[?1006h', sgr: 1, pixels: 2 },
+        { name: 'SGR pixels', setup: '\x1b[?1016h', sgr: 2, pixels: 1 },
+        { name: 'default', setup: '', sgr: 2, pixels: 2 },
+        { name: 'disabled SGR', setup: '\x1b[?1006h\x1b[?1006l', sgr: 2, pixels: 2 },
+        { name: 'disabled pixels', setup: '\x1b[?1016h\x1b[?1016l', sgr: 2, pixels: 2 },
+        { name: 'reset', setup: '\x1b[?1006h\x1bc\x1b[?1049h\x1b[?1000h', sgr: 2, pixels: 2 },
+      ])(`preserves $name mouse encoding on ${method}`, async ({ setup, sgr, pixels }) => {
+        // Use real xterm instances: the serializer preserves tracking but omits encoding.
+        const { default: headless } = await vi.importActual<{ default: typeof import('@xterm/headless') }>('@xterm/headless');
+        const { default: serialize } = await vi.importActual<{ default: typeof import('@xterm/addon-serialize') }>('@xterm/addon-serialize');
+        const source = new headless.Terminal({ cols: 80, rows: 24, allowProposedApi: true });
+        const restored = new headless.Terminal({ cols: 80, rows: 24, allowProposedApi: true });
+        (XtermHeadless as Mock).mockImplementationOnce(function () { return source; });
+        (SerializeAddon as Mock).mockImplementationOnce(function () { return new serialize.SerializeAddon(); });
+        try {
+          const terminalId = await service.handle('create', { cols: 80, rows: 24 });
+          ptyDataHandler!('\x1b[?1049h\x1b[?1000h' + setup + 'History');
+          mockSocket.emit.mockClear();
+          await service.handle(method, { terminalId });
+          const refresh = mockSocket.emit.mock.calls.find(([, message]: any[]) => message.method === 'terminal.bufferRefresh');
+          await new Promise<void>(resolve => restored.write(refresh![1].params.buffer, resolve));
+          expect(restored.buffer.active.type).toBe('alternate');
+          expect(restored.modes.mouseTrackingMode).toBe('vt200');
+
+          // Query the restored terminal's encoding through its public parser API.
+          const replies: string[] = [];
+          restored.onData(data => replies.push(data));
+          await new Promise<void>(resolve => restored.write('\x1b[?1006$p\x1b[?1016$p', resolve));
+          expect(replies).toEqual([`\x1b[?1006;${sgr}$y`, `\x1b[?1016;${pixels}$y`]);
+        } finally {
+          source.dispose();
+          restored.dispose();
+        }
+      });
+    }
+  });
+
   describe('Terminal List', () => {
     it('should list all terminals for user', async () => {
       const terminal1 = await service.handle('create', { cols: 80, rows: 24 });

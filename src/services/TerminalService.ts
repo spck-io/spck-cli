@@ -432,8 +432,14 @@ export class TerminalService {
 
     await waitForWrites();
 
-    // Serialize xterm buffer
-    const buffer = session.serializeAddon.serialize();
+    // SerializeAddon preserves mouse tracking but omits its encoding. xterm's
+    // public modes API also omits encoding, so read it from the pinned core.
+    // Without this, restored editors emit legacy reports instead of the SGR
+    // wheel reports the running application expects.
+    const mouseEncoding = session.xterm._core?.coreMouseService?.activeEncoding;
+    const mouseMode = mouseEncoding === 'SGR' ? '\x1b[?1006h'
+      : mouseEncoding === 'SGR_PIXELS' ? '\x1b[?1016h' : '';
+    const buffer = session.serializeAddon.serialize() + mouseMode;
     // Send to client
     this.getSocket().emit('rpc', {
       jsonrpc: '2.0',
