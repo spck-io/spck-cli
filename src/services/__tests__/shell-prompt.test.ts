@@ -29,8 +29,10 @@ describe('compact shell prompts', () => {
   }
 
   function run(shell: string, config: ShellLaunch, input: string) {
-    const result = spawnSync(shell, [...config.args, '-i'], {
-      env: config.env, cwd: folder, input, encoding: 'utf8', timeout: 5000,
+    // ZLE reads from the controlling terminal even when stdin is piped.
+    const interactiveArgs = shell === '/bin/zsh' ? ['-i', '+Z'] : ['-i'];
+    const result = spawnSync(shell, [...config.args, ...interactiveArgs], {
+      env: config.env, cwd: folder, input, encoding: 'utf8', timeout: 5000, killSignal: 'SIGKILL',
     });
     expect(result.error).toBeUndefined();
     expect(result.status).toBe(0);
