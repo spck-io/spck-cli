@@ -35,6 +35,7 @@ vi.mock('@xterm/headless', () => {
       write: vi.fn(),
       resize: vi.fn(),
       loadAddon: vi.fn(),
+      onTitleChange: vi.fn(),
     }; }),
   };
   return { default: mod, ...mod };
@@ -65,6 +66,7 @@ describe('TerminalService', () => {
   let mockSerializeAddon: any;
   let ptyDataHandler: Function | null = null;
   let ptyExitHandler: Function | null = null;
+  let titleChangeHandler: Function | null = null;
 
   beforeEach(() => {
     // Reset all mocks
@@ -100,6 +102,9 @@ describe('TerminalService', () => {
       write: vi.fn(),
       resize: vi.fn(),
       loadAddon: vi.fn(),
+      onTitleChange: vi.fn((handler: Function) => {
+        titleChangeHandler = handler;
+      }),
     };
 
     // Set up mock serialize addon
@@ -118,6 +123,7 @@ describe('TerminalService', () => {
     // Reset handlers
     ptyDataHandler = null;
     ptyExitHandler = null;
+    titleChangeHandler = null;
   });
 
   describe('Terminal Creation', () => {
@@ -630,6 +636,78 @@ describe('TerminalService', () => {
       // Different user should see empty list
       const result = await otherService.handle('list', {});
       expect(result).toEqual([]);
+    });
+  });
+
+  describe('Titles and names', () => {
+    const titleEvents = () => mockSocket.emit.mock.calls
+      .filter(([, message]: any[]) => message?.method === 'terminal.titleChanged')
+      .map(([, message]: any[]) => message.params);
+
+    it('keeps the window title a program sets and tells the editor', async () => {
+      const terminalId = await service.handle('create', { cols: 80, rows: 24 });
+
+      titleChangeHandler?.('vim  main.ts\x07');
+      titleChangeHandler?.('vim  main.ts\x07'); // unchanged: not sent again
+
+      expect(titleEvents()).toEqual([{ terminalId, title: 'vim main.ts' }]);
+      expect(await service.handle('list', { details: true }))
+        .toEqual([{ id: terminalId, title: 'vim main.ts', name: null }]);
+    });
+
+    it('still lists bare ids for editors that do not ask for details', async () => {
+      const terminalId = await service.handle('create', { cols: 80, rows: 24 });
+      titleChangeHandler?.('zsh');
+
+      expect(await service.handle('list', {})).toEqual([terminalId]);
+    });
+
+    it('renames a terminal, and an empty name goes back to the title', async () => {
+      const terminalId = await service.handle('create', { cols: 80, rows: 24 });
+      titleChangeHandler?.('zsh');
+
+      expect(await service.handle('rename', { terminalId, name: '  Dev server\n' })).toEqual({ name: 'Dev server' });
+      expect(await service.handle('list', { details: true }))
+        .toEqual([{ id: terminalId, title: 'zsh', name: 'Dev server' }]);
+
+      expect(await service.handle('rename', { terminalId, name: '   ' })).toEqual({ name: null });
+      expect(await service.handle('list', { details: true }))
+        .toEqual([{ id: terminalId, title: 'zsh', name: null }]);
+    });
+
+    it('caps titles and names at 100 characters', async () => {
+      const terminalId = await service.handle('create', { cols: 80, rows: 24 });
+
+      titleChangeHandler?.('t'.repeat(500));
+      const { name } = await service.handle('rename', { terminalId, name: 'n'.repeat(500) });
+
+      expect(name).toHaveLength(100);
+      const [details] = await service.handle('list', { details: true });
+      expect(details.title).toHaveLength(100);
+    });
+
+    it('rejects a name that is not a string', async () => {
+      const terminalId = await service.handle('create', { cols: 80, rows: 24 });
+
+      await expect(service.handle('rename', { terminalId, name: 42 })).rejects.toMatchObject({
+        code: ErrorCode.INVALID_PARAMS,
+      });
+    });
+
+    it('does not rename a missing terminal or another user\'s terminal', async () => {
+      const terminalId = await service.handle('create', { cols: 80, rows: 24 });
+      const otherService = new TerminalService(
+        () => ({ ...mockSocket, data: { uid: 'different-user', deviceId: 'different-device' } }),
+        10, 10000, '/test/root'
+      );
+      (otherService as any).sessions = (service as any).sessions;
+
+      await expect(service.handle('rename', { terminalId: 'nope', name: 'x' })).rejects.toMatchObject({
+        code: ErrorCode.TERMINAL_NOT_FOUND,
+      });
+      await expect(otherService.handle('rename', { terminalId, name: 'x' })).rejects.toMatchObject({
+        code: ErrorCode.PERMISSION_DENIED,
+      });
     });
   });
 

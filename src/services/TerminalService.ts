@@ -15,6 +15,9 @@ const { SerializeAddon } = SerializeAddonModule as any;
 
 // Hard limit on terminal buffer size to prevent memory exhaustion (DoS)
 const MAX_BUFFER_LINES_HARD_LIMIT = 50000;
+// Longest title or name kept for a terminal. Programs can set any title, and
+// the editor shows it in a tab.
+const MAX_TERMINAL_NAME_LENGTH = 100;
 
 interface TerminalSession {
   id: string;
@@ -34,7 +37,18 @@ interface TerminalSession {
   bufferBytes: number;
   bufferDirty: boolean;
   bufferMeasuredAt: number;
+  // Window title the shell or a program set with OSC 0/2, '' until one does
+  title: string;
+  // Name the user gave the terminal, which wins over the title
+  name: string | null;
   cleanupPrompt(): void;
+}
+
+/** One entry of `terminal.list` with `{ details: true }`. */
+export interface TerminalDetails {
+  id: string;
+  title: string;
+  name: string | null;
 }
 
 export interface TerminalSummary {
@@ -92,7 +106,7 @@ export class TerminalService {
 
     // Define read and write operations
     const readOps = ['list', 'refresh'];
-    const writeOps = ['create', 'destroy', 'activate', 'send', 'resize'];
+    const writeOps = ['create', 'destroy', 'activate', 'send', 'resize', 'rename'];
 
     try {
       switch (method) {
@@ -120,8 +134,12 @@ export class TerminalService {
           logTerminalRead(method, params, uid, true);
           return result;
         case 'list':
-          result = await this.list();
+          result = await this.list(params);
           logTerminalRead(method, params, uid, true, undefined, { count: result.length });
+          return result;
+        case 'rename':
+          result = await this.rename(params);
+          logTerminalWrite(method, params, uid, true);
           return result;
         default:
           throw createRPCError(ErrorCode.METHOD_NOT_FOUND, `Method not found: terminal.${method}`);
@@ -208,6 +226,22 @@ export class TerminalService {
     const serializeAddon = new SerializeAddon();
     xterm.loadAddon(serializeAddon);
 
+    // Shells and programs name their window with OSC 0/2. The headless xterm
+    // sees every terminal's output, not only the one an editor is showing, so
+    // it is the one place that can keep every title current.
+    xterm.onTitleChange((rawTitle: string) => {
+      const session = this.sessions.get(terminalId);
+      if (!session) return;
+      const title = TerminalService.cleanName(rawTitle);
+      if (title === session.title) return;
+      session.title = title;
+      this.getSocket().emit('rpc', {
+        jsonrpc: '2.0',
+        method: 'terminal.titleChanged',
+        params: { terminalId, title },
+      });
+    });
+
     // Connect PTY to xterm buffer
     ptyProcess.onData((data) => {
       const session = this.sessions.get(terminalId);
@@ -269,6 +303,8 @@ export class TerminalService {
       bufferBytes: 0,
       bufferDirty: true,
       bufferMeasuredAt: 0,
+      title: '',
+      name: null,
       cleanupPrompt: launch.cleanup,
     });
 
@@ -396,15 +432,58 @@ export class TerminalService {
   }
 
   /**
-   * List terminals for current user
+   * Name a terminal, or clear its name with an empty one so the title shows
+   * again. The name lives here so every editor, and the next session of this
+   * one, sees it.
    */
-  private async list(): Promise<string[]> {
+  private async rename(params: { terminalId: string; name?: unknown }): Promise<{ name: string | null }> {
+    const session = this.sessions.get(params.terminalId);
+    if (!session) {
+      throw createRPCError(ErrorCode.TERMINAL_NOT_FOUND, 'Terminal not found');
+    }
+
+    // Verify ownership
+    if (session.uid !== this.getUid()) {
+      throw createRPCError(ErrorCode.PERMISSION_DENIED, 'Permission denied');
+    }
+
+    if (params.name != null && typeof params.name !== 'string') {
+      throw createRPCError(ErrorCode.INVALID_PARAMS, 'name must be a string');
+    }
+
+    session.name = TerminalService.cleanName(params.name ?? '') || null;
+    return { name: session.name };
+  }
+
+  /**
+   * List terminals for current user. Editors that know about titles and names
+   * pass `{ details: true }`; older ones get the bare ids they expect.
+   */
+  private async list(params?: { details?: boolean }): Promise<string[] | TerminalDetails[]> {
     const uid = this.getUid();
     // Exited terminals are left out: an editor restoring sessions would only
     // show a dead prompt that can't take input.
-    return Array.from(this.sessions.values())
-      .filter((s) => s.uid === uid && !s.exited)
-      .map((s) => s.id);
+    const sessions = Array.from(this.sessions.values())
+      .filter((s) => s.uid === uid && !s.exited);
+    if (params?.details) {
+      return sessions.map((s) => ({ id: s.id, title: s.title, name: s.name }));
+    }
+    return sessions.map((s) => s.id);
+  }
+
+  /**
+   * One line of printable text: control characters go (a title can carry
+   * escape sequences), whitespace runs collapse and the length is capped.
+   */
+  private static cleanName(value: string): string {
+    return Array.from(String(value)
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim())
+      .slice(0, MAX_TERMINAL_NAME_LENGTH)
+      .join('')
+      .trim();
   }
 
   /**
