@@ -67,10 +67,23 @@ let knownServers: CLIServer[] = DEFAULT_SERVERS;
  * retired alias hostnames to their canonical relay. Null when unknown.
  */
 export function getServerLabel(url: string): string | null {
-  const canonical = normalizeServerUrl(url).toLowerCase();
-  const server = knownServers.find(s => s.url.toLowerCase() === canonical);
+  const server = knownServers.find(s => isSameServer(s.url, url));
   if (!server) return null;
   return server.label[getLocale()] || server.label.en || null;
+}
+
+/**
+ * Localized display name of a listed relay, else its hostname.
+ */
+export function serverLabel(server: CLIServer): string {
+  return server.label[getLocale()] || server.label.en || server.url;
+}
+
+/**
+ * Whether two hostnames name the same relay (case and retired aliases aside).
+ */
+export function isSameServer(a: string, b: string): boolean {
+  return normalizeServerUrl(a).toLowerCase() === normalizeServerUrl(b).toLowerCase();
 }
 
 /**
@@ -124,8 +137,37 @@ export async function fetchServerList(): Promise<CLIServer[]> {
 }
 
 /**
+ * Round trip to a relay, for the dashboard. The first request opens the
+ * connection (DNS, TCP, TLS) and isn't counted; the result is the fastest of
+ * `samples` requests reusing it. nginx answers /health itself, so this is
+ * network time. Infinity when the relay can't be reached.
+ */
+export async function measureServerPing(serverUrl: string, samples = 3): Promise<number> {
+  const timedRequest = async (): Promise<number> => {
+    const start = performance.now();
+    const response = await fetch(`https://${serverUrl}/health`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    // Reading the body lets the next request reuse the connection
+    await response.arrayBuffer();
+    if (!response.ok) throw new Error(`${response.status}`);
+    return performance.now() - start;
+  };
+  try {
+    await timedRequest();
+  } catch {
+    return Infinity;
+  }
+  let fastest = Infinity;
+  for (let i = 0; i < samples; i++) {
+    fastest = Math.min(fastest, await timedRequest().catch(() => Infinity));
+  }
+  return fastest === Infinity ? Infinity : Math.round(fastest);
+}
+
+/**
  * Check ping to a server by making 4 parallel HTTP calls to /health
- * and averaging the latency
+ * and taking the first to answer (connection setup included)
  */
 export async function checkServerPing(serverUrl: string): Promise<number> {
   const shortestTime = await Promise.any(
@@ -183,9 +225,8 @@ export async function displayServerPings(servers: CLIServer[]): Promise<Map<stri
     })
   );
 
-  const locale = getLocale();
   for (const { server, ping } of results) {
-    const label = server.label[locale] || server.label.en || server.url;
+    const label = serverLabel(server);
     const pingStr = ping === Infinity ? t('server.unreachable') : `${ping}ms`;
     console.log(`   ${label}: ${pingStr}`);
     pingResults.set(server.url, ping);

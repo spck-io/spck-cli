@@ -434,9 +434,15 @@ const FIREBASE_API_KEY = 'AIzaSyCFgtHhWiM-EdFBdiDw9ISHfcGOqbV3OCU';
  *
  * @see https://firebase.google.com/docs/reference/rest/auth#section-refresh-token
  */
-export async function refreshFirebaseToken(storedCredentials: StoredCredentials, onInteractiveAuth?: () => void): Promise<FirebaseCredentials> {
+export async function refreshFirebaseToken(
+  storedCredentials: StoredCredentials,
+  onInteractiveAuth?: () => void,
+  // false where nobody is watching for a sign-in prompt (the dashboard): fail instead
+  { interactive = true }: { interactive?: boolean } = {}
+): Promise<FirebaseCredentials> {
   if (!storedCredentials.refreshToken) {
     console.log('⚠️  ' + t('auth.noRefreshToken'));
+    if (!interactive) throw new Error(t('auth.noRefreshToken'));
     return authenticateWithFirebase(onInteractiveAuth);
   }
 
@@ -463,6 +469,7 @@ export async function refreshFirebaseToken(storedCredentials: StoredCredentials,
           reason: errorMessage
         }, 'warn');
         console.log('⚠️  ' + t('auth.refreshTokenExpired'));
+        if (!interactive) throw new Error(t('auth.refreshTokenExpired'));
         return authenticateWithFirebase(onInteractiveAuth);
       }
 
@@ -504,6 +511,7 @@ export async function refreshFirebaseToken(storedCredentials: StoredCredentials,
       error: error.message
     }, 'error');
     console.error(t('auth.tokenRefreshError', { message: error.message }));
+    if (!interactive) throw error;
     console.log('⚠️  ' + t('auth.tokenRefreshFailed'));
     return authenticateWithFirebase(onInteractiveAuth);
   }

@@ -4,7 +4,7 @@
  * Logs are captured into a LogBuffer and only shown in the log view [l].
  * The main view shows the relay, connected editors (with ping), Fast Lane
  * status, detected capabilities and toggleable settings, including a keep-awake
- * wake lock.
+ * wake lock. The relays view [r] shows each relay's ping and switches to one.
  */
 
 import * as readline from 'readline';
@@ -13,7 +13,7 @@ import chalk from 'chalk';
 import qrcode from 'qrcode-terminal';
 import { ProxyClient, ProxyStatus, ClientStatus } from '../proxy/ProxyClient.js';
 import { ServerConfig, ToolDetectionResult } from '../types.js';
-import { formatServerName } from '../config/server-selection.js';
+import { CLIServer, formatServerName, getServerLabel, isSameServer, serverLabel } from '../config/server-selection.js';
 import { t } from '../i18n/index.js';
 import { LogBuffer, LogEntry } from './LogBuffer.js';
 import { WakeLock } from './WakeLock.js';
@@ -23,7 +23,7 @@ import { RPCRouter } from '../rpc/router.js';
 import type { TerminalSummary } from '../services/TerminalService.js';
 import { pinSettingLabel, pinSetupText, saveConnectionPin } from './pin-settings.js';
 
-type View = 'main' | 'logs' | 'qr' | 'terminals' | 'pinSetup';
+type View = 'main' | 'logs' | 'qr' | 'terminals' | 'pinSetup' | 'relays';
 
 type TerminalRow = TerminalSummary & { deviceId: string };
 
@@ -34,7 +34,17 @@ export interface DashboardOptions {
   tools: ToolDetectionResult;
   logs: LogBuffer;
   wakeLock: WakeLock;
+  relays: RelayControls;
   onQuit: () => void;
+}
+
+export interface RelayControls {
+  /** Relays to offer, in display order */
+  list(): Promise<CLIServer[]>;
+  /** Round trip in ms, or Infinity when the relay can't be reached */
+  ping(url: string): Promise<number>;
+  /** Move to another relay; resolves with the client now serving */
+  switchTo(url: string): Promise<ProxyClient>;
 }
 
 const { version: CLI_VERSION } = createRequire(import.meta.url)('../../package.json') as { version: string };
@@ -42,6 +52,7 @@ const LABEL_WIDTH = 24;
 const QUIT_CONFIRM_MS = 3000;
 const QR_SIDE_GAP = 3;
 const QR_MIN_SIDE_WIDTH = 24;
+const RELAY_PING_REFRESH_MS = 10_000;
 
 // Alternate screen, hidden cursor, and no auto-wrap: a line that a terminal
 // measures wider than we do (emoji widths vary) is clipped instead of pushing
@@ -49,6 +60,9 @@ const QR_MIN_SIDE_WIDTH = 24;
 const ENTER_ALT_SCREEN = '\x1b[?1049h\x1b[?25l\x1b[?7l';
 const LEAVE_ALT_SCREEN = '\x1b[?7h\x1b[?25h\x1b[?1049l';
 const CLEAR_SCREEN = '\x1b[2J';
+
+/** "Relay EU", or the hostname of a relay that isn't listed */
+const relayName = (url: string) => getServerLabel(url) ?? url;
 
 export class Dashboard {
   private view: View = 'main';
@@ -75,6 +89,16 @@ export class Dashboard {
   private readonly terminalNumbers = new Map<string, number>();
   private nextTerminalNumber = 1;
   private pinSetup: { digits: string; first: string; confirming: boolean; error: string } | null = null;
+  private unsubscribeProxy: (() => void) | null = null;
+  // Relays view: the list (null until loaded), each relay's last ping, and
+  // the relay being switched to
+  private relayList: CLIServer[] | null = null;
+  private relayListLoading = false;
+  private relayPings = new Map<string, number>();
+  private pingRound: Promise<void> | null = null;
+  private pingTimer: NodeJS.Timeout | null = null;
+  private selectedRelay: string | null = null;
+  private switchingTo: string | null = null;
 
   constructor(private options: DashboardOptions) {
     for (const setting of SETTINGS) {
@@ -98,10 +122,10 @@ export class Dashboard {
     const onResize = () => this.repaint();
     stdout.on('resize', onResize);
 
+    this.unsubscribeProxy = this.options.proxy.onStatusChange(() => this.onStatusChange());
     this.unsubscribers.push(
       () => stdin.off('keypress', onKey),
       () => stdout.off('resize', onResize),
-      this.options.proxy.onStatusChange(() => this.onStatusChange()),
       this.options.logs.onAppend((added) => this.onLogAppend(added)),
       this.options.wakeLock.onChange(() => this.scheduleRender()),
     );
@@ -126,6 +150,9 @@ export class Dashboard {
     this.active = false;
     this.pinSetup = null;
     if (this.tick) clearInterval(this.tick);
+    this.stopRelayPings();
+    this.unsubscribeProxy?.();
+    this.unsubscribeProxy = null;
     for (const unsubscribe of this.unsubscribers) unsubscribe();
     this.unsubscribers = [];
 
@@ -167,6 +194,8 @@ export class Dashboard {
       this.handleLogKey(name, key);
     } else if (this.view === 'terminals') {
       this.handleTerminalsKey(name);
+    } else if (this.view === 'relays') {
+      this.handleRelaysKey(name);
     } else if (this.view === 'qr') {
       if (name === 'escape' || name === 'c' || name === 'return') this.setView('main');
       else if (name === 'l') this.setView('logs');
@@ -181,6 +210,7 @@ export class Dashboard {
     if (name === 'l') return this.setView('logs');
     if (name === 'c') return this.setView('qr');
     if (name === 'm' && this.terminalsEnabled()) return this.setView('terminals');
+    if (name === 'r') return this.openRelays();
     if (name === 'q') return this.handleQuitKey();
     if (name === 'w') {
       this.options.wakeLock.toggle();
@@ -353,6 +383,7 @@ export class Dashboard {
   }
 
   private setView(view: View): void {
+    if (view !== 'relays') this.stopRelayPings();
     this.view = view;
     this.killArmed = null;
     this.autoQr = false;
@@ -411,6 +442,7 @@ export class Dashboard {
     else if (this.view === 'pinSetup') lines = this.renderPinSetup();
     else if (this.view === 'qr') lines = this.renderQr(width, height);
     else if (this.view === 'terminals') lines = this.renderTerminalsView(width, height);
+    else if (this.view === 'relays') lines = this.renderRelays(width, height);
     else lines = this.renderMain(width, height);
 
     const body = lines.slice(0, height - 1).map((line) => truncate(line, width));
@@ -442,7 +474,10 @@ export class Dashboard {
     const relayState = status.relayConnected
       ? chalk.green('● ' + t('dashboard.relayConnected'))
       : chalk.yellow('● ' + t('dashboard.relayReconnecting'));
-    const relay = [this.row(t('dashboard.relay'), `${relayState}  ${chalk.gray(formatServerName(status.relayUrl))}`)];
+    const relayNote = this.switchingTo
+      ? chalk.yellow(t('dashboard.relaySwitchingTo', { name: relayName(this.switchingTo) }))
+      : chalk.gray(t('dashboard.relayChangeHint'));
+    const relay = [this.row(t('dashboard.relay'), `${relayState}  ${chalk.gray(formatServerName(status.relayUrl))}  ${relayNote}`)];
 
     // Clients
     const clients = [chalk.bold(t('dashboard.clients'))];
@@ -658,11 +693,16 @@ export class Dashboard {
 
   private formatPing(client: ClientStatus): string {
     if (client.pingMs === null) return chalk.gray(client.ready ? '— ms' : '');
-    const text = `${client.pingMs} ms`;
+    return this.colorPing(client.pingMs);
+  }
+
+  /** "42 ms", colored by how fast it is */
+  private colorPing(ms: number): string {
+    const text = `${ms} ms`;
     // Solid green below 80 ms, blending through yellow at 175 ms to red at 300 ms.
-    const hue = client.pingMs <= 80 ? 140 : client.pingMs < 175
-      ? 140 - (client.pingMs - 80) * 92 / 95
-      : Math.max(0, 48 - (client.pingMs - 175) * 48 / 125);
+    const hue = ms <= 80 ? 140 : ms < 175
+      ? 140 - (ms - 80) * 92 / 95
+      : Math.max(0, 48 - (ms - 175) * 48 / 125);
     // HSL (75% saturation, 50% lightness) converted to RGB for Chalk's color support.
     const chroma = 0.75;
     const x = chroma * (1 - Math.abs((hue / 60) % 2 - 1));
@@ -720,6 +760,163 @@ export class Dashboard {
     const color = notice.level === 'error' ? chalk.red : chalk.yellow;
     const text = stripAnsi(notice.text).trim();
     return `${chalk.bold(t('dashboard.latest'))} ${chalk.gray(time)} ${color(text)}`;
+  }
+
+  // ---------------------------------------------------------- relays view
+
+  private openRelays(): void {
+    this.setView('relays');
+    this.selectedRelay = this.options.proxy.getStatus().relayUrl;
+    if (this.relayList) this.pingRelays();
+    else this.loadRelays();
+    this.pingTimer ??= setInterval(() => this.pingRelays(), RELAY_PING_REFRESH_MS);
+    this.pingTimer.unref();
+  }
+
+  private stopRelayPings(): void {
+    if (this.pingTimer) clearInterval(this.pingTimer);
+    this.pingTimer = null;
+  }
+
+  private loadRelays(): void {
+    if (this.relayListLoading) return;
+    this.relayListLoading = true;
+    this.options.relays.list().catch(() => []).then((list) => {
+      this.relayList = list;
+      this.relayListLoading = false;
+      if (this.view === 'relays') this.pingRelays();
+      this.scheduleRender();
+    });
+  }
+
+  /** Measure every relay again; values from the last round stay until replaced. */
+  private pingRelays(): void {
+    if (this.pingRound || !this.relayList) return;
+    this.pingRound = Promise.all(this.relayRows().map(async (server) => {
+      const ms = await this.options.relays.ping(server.url).catch(() => Infinity);
+      this.relayPings.set(server.url, ms);
+      this.scheduleRender();
+    })).then(() => { this.pingRound = null; });
+  }
+
+  /** The listed relays, plus the current one if it isn't listed (--server). */
+  private relayRows(): CLIServer[] {
+    const list = this.relayList ?? [];
+    const current = this.options.proxy.getStatus().relayUrl;
+    if (list.some((server) => isSameServer(server.url, current))) return list;
+    return [{ url: current, label: {}, locale: {} }, ...list];
+  }
+
+  private selectedRelayIndex(rows: CLIServer[]): number {
+    const index = rows.findIndex((server) => this.selectedRelay !== null && isSameServer(server.url, this.selectedRelay));
+    return index === -1 ? 0 : index;
+  }
+
+  private handleRelaysKey(name: string | undefined): void {
+    const rows = this.relayList ? this.relayRows() : [];
+    const index = this.selectedRelayIndex(rows);
+    switch (name) {
+      case 'escape':
+      case 'r':
+        this.setView('main');
+        break;
+      case 'l':
+        this.setView('logs');
+        break;
+      case 'q':
+        this.handleQuitKey();
+        break;
+      case 'up':
+      case 'k':
+        if (rows.length > 0) this.selectedRelay = rows[Math.max(0, index - 1)].url;
+        break;
+      case 'down':
+      case 'j':
+        if (rows.length > 0) this.selectedRelay = rows[Math.min(rows.length - 1, index + 1)].url;
+        break;
+      case 'return':
+        if (rows[index]) this.switchRelay(rows[index].url);
+        break;
+    }
+  }
+
+  private switchRelay(url: string): void {
+    if (this.switchingTo) return;
+    const name = relayName(url);
+    if (isSameServer(url, this.options.proxy.getStatus().relayUrl)) {
+      this.setFlash(t('dashboard.relayAlreadyCurrent', { name }));
+      return;
+    }
+    this.switchingTo = url;
+    const clientId = this.options.proxy.getConnectionSettings()?.clientId;
+    console.log(`[Dashboard] Switching relay to ${name}`);
+    this.options.relays.switchTo(url).then((proxy) => {
+      this.setProxy(proxy);
+      console.log(`[Dashboard] Relay switched to ${name}`);
+      if (clientId && proxy.getConnectionSettings()?.clientId !== clientId) {
+        // Editors paired with the old client ID can't find this CLI any more
+        console.warn(`⚠️  ${t('dashboard.relayNewPairing')}`);
+        this.setView('qr');
+        this.setFlash(t('dashboard.relayNewPairing'));
+      } else {
+        this.setFlash(t('dashboard.relaySwitched', { name }));
+      }
+    }, (error: any) => {
+      // The first line says what went wrong; connect errors add details below it
+      const [reason = '', ...details] = String(error?.message ?? error).split('\n').filter((line) => line.trim());
+      const message = t('dashboard.relaySwitchFailed', { name, message: reason.trim() });
+      console.warn([`⚠️  ${message}`, ...details].join('\n'));
+      this.setFlash(message);
+    }).finally(() => {
+      this.switchingTo = null;
+      this.scheduleRender();
+    });
+  }
+
+  private setProxy(proxy: ProxyClient): void {
+    this.unsubscribeProxy?.();
+    this.options.proxy = proxy;
+    this.unsubscribeProxy = this.active ? proxy.onStatusChange(() => this.onStatusChange()) : null;
+    this.scheduleRender();
+  }
+
+  private renderRelays(width: number, height: number): string[] {
+    const above = [this.renderHeader(width), '', chalk.bold(t('dashboard.relaysTitle'))];
+    if (!this.relayList) return [...above, '  ' + chalk.gray(t('dashboard.relaysLoading'))];
+
+    const status = this.options.proxy.getStatus();
+    const rows = this.relayRows();
+    const index = this.selectedRelayIndex(rows);
+    const cells = rows.map((server) => {
+      const current = isSameServer(server.url, status.relayUrl);
+      const ping = this.relayPings.get(server.url);
+      const label = serverLabel(server);
+      return {
+        dot: !current ? chalk.gray('○') : status.relayConnected ? chalk.green('●') : chalk.yellow('●'),
+        // An unlisted relay has no name: its hostname goes in the name column
+        label,
+        host: label === server.url ? '' : server.url,
+        ping: ping === undefined
+          ? chalk.gray('…')
+          : ping === Infinity ? chalk.red(t('server.unreachable')) : this.colorPing(ping),
+        state: this.switchingTo !== null && isSameServer(server.url, this.switchingTo)
+          ? chalk.yellow(t('dashboard.relaySwitching'))
+          : current ? chalk.gray(t('dashboard.relayCurrent')) : '',
+      };
+    });
+    const columnWidth = (pick: (cell: typeof cells[number]) => string) =>
+      Math.max(...cells.map((cell) => visibleWidth(pick(cell)))) + 3;
+    const labelWidth = columnWidth((cell) => cell.label);
+    const hostWidth = columnWidth((cell) => cell.host);
+    const pingWidth = Math.max(9, columnWidth((cell) => cell.ping));
+    const lines = cells.map((cell, i) => {
+      const line = `${cell.dot} ${fit(cell.label, labelWidth)}${chalk.gray(fit(cell.host, hostWidth))}${fit(cell.ping, pingWidth)}${cell.state}`;
+      return i === index ? chalk.inverse('> ' + stripAnsi(line)) : '  ' + line;
+    });
+    const hint = wrap(t('dashboard.relaysHint'), Math.max(20, width - 4)).map((line) => '  ' + chalk.gray(line));
+    // Keep the hint when there's room; the list matters more
+    const room = height - 1 - above.length - lines.length;
+    return [...above, ...lines, ...(room > hint.length ? ['', ...hint] : [])];
   }
 
   // ------------------------------------------------------------- QR view
@@ -831,6 +1028,13 @@ export class Dashboard {
       items = [key('↑↓', t('dashboard.keySelect'))];
       if (selected) items.push(key('x', selected.exited ? t('dashboard.keyRemove') : t('dashboard.keyKill')));
       items.push(key('m', t('dashboard.keyBack')), key('q', t('dashboard.keyQuit')));
+    } else if (this.view === 'relays') {
+      items = [
+        key('↑↓', t('dashboard.keySelect')),
+        key('Enter', t('dashboard.keySwitch')),
+        key('r', t('dashboard.keyBack')),
+        key('q', t('dashboard.keyQuit')),
+      ];
     } else if (this.view === 'qr') {
       items = [key('c', t('dashboard.keyBack')), key('l', t('dashboard.keyLogs')), key('q', t('dashboard.keyQuit'))];
     } else {

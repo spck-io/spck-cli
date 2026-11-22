@@ -986,4 +986,134 @@ describe('ProxyClient Security', () => {
       consoleWarn.mockRestore();
     });
   });
+
+  describe('Switching relays', () => {
+    const EU = 'cli-eu-1.spck.io';
+    const fresh = { firebaseToken: 'fresh-firebase-token', userId: 'test-user-123' };
+
+    /** A second relay socket with its own handlers */
+    function nextRelaySocket() {
+      const handlers: Record<string, Function[]> = {};
+      const add = (event: string, handler: Function) => { (handlers[event] ??= []).push(handler); };
+      const socket = {
+        on: vi.fn(add), once: vi.fn(add), off: vi.fn(), emit: vi.fn(),
+        disconnect: vi.fn(), removeAllListeners: vi.fn(), id: 'eu-socket-id',
+      };
+      const trigger = async (event: string, data: any) => {
+        for (const handler of handlers[event] ?? []) await handler(data);
+      };
+      (io as Mock).mockReturnValueOnce(socket);
+      return { socket, trigger };
+    }
+
+    const authenticated = { clientId: TEST_CLIENT_ID, token: 'eu-server-token', expiresAt: Date.now() + 86400000, userId: 'test-user-123' };
+    const tick = () => new Promise(resolve => setImmediate(resolve));
+
+    it('signs in on the new relay with the same client ID before leaving the old one', async () => {
+      const client = await setupClient();
+      const eu = nextRelaySocket();
+      const switching = client.switchTo(EU, fresh);
+      await tick();
+
+      expect((io as Mock).mock.lastCall![0]).toBe(`wss://${EU}/listen`);
+      const auth = await new Promise<any>(resolve => (io as Mock).mock.lastCall![1].auth(resolve));
+      expect(auth).toMatchObject({ firebaseToken: 'fresh-firebase-token', serverToken: 'mock-server-token', onDuplicate: 'takeover' });
+      // Still serving through the old relay, file changes included
+      expect(mockSocket.disconnect).not.toHaveBeenCalled();
+      expect(mockRPCRouter.setBroadcastCallback).toHaveBeenCalledTimes(1);
+
+      await eu.trigger('authenticated', authenticated);
+      const next = await switching;
+
+      expect(next.getStatus().relayUrl).toBe(EU);
+      expect(next.getConnectUrl()).toContain(`secret=${TEST_SECRET}`);
+      expect(mockSocket.removeAllListeners).toHaveBeenCalled();
+      expect(mockSocket.disconnect).toHaveBeenCalled();
+      expect(mockRPCRouter.setBroadcastCallback).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps serving through the old relay, without exiting, when the new one refuses', async () => {
+      const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as any);
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const client = await setupClient();
+        const eu = nextRelaySocket();
+        const switching = client.switchTo(EU, fresh);
+        await tick();
+
+        // Relay order: error first, then disconnect(true)
+        await eu.trigger('error', { code: 'subscription_check_failed', message: 'Unable to verify subscription' });
+        await eu.trigger('disconnect', 'io server disconnect');
+        await expect(switching).rejects.toMatchObject({ code: 'subscription_check_failed' });
+
+        expect(exit).not.toHaveBeenCalled();
+        expect(eu.socket.disconnect).toHaveBeenCalled();
+        expect(mockSocket.disconnect).not.toHaveBeenCalled();
+        expect(mockRPCRouter.setBroadcastCallback).toHaveBeenCalledTimes(1);
+        expect(client.getConnectUrl()).toContain('rs=cli-na-1.spck.io');
+
+        // The old relay dropping us afterwards is handled as before
+        await triggerEvent('disconnect', 'io server disconnect');
+        expect(exit).toHaveBeenCalledWith(1);
+      } finally {
+        exit.mockRestore();
+        consoleError.mockRestore();
+      }
+    });
+
+    it('fails the switch when the new relay drops the socket without an error', async () => {
+      const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as any);
+      try {
+        const client = await setupClient();
+        const eu = nextRelaySocket();
+        const switching = client.switchTo(EU, fresh);
+        await tick();
+        await eu.trigger('disconnect', 'io server disconnect');
+        await expect(switching).rejects.toThrow('io server disconnect');
+        expect(exit).not.toHaveBeenCalled();
+      } finally {
+        exit.mockRestore();
+      }
+    });
+
+    it('does not exit when the old relay reports it replaced while the switch completes', async () => {
+      const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as any);
+      try {
+        const client = await setupClient();
+        const eu = nextRelaySocket();
+        const switching = client.switchTo(EU, fresh);
+        await tick();
+
+        // The new relay has already taken the session over
+        await triggerEvent('error', { code: 'replaced_by_new_connection', message: 'replaced' });
+        await triggerEvent('disconnect', 'io server disconnect');
+        await eu.trigger('authenticated', authenticated);
+        await switching;
+        expect(exit).not.toHaveBeenCalled();
+      } finally {
+        exit.mockRestore();
+      }
+    });
+
+    it('reconnects to the old relay if it dropped us and the switch then failed', async () => {
+      const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as any);
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const client = await setupClient();
+        const eu = nextRelaySocket();
+        const switching = client.switchTo(EU, fresh);
+        await tick();
+
+        await triggerEvent('disconnect', 'io server disconnect');
+        await eu.trigger('error', { code: 'rate_limited', message: 'slow down' });
+        await expect(switching).rejects.toMatchObject({ code: 'rate_limited' });
+        expect(exit).not.toHaveBeenCalled();
+        expect((client as any).reconnectTimer).not.toBeNull();
+        client.forceCleanup();
+      } finally {
+        exit.mockRestore();
+        consoleError.mockRestore();
+      }
+    });
+  });
 });

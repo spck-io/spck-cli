@@ -20,7 +20,7 @@ You need [Node.js](https://nodejs.org) 22.22.2+ or 24.15+, and the Spck Editor a
 
 Your project is now open in the app. To enter the connection details by hand instead, use the Client ID, Secret and relay server shown in the terminal.
 
-After an editor connects successfully, future launches open the dashboard directly. Press `c` in the dashboard to show the QR code again, or `l` to view logs, including startup details.
+After an editor connects successfully, future launches open the dashboard directly. Press `c` in the dashboard to show the QR code again, `l` to view logs, including startup details, or `r` to see each relay's ping and switch to another relay.
 
 To skip `npx` next time, install the CLI with `npm install -g spck` and run `spck`.
 

@@ -13,6 +13,13 @@ function fakeClient(id: string) {
   return { connectionId: id, deviceId: id, transport: 'relay', connectedAt: Date.now(), ready: true, pingMs: 20 };
 }
 
+const RELAYS = [
+  { url: 'cli-na-1.spck.io', label: { en: 'Relay US' }, locale: {} },
+  { url: 'cli-eu-1.spck.io', label: { en: 'Relay EU' }, locale: {} },
+  { url: 'cli-ea-1.spck.io', label: { en: 'Relay Asia' }, locale: {} },
+];
+const PINGS: Record<string, number> = { 'cli-na-1.spck.io': 42, 'cli-eu-1.spck.io': 118, 'cli-ea-1.spck.io': Infinity };
+
 function fakeTerminal(n: number) {
   return {
     id: `term-${n}`, deviceId: 'device-1', createdAt: Date.now(), lastAttachedAt: Date.now(),
@@ -30,6 +37,7 @@ describe('Dashboard', () => {
   let statusChanged: () => void;
   let onQuit: Mock<() => void>;
   let toggleWake: Mock<() => void>;
+  let relays: { list: Mock; ping: Mock; switchTo: Mock };
   const original = { columns: process.stdout.columns, rows: process.stdout.rows, setRawMode: process.stdin.setRawMode };
 
   /** Plain text of the most recent frame, one string per row. */
@@ -41,20 +49,27 @@ describe('Dashboard', () => {
     await settle();
   };
 
-  function start(columns: number, rows: number) {
+  function fakeProxy(relayUrl: string, clientId = 'abcdefghijkl') {
+    const unsubscribe = vi.fn();
+    return {
+      unsubscribe,
+      getStatus: () => ({ relayUrl, relayConnected: true, fastLane: 'available', clients }),
+      onStatusChange: (listener: () => void) => { statusChanged = listener; return unsubscribe; },
+      getConnectUrl: () => `spck://connect?clientId=${clientId}&secret=${SECRET}&rs=${relayUrl}&name=project`,
+      getConnectionSettings: () => ({ clientId, secret: SECRET }),
+    };
+  }
+
+  function start(columns: number, rows: number, proxy = fakeProxy('cli-na-1.spck.io')) {
     process.stdout.columns = columns;
     process.stdout.rows = rows;
     dashboard = new Dashboard({
-      proxy: {
-        getStatus: () => ({ relayUrl: 'cli-na-1.spck.io', relayConnected: true, fastLane: 'available', clients }),
-        onStatusChange: (listener: () => void) => { statusChanged = listener; return () => {}; },
-        getConnectUrl: () => `spck://connect?clientId=abcdefghijkl&secret=${SECRET}&rs=cli-na-1.spck.io&name=project`,
-        getConnectionSettings: () => ({ clientId: 'abcdefghijkl', secret: SECRET }),
-      } as any,
+      proxy: proxy as any,
       config,
       tools,
       logs,
       wakeLock: { state: 'off', error: null, onChange: () => () => {}, toggle: toggleWake } as any,
+      relays: relays as any,
       onQuit,
     });
     dashboard.start();
@@ -70,6 +85,11 @@ describe('Dashboard', () => {
     };
     onQuit = vi.fn();
     toggleWake = vi.fn();
+    relays = {
+      list: vi.fn(async () => RELAYS),
+      ping: vi.fn(async (url: string) => PINGS[url] ?? Infinity),
+      switchTo: vi.fn(),
+    };
     logs = new LogBuffer();
     logs.install();
     (process.stdin as any).setRawMode = vi.fn();
@@ -336,6 +356,115 @@ describe('Dashboard', () => {
       for (let i = 0; i < 19; i++) await press('j');
       expect(text()).toContain('> ● #20');
       expect(text()).toContain('20/20');
+    });
+  });
+
+  describe('relays view', () => {
+    const row = (name: string) => screen().find((line) => line.includes(name)) ?? '';
+
+    it('lists every relay with its ping and marks the current one', async () => {
+      start(100, 24);
+      expect(text()).toContain('[r] change');
+      await press('r');
+      await settle();
+
+      expect(row('Relay US')).toMatch(/> ● Relay US\s+cli-na-1\.spck\.io\s+42 ms\s+current/);
+      expect(row('Relay EU')).toMatch(/○ Relay EU\s+cli-eu-1\.spck\.io\s+118 ms\s*$/);
+      expect(row('Relay Asia')).toContain('unreachable');
+      expect(relays.ping).toHaveBeenCalledTimes(3);
+    });
+
+    it('lists the current relay even when it is not a listed one', async () => {
+      start(100, 24, fakeProxy('custom.spck.io'));
+      await press('r');
+      await settle();
+      expect(row('custom.spck.io')).toMatch(/> ● custom\.spck\.io\s+unreachable\s+current/);
+      expect(relays.ping).toHaveBeenCalledWith('custom.spck.io');
+      expect(row('Relay US')).toContain('42 ms');
+    });
+
+    it('measures again while open, and stops once closed', async () => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+      try {
+        start(100, 24);
+        await press('r');
+        await settle();
+        expect(relays.ping).toHaveBeenCalledTimes(3);
+        vi.advanceTimersByTime(10_000);
+        await settle();
+        expect(relays.ping).toHaveBeenCalledTimes(6);
+
+        await press('escape', { meta: true });
+        vi.advanceTimersByTime(30_000);
+        await settle();
+        expect(relays.ping).toHaveBeenCalledTimes(6);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('switches to the selected relay and follows the new connection', async () => {
+      const first = fakeProxy('cli-na-1.spck.io');
+      const next = fakeProxy('cli-eu-1.spck.io');
+      let finish!: (proxy: unknown) => void;
+      relays.switchTo.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+      start(100, 24, first);
+      await press('r');
+      await settle();
+
+      await press('return');
+      expect(relays.switchTo).not.toHaveBeenCalled();
+      expect(text()).toContain('Already connected through Relay US');
+
+      await press('j');
+      await press('return');
+      expect(relays.switchTo).toHaveBeenCalledWith('cli-eu-1.spck.io');
+      expect(row('Relay EU')).toContain('switching…');
+      await press('return'); // one switch at a time
+      expect(relays.switchTo).toHaveBeenCalledOnce();
+
+      await press('escape', { meta: true });
+      expect(row('Relay ')).toContain('switching to Relay EU…');
+
+      finish(next);
+      await settle();
+      await settle();
+      expect(row('Relay ')).toContain('Connected  Relay EU (cli-eu-1.spck.io)  [r] change');
+      expect(text()).toContain('Now connected through Relay EU');
+      expect(first.unsubscribe).toHaveBeenCalled();
+    });
+
+    it('says so when a switch fails, and stays on the current relay', async () => {
+      relays.switchTo.mockRejectedValue(new Error('relay refused the connection'));
+      start(100, 24);
+      await press('r');
+      await settle();
+      await press('j');
+      await press('return');
+      await settle();
+      await settle();
+
+      expect(text()).toContain('Could not switch to Relay EU: relay refused the connection');
+      expect(row('Relay US')).toContain('current');
+      await press('r');
+      expect(row('Relay ')).toContain('Relay US (cli-na-1.spck.io)');
+      expect(row('Latest:')).toContain('Could not switch to Relay EU: relay refused the connection');
+    });
+
+    it('shows the QR code when the new relay gave the CLI a new client ID', async () => {
+      clients = [];
+      config.hasConnectedEditor = true;
+      relays.switchTo.mockResolvedValue(fakeProxy('cli-eu-1.spck.io', 'newclientid1'));
+      start(80, 24);
+      await press('r');
+      await settle();
+      await press('j');
+      await press('return');
+      await settle();
+      await settle();
+
+      expect(text()).toContain('Client ID: newclientid1');
+      expect(text()).toContain('new client ID');
     });
   });
 });

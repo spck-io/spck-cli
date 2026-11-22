@@ -75,6 +75,10 @@ interface ProxyClientOptions {
   // What the relay should do on the first connect if another running CLI holds
   // this client ID. 'ask' fails with client_id_in_use so the caller can prompt.
   onDuplicate?: 'ask' | 'takeover';
+  // Set when another client is still serving (a relay switch): until this one
+  // first signs in, relay errors and disconnects only fail connect(), they
+  // don't exit the process.
+  softFirstConnect?: boolean;
 }
 
 /**
@@ -159,6 +163,14 @@ export class ProxyClient {
 
   private statusListeners: Set<() => void> = new Set();
 
+  // Set while switchTo() signs in through another relay. That relay takes the
+  // session over just before it confirms, so this one may report us replaced
+  // and drop us first: the switch working, not a reason to exit.
+  private handingOff = false;
+  private droppedDuringHandoff = false;
+  // Set by forceCleanup(), so an in-flight token refresh doesn't reconnect it
+  private closed = false;
+
   constructor(private options: ProxyClientOptions) {
     this.config = options.config;
     this.tools = options.tools;
@@ -191,7 +203,14 @@ export class ProxyClient {
         this.notifyStatus();
       },
     });
+  }
 
+  /**
+   * Send file changes and agent updates to this client's editors. Only done
+   * once signed in: a client still trying a relay (at startup, or while
+   * switching) must not take them from the one serving.
+   */
+  private routeBroadcasts(): void {
     RPCRouter.setBroadcastCallback((method: string, params: any) => {
       for (const [connectionId, connection] of this.activeConnections) {
         if (connection.handshakeComplete) {
@@ -199,6 +218,11 @@ export class ProxyClient {
         }
       }
     });
+  }
+
+  /** A relay switch's first sign-in, which must not end the CLI if it fails */
+  private get failsSoftly(): boolean {
+    return this.options.softFirstConnect === true && this.connectionSettings === null;
   }
 
   /**
@@ -264,6 +288,38 @@ export class ProxyClient {
 
     // Wait for authentication
     await this.waitForAuthentication();
+    this.routeBroadcasts();
+  }
+
+  /**
+   * Move to another relay: sign in there with the same client ID, then leave
+   * this one. This relay drops its editors; when they reconnect here they are
+   * redirected to the new relay. Terminals and agents keep running. Resolves
+   * with the client now serving; if the new relay fails, this one carries on.
+   */
+  async switchTo(proxyServerUrl: string, credentials: { firebaseToken: string; userId: string }): Promise<ProxyClient> {
+    const next = new ProxyClient({
+      ...this.options,
+      firebaseToken: credentials.firebaseToken,
+      userId: credentials.userId,
+      existingConnectionSettings: this.connectionSettings ?? this.options.existingConnectionSettings,
+      proxyServerUrl,
+      // The client ID's other holder is this process, on the old relay
+      onDuplicate: 'takeover',
+      softFirstConnect: true,
+    });
+    this.handingOff = true;
+    try {
+      await next.connect();
+    } catch (error) {
+      next.forceCleanup();
+      this.handingOff = false;
+      if (this.droppedDuringHandoff && !this.closed) this.scheduleReconnect();
+      this.droppedDuringHandoff = false;
+      throw error;
+    }
+    this.forceCleanup();
+    return next;
   }
 
   /**
@@ -281,6 +337,8 @@ export class ProxyClient {
 
       // Refresh the Firebase token
       const newCredentials = await refreshFirebaseToken(storedCredentials);
+      // Replaced by a relay switch while the refresh ran
+      if (this.closed) return;
 
       // Update internal state
       this.firebaseToken = newCredentials.firebaseToken;
@@ -407,6 +465,12 @@ export class ProxyClient {
         enhancedError.code = error?.code;
         enhancedError.retryAfter = error?.retryAfter;
         reject(enhancedError);
+      });
+
+      // Dropped before signing in without saying why (no 'error' first)
+      this.socket.once('disconnect', (reason: string) => {
+        clearTimeout(timeout);
+        reject(new Error(t('connection.disconnectedFromProxy', { reason })));
       });
 
       this.socket.once('connect_error', (error: any) => {
@@ -1244,6 +1308,12 @@ export class ProxyClient {
    * Handle proxy error
    */
   private async handleError(error: ProxyErrorEvent): Promise<void> {
+    // connect() rejects with this error; the client serving now carries on
+    if (this.failsSoftly) {
+      this.suppressServerDisconnectExit = true;
+      return;
+    }
+
     // The server can emit multiple expired_firebase_token events during a reconnect
     // cycle; guard so only one refresh runs and duplicates are silently dropped.
     if (error.code === 'expired_firebase_token') {
@@ -1275,6 +1345,7 @@ export class ProxyClient {
     // Exit 0: a service manager restarting on failure would otherwise start
     // this CLI again, and the two would keep replacing each other.
     if (error.code === 'replaced_by_new_connection') {
+      if (this.handingOff) return;
       console.warn(`\n⚠️  ${t('proxyError.replacedByNewConnection')}`);
       console.warn(`${t('proxyError.replacedByNewConnectionHint')}\n`);
       process.exit(0);
@@ -1402,6 +1473,11 @@ export class ProxyClient {
     if (this.tokenRefreshState === 'refreshing') return;
 
     if (reason === 'io server disconnect') {
+      if (this.failsSoftly) return; // connect() reports it
+      if (this.handingOff) {
+        this.droppedDuringHandoff = true;
+        return;
+      }
       // Server forcefully disconnected us
       console.error(`${t('connection.serverTerminated')}\n`);
       process.exit(1);
@@ -1512,6 +1588,7 @@ export class ProxyClient {
    * against a different relay without leaving a reconnecting socket behind.
    */
   forceCleanup(): void {
+    this.closed = true;
     this.resetReconnectState();
     this.resetEditorSessions();
     if (!this.socket) return;

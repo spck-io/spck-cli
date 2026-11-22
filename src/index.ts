@@ -20,8 +20,8 @@ import {
   loadServerPreference,
   saveServerPreference,
 } from './config/credentials.js';
-import { fetchServerList, displayServerPings, getDefaultServerList, normalizeServerUrl, formatServerName } from './config/server-selection.js';
-import { authenticateWithFirebase, getValidFirebaseToken, abortCurrentAuth } from './connection/firebase-auth.js';
+import { fetchServerList, displayServerPings, getDefaultServerList, normalizeServerUrl, formatServerName, measureServerPing } from './config/server-selection.js';
+import { authenticateWithFirebase, getValidFirebaseToken, refreshFirebaseToken, abortCurrentAuth } from './connection/firebase-auth.js';
 import { confirm, runSetup } from './setup/wizard.js';
 import { detectTools, displayFeatureSummary } from './utils/tool-detection.js';
 import { ensureProjectDir, isDirectory } from './utils/project-dir.js';
@@ -337,6 +337,11 @@ export async function startProxyClient(
         tools,
         logs: logBuffer,
         wakeLock: new WakeLock(),
+        relays: {
+          list: fetchServerList,
+          ping: (url) => measureServerPing(url),
+          switchTo: switchRelay,
+        },
         onQuit: () => shutdown('SIGINT'),
       });
       dashboard.start();
@@ -388,6 +393,28 @@ export async function startProxyClient(
     process.off('exit', onStartupExit);
     if (!dashboardStarted) logBuffer?.uninstall();
   }
+}
+
+/**
+ * Move the running CLI to another relay (from the dashboard). The ID token
+ * from startup expires after an hour, so sign in with a fresh one; there's
+ * nobody to answer a browser sign-in, so a refresh that needs one fails.
+ */
+async function switchRelay(url: string): Promise<ProxyClient> {
+  const current = proxyClient;
+  if (!current) throw new Error(t('server.allRelaysFailed'));
+  const stored = loadCredentials();
+  if (!stored) throw new Error(t('auth.noRefreshToken'));
+  const credentials = await refreshFirebaseToken(stored, undefined, { interactive: false });
+  const next = await current.switchTo(url, credentials);
+  proxyClient = next;
+  try {
+    saveServerPreference(url);
+  } catch (error: any) {
+    // The switch worked; only the next start would use the old relay
+    console.warn(`⚠️  ${t('dashboard.saveFailed', { message: error.message })}`);
+  }
+  return next;
 }
 
 /**
