@@ -11,6 +11,7 @@ import * as crypto from 'crypto';
 import { AuthenticatedSocket, ErrorCode, createRPCError, linkOutsideRootError } from '../types.js';
 import { logGitRead, logGitWrite } from '../utils/logger.js';
 import { isPathInside, linksStayInside, toRelativeClientPath } from '../utils/paths.js';
+import { GitCommandError, classifyGitFailure } from '../utils/git-errors.js';
 
 interface ExecGitOptions {
   cwd?: string;
@@ -330,10 +331,11 @@ export class GitService {
       if (error.code && error.message) {
         throw error; // Re-throw RPC errors
       }
+      const reason = error instanceof GitCommandError ? error.reason : undefined;
       throw createRPCError(
         ErrorCode.GIT_OPERATION_FAILED,
         `Git operation failed: ${error.message}`,
-        { method, error: error.toString() }
+        { method, error: error.toString(), ...(reason ? { reason } : {}) }
       );
     }
   }
@@ -444,8 +446,9 @@ export class GitService {
             stderr: stderr.substring(0, 500), // Truncate for logs
             stdout: stdout.substring(0, 500),
           });
-          // Send sanitized error to client (no file paths from stderr/stdout)
-          reject(new Error(`Git command failed with exit code ${code}`));
+          // Send sanitized error to client (no file paths from stderr/stdout):
+          // only the reason, which the editor turns into its own message
+          reject(new GitCommandError(code, classifyGitFailure(`${stderr}\n${stdout}`), stdout + stderr));
         } else {
           resolve({ stdout, stderr, code: exitCode, ...(options.binary ? { stdoutBuffer: Buffer.concat(stdoutChunks) } : {}) });
         }
@@ -1545,12 +1548,7 @@ export class GitService {
       args.push(`${currentBranch}:${params.remoteRef}`);
     }
 
-    const { env: askpassEnv, cleanup } = await this.setupAskpass(socket);
-    try {
-      await this.execGit(args, { cwd: dir, env: askpassEnv });
-    } finally {
-      cleanup();
-    }
+    await this.execGitWithAskpass(args, socket, { cwd: dir });
 
     // Send change notification
     socket.broadcast.emit('rpc', {
@@ -1571,6 +1569,10 @@ export class GitService {
 
     if (params.fastForwardOnly) {
       args.push('--ff-only');
+    } else {
+      // Merge when the branches have diverged. Without a pull.rebase setting,
+      // Git (2.33+) refuses to choose between merging and rebasing.
+      args.push('--no-rebase', '--ff', '--no-edit');
     }
 
     args.push(remote);
@@ -1587,14 +1589,18 @@ export class GitService {
       env.GIT_COMMITTER_EMAIL = params.author.email;
     }
 
-    const { env: askpassEnv, cleanup } = await this.setupAskpass(socket);
-    Object.assign(env, askpassEnv);
-
     let result;
     try {
-      result = await this.execGit(args, { cwd: dir, env });
-    } finally {
-      cleanup();
+      result = await this.execGitWithAskpass(args, socket, { cwd: dir, env });
+    } catch (error) {
+      if (!(error instanceof GitCommandError && error.reason === 'MergeConflict')) throw error;
+      // The merge stopped with conflicts for the user to resolve, as a local pull does
+      socket.broadcast.emit('rpc', {
+        jsonrpc: '2.0',
+        method: 'git.changed',
+        params: { dir },
+      });
+      return { alreadyMerged: false, fastForward: false, recursiveMerge: true, mergeCommit: false };
     }
     const output = result.stdout + result.stderr;
 
@@ -1624,12 +1630,7 @@ export class GitService {
   private async fetch(dir: string, params: any, socket: AuthenticatedSocket): Promise<{ success: boolean }> {
     const remote = params.remote || 'origin';
 
-    const { env: askpassEnv, cleanup } = await this.setupAskpass(socket);
-    try {
-      await this.execGit(['fetch', remote], { cwd: dir, env: askpassEnv });
-    } finally {
-      cleanup();
-    }
+    await this.execGitWithAskpass(['fetch', remote], socket, { cwd: dir });
 
     // Send change notification
     socket.broadcast.emit('rpc', {
@@ -1668,12 +1669,7 @@ export class GitService {
       args.push('--single-branch');
     }
 
-    const { env: askpassEnv, cleanup } = await this.setupAskpass(socket);
-    try {
-      await this.execGit(args, { cwd: dir, env: askpassEnv });
-    } finally {
-      cleanup();
-    }
+    await this.execGitWithAskpass(args, socket, { cwd: dir });
 
     // Send change notification
     socket.broadcast.emit('rpc', {
@@ -1686,6 +1682,25 @@ export class GitService {
   }
 
   /**
+   * Run a git command that may ask for credentials, with askpass set up. If
+   * the user cancels a prompt, the command stops there and fails as
+   * AuthCancelled.
+   */
+  private async execGitWithAskpass(args: string[], socket: AuthenticatedSocket, options: ExecGitOptions = {}): Promise<ExecGitResult> {
+    const askpass = await this.setupAskpass(socket);
+    try {
+      return await this.execGit(args, { ...options, env: { ...options.env, ...askpass.env } });
+    } catch (error) {
+      if (askpass.wasCancelled?.()) {
+        throw new GitCommandError(error instanceof GitCommandError ? error.exitCode : null, 'AuthCancelled');
+      }
+      throw error;
+    } finally {
+      askpass.cleanup();
+    }
+  }
+
+  /**
    * Set up an askpass mechanism for SSH/Git credential prompts.
    * Creates a temporary HTTP server and shell script that SSH_ASKPASS/GIT_ASKPASS
    * points to. When SSH or git needs a passphrase/password, it calls the script,
@@ -1694,8 +1709,10 @@ export class GitService {
   private async setupAskpass(socket: AuthenticatedSocket): Promise<{
     env: Record<string, string>;
     cleanup: () => void;
+    wasCancelled?: () => boolean;
   }> {
     return new Promise((resolve, reject) => {
+      let cancelled = false;
       const server = http.createServer((req, res) => {
         let body = '';
         req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
@@ -1709,8 +1726,10 @@ export class GitService {
             res.writeHead(200, { 'Content-Type': 'text/plain' });
             res.end(result?.password || '');
           } catch (err) {
-            // Auth was denied or timed out
-            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            // Cancelled in the editor (or it couldn't ask). An error makes the
+            // script exit non-zero, so Git and SSH stop rather than ask again.
+            cancelled = true;
+            res.writeHead(403, { 'Content-Type': 'text/plain' });
             res.end('');
           }
         });
@@ -1731,15 +1750,18 @@ export class GitService {
         let command: string;
 
         if (this.hasCurl()) {
-          // Use curl directly — available on macOS, most Linux, and newer Windows
-          command = `curl -s --max-time 0 -X POST -d "$1" "http://127.0.0.1:${port}/askpass" 2>/dev/null`;
+          // Use curl directly — available on macOS, most Linux, and newer Windows.
+          // -f: exit non-zero, printing nothing, when the prompt was cancelled.
+          command = `curl -sf --max-time 0 -X POST -d "$1" "http://127.0.0.1:${port}/askpass" 2>/dev/null`;
         } else {
           // Fallback to Node.js script (node is always available since we're running on it)
           const jsPath = path.join(os.tmpdir(), `spck-askpass-${id}.js`);
           fs.writeFileSync(jsPath, [
             `const h=require('http'),d=process.argv[2]||'';`,
             `const r=h.request({hostname:'127.0.0.1',port:${port},path:'/askpass',method:'POST',` +
-              `headers:{'Content-Length':Buffer.byteLength(d)}},s=>{let b='';s.on('data',c=>b+=c);s.on('end',()=>process.stdout.write(b))});`,
+              `headers:{'Content-Length':Buffer.byteLength(d)}},s=>{let b='';s.on('data',c=>b+=c);` +
+              `s.on('end',()=>{if(s.statusCode!==200)process.exit(1);process.stdout.write(b)})});`,
+            `r.on('error',()=>process.exit(1));`,
             `r.write(d);r.end();`,
             ''
           ].join('\n'));
@@ -1767,7 +1789,8 @@ export class GitService {
             // editor's user may not be at. Saved credentials still work.
             GCM_INTERACTIVE: 'never',
           },
-          cleanup
+          cleanup,
+          wasCancelled: () => cancelled
         });
       });
 

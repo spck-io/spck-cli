@@ -37,20 +37,21 @@ export class FileWatcher extends EventEmitter {
       this.emit('change', path, stats?.mtimeMs);
     });
 
+    // 'added' and 'removed' also say whether the path is a file or a folder
     this.watcher.on('unlink', (path) => {
-      this.emit('removed', path);
+      this.emit('removed', path, 'file');
     });
 
     this.watcher.on('add', (path, stats) => {
-      this.emit('added', path, stats?.mtimeMs);
+      this.emit('added', path, stats?.mtimeMs, 'file');
     });
 
     this.watcher.on('unlinkDir', (path) => {
-      this.emit('removed', path);
+      this.emit('removed', path, 'folder');
     });
 
     this.watcher.on('addDir', (path) => {
-      this.emit('added', path);
+      this.emit('added', path, undefined, 'folder');
     });
 
     this.watcher.on('error', (error) => {

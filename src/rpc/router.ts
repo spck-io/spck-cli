@@ -13,6 +13,8 @@ import { AcpService } from '../services/AcpService.js';
 import { FileWatcher } from '../watcher/FileWatcher.js';
 import { toClientPath } from '../utils/paths.js';
 
+type FileChangeType = 'file' | 'folder';
+
 export class RPCRouter {
   private static filesystemService: FilesystemService;
   private static gitService: GitService;
@@ -128,23 +130,23 @@ export class RPCRouter {
 
     this.fileWatcher.on('change', (filePath: string) => {
       const rel = toClientPath(rootPath, filePath);
-      this.broadcastFileChange(rel, 'write');
+      this.broadcastFileChange(rel, 'write', 'file');
     });
 
-    this.fileWatcher.on('added', (filePath: string) => {
+    this.fileWatcher.on('added', (filePath: string, _mtimeMs?: number, type: FileChangeType = 'file') => {
       const rel = toClientPath(rootPath, filePath);
-      this.broadcastFileChange(rel, 'write');
+      this.broadcastFileChange(rel, 'write', type);
     });
 
-    this.fileWatcher.on('removed', (filePath: string) => {
+    this.fileWatcher.on('removed', (filePath: string, type: FileChangeType = 'file') => {
       const rel = toClientPath(rootPath, filePath);
-      this.broadcastFileChange(rel, 'remove');
+      this.broadcastFileChange(rel, 'remove', type);
     });
   }
 
-  private static broadcastFileChange(filePath: string, action: string): void {
+  private static broadcastFileChange(filePath: string, action: string, type: FileChangeType): void {
     if (this.broadcastCallback) {
-      this.broadcastCallback('fs.change', { path: filePath, action });
+      this.broadcastCallback('fs.change', { path: filePath, action, type });
     }
   }
 

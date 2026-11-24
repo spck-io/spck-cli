@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
+import * as http from 'http';
 import { spawn } from 'child_process';
 import { GitService } from '../GitService.js';
 import { ErrorCode } from '../../types.js';
@@ -149,6 +150,136 @@ describe('GitService', () => {
       }
       expect(prompts).toEqual([`Password for 'https://${user}@example.com': `]);
       await expect(fs.access(path.join(repoPath, 'injected'))).rejects.toThrow();
+    });
+
+    it.each([['curl', true], ['node', false]])('stops Git at a cancelled prompt, through %s', async (_name, curl) => {
+      (service as any)._hasCurl = curl;
+      const requestAuth = vi.spyOn(service as any, 'requestAuth').mockRejectedValue(new Error('Authentication cancelled'));
+      const askpass = await (service as any).setupAskpass(mockSocket);
+      try {
+        // An empty answer would let Git go on with an empty password
+        await expect(credentialFill(askpass.env)).rejects.toThrow(/could not read Password/);
+      } finally {
+        askpass.cleanup();
+      }
+      expect(requestAuth).toHaveBeenCalledTimes(1);
+      expect(askpass.wasCancelled()).toBe(true);
+    });
+  });
+
+  describe('remote operations', () => {
+    let remote: string;
+    let other: string;
+
+    async function setUser(cwd: string): Promise<void> {
+      await execGit(['config', 'user.name', 'Test'], cwd);
+      await execGit(['config', 'user.email', 'test@example.com'], cwd);
+    }
+
+    async function commitLine(cwd: string, from: string, to: string): Promise<void> {
+      const file = path.join(cwd, 'notes.md');
+      await fs.writeFile(file, (await fs.readFile(file, 'utf8')).replace(from, to));
+      await execGit(['commit', '-am', `${from} -> ${to}`], cwd);
+    }
+
+    beforeEach(async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      remote = path.join(testRoot, 'remote.git');
+      await execGit(['init', '--bare', remote], testRoot);
+      await execGit(['symbolic-ref', 'HEAD', 'refs/heads/main'], remote);
+      await initRepoOnMain(repoPath);
+      await setUser(repoPath);
+      await fs.writeFile(path.join(repoPath, 'notes.md'), 'one\ntwo\nthree\n');
+      await execGit(['add', '.'], repoPath);
+      await execGit(['commit', '-m', 'start'], repoPath);
+      await execGit(['remote', 'add', 'origin', remote], repoPath);
+      await execGit(['push', 'origin', 'main'], repoPath);
+      other = path.join(testRoot, 'other');
+      await execGit(['clone', remote, other], testRoot);
+      await setUser(other);
+    });
+
+    it('merges diverged branches unless the pull is fast-forward only', async () => {
+      await commitLine(other, 'three', 'three (remote)');
+      await execGit(['push', 'origin', 'main'], other);
+      await commitLine(repoPath, 'one', 'one (local)');
+      const pull = (fastForwardOnly: boolean) =>
+        service.handle('pull', { dir: '/repo', remote: 'origin', ref: 'main', fastForwardOnly }, mockSocket);
+
+      await expect(pull(true)).rejects.toMatchObject({
+        code: ErrorCode.GIT_OPERATION_FAILED,
+        data: { reason: 'NotFastForward' },
+      });
+      // Whatever pull.rebase and pull.ff say
+      await execGit(['config', 'pull.ff', 'only'], repoPath);
+      expect(await pull(false)).toEqual({ alreadyMerged: false, fastForward: false, recursiveMerge: true, mergeCommit: true });
+      expect((await execGit(['rev-list', '--parents', '-n', '1', 'HEAD'], repoPath)).split(' ')).toHaveLength(3);
+      expect(await fs.readFile(path.join(repoPath, 'notes.md'), 'utf8')).toBe('one (local)\ntwo\nthree (remote)\n');
+    });
+
+    it('stops at merge conflicts for the user to resolve', async () => {
+      await commitLine(other, 'two', 'two (remote)');
+      await execGit(['push', 'origin', 'main'], other);
+      await commitLine(repoPath, 'two', 'two (local)');
+      const result = await service.handle('pull', { dir: '/repo', remote: 'origin', ref: 'main', fastForwardOnly: false }, mockSocket);
+      expect(result).toEqual({ alreadyMerged: false, fastForward: false, recursiveMerge: true, mergeCommit: false });
+      expect(await execGit(['status', '--porcelain'], repoPath)).toBe('UU notes.md');
+    });
+
+    it('reports a push that needs a pull first', async () => {
+      await commitLine(other, 'three', 'three (remote)');
+      await execGit(['push', 'origin', 'main'], other);
+      await commitLine(repoPath, 'one', 'one (local)');
+      await expect(service.handle('push', { dir: '/repo', remote: 'origin', remoteRef: 'main' }, mockSocket)).rejects.toMatchObject({
+        code: ErrorCode.GIT_OPERATION_FAILED,
+        message: expect.not.stringContaining(remote),
+        data: { reason: 'PushRejected' },
+      });
+    });
+
+    describe('signing in', () => {
+      let server: http.Server;
+      let prompts: string[];
+
+      beforeEach(async () => {
+        // A Git server that turns down every request
+        server = http.createServer((_req, res) => {
+          res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="test"' });
+          res.end();
+        });
+        await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+        const { port } = server.address() as { port: number };
+        // No saved credentials, and nothing saved to the system's store
+        await execGit(['config', 'credential.helper', ''], repoPath);
+        await execGit(['remote', 'set-url', 'origin', `http://127.0.0.1:${port}/repo.git`], repoPath);
+        prompts = [];
+      });
+
+      afterEach(() => new Promise<void>((resolve) => server.close(() => resolve())));
+
+      it('stops when the user cancels', async () => {
+        vi.spyOn(service as any, 'requestAuth').mockImplementation(async (_socket: unknown, params: any) => {
+          prompts.push(params.prompt);
+          throw new Error('Authentication cancelled');
+        });
+        await expect(service.handle('fetch', { dir: '/repo', remote: 'origin' }, mockSocket)).rejects.toMatchObject({
+          code: ErrorCode.GIT_OPERATION_FAILED,
+          data: { reason: 'AuthCancelled' },
+        });
+        expect(prompts).toEqual([expect.stringMatching(/^Username for 'http:\/\/127\.0\.0\.1:\d+': $/)]);
+      });
+
+      it('reports credentials the server turns down', async () => {
+        vi.spyOn(service as any, 'requestAuth').mockImplementation(async (_socket: unknown, params: any) => {
+          prompts.push(params.prompt);
+          return { password: 'wrong' };
+        });
+        await expect(service.handle('fetch', { dir: '/repo', remote: 'origin' }, mockSocket)).rejects.toMatchObject({
+          code: ErrorCode.GIT_OPERATION_FAILED,
+          data: { reason: 'AuthFailed' },
+        });
+        expect(prompts).toHaveLength(2);
+      });
     });
   });
 
