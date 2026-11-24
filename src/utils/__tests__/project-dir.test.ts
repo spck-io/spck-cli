@@ -12,12 +12,22 @@ vi.mock('fs', async (importOriginal) => {
   return { ...actual, symlinkSync: vi.fn(actual.symlinkSync) };
 });
 
+// Links left by an earlier run are the kind the CLI makes: junctions on Windows,
+// where directory symlinks need admin rights or Developer Mode
+const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
+
 describe('project-dir', () => {
   let tempDir: string;
   let home: string;
   let projectRoot: string;
   let mod: typeof import('../project-dir.js');
   const originalHome = process.env.HOME;
+  const originalUserProfile = process.env.USERPROFILE;
 
   beforeEach(async () => {
     tempDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'spck-project-dir-')));
@@ -25,14 +35,17 @@ describe('project-dir', () => {
     projectRoot = path.join(tempDir, 'project');
     fs.mkdirSync(home);
     fs.mkdirSync(projectRoot);
+    // os.homedir() reads USERPROFILE on Windows and HOME elsewhere
     process.env.HOME = home;
+    process.env.USERPROFILE = home;
     vi.spyOn(console, 'log').mockImplementation(() => {});
     mod = await import('../project-dir.js');
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
-    process.env.HOME = originalHome;
+    restoreEnv('HOME', originalHome);
+    restoreEnv('USERPROFILE', originalUserProfile);
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -68,7 +81,7 @@ describe('project-dir', () => {
     const projectDir = mod.getProjectDirPath(projectRoot);
     fs.mkdirSync(projectDir);
     const link = mod.getConfigSymlinkPath(projectRoot);
-    fs.symlinkSync(path.join(tempDir, 'old-home', '.spck-editor', 'projects', oldId), link, 'dir');
+    fs.symlinkSync(path.join(tempDir, 'old-home', '.spck-editor', 'projects', oldId), link, linkType);
 
     expect(mod.isProjectDirSetup(projectRoot)).toBe(false);
     expect(() => mod.ensureProjectDir(projectRoot)).not.toThrow();
@@ -89,7 +102,7 @@ describe('project-dir', () => {
 
     fs.mkdirSync(mod.getProjectDirPath(projectRoot));
     const link = mod.getConfigSymlinkPath(projectRoot);
-    fs.symlinkSync(otherData, link, 'dir');
+    fs.symlinkSync(otherData, link, linkType);
 
     expect(mod.isProjectDirSetup(projectRoot)).toBe(false);
     mod.ensureProjectDir(projectRoot);

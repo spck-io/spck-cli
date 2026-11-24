@@ -8,7 +8,7 @@
     "spck": "./bin/cli.js"
   },
   "scripts": {
-    "build": "tsc && cp src/i18n/locales/*.json dist/i18n/locales/",
+    "build": "tsc && node -e \"require('fs').cpSync('src/i18n/locales', 'dist/i18n/locales', { recursive: true })\"",
     "start": "node dist/index.js",
     "dev": "npm run build && node dist/index.js",
     "watch": "tsc --watch",

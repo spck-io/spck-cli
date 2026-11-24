@@ -176,6 +176,16 @@ describe('config', () => {
       expect(mockFs.writeFileSync).not.toHaveBeenCalled();
     });
 
+    // A shell keeps the case typed in `cd`, and both spellings share one project ID
+    it.runIf(process.platform === 'win32')('should not rebase a root that differs from cwd only in case on Windows', () => {
+      vi.spyOn(process, 'cwd').mockReturnValue('c:\\mock\\project');
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ ...validConfig, root: 'C:\\Mock\\Project' }));
+
+      expect(loadConfig().root).toBe('C:\\Mock\\Project');
+      expect(mockFs.writeFileSync).not.toHaveBeenCalled();
+    });
+
     it('should keep a custom config path root as-is', () => {
       mockFs.existsSync.mockReturnValue(true);
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ ...validConfig, root: '/other/project' }));

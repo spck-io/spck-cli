@@ -81,7 +81,8 @@ describe('FilesystemService', () => {
       await fs.mkdir(sibling);
       try {
         await fs.writeFile(path.join(sibling, 'secret.txt'), 'secret');
-        await fs.symlink(sibling, path.join(testRoot, 'link'));
+        // A junction on Windows, which needs no admin rights (a plain symlink elsewhere)
+        await fs.symlink(sibling, path.join(testRoot, 'link'), 'junction');
 
         await expect(
           service.handle('readFile', { path: '/link/secret.txt' }, mockSocket)
@@ -360,7 +361,8 @@ describe('FilesystemService', () => {
       expect(written).toEqual(bytes);
     });
 
-    it('should set executable permission when requested', async () => {
+    // Windows has no executable bit: stat reports 0o666 for any writable file
+    it.skipIf(process.platform === 'win32')('should set executable permission when requested', async () => {
       await service.handle(
         'write',
         {

@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ServerConfig } from '../types.js';
 import { getProjectFilePath } from '../utils/project-dir.js';
+import { hostPathKey } from '../utils/paths.js';
 import { t } from '../i18n/index.js';
 import { validPinVerifier } from '../connection/pin.js';
 
@@ -58,9 +59,10 @@ export function loadConfig(configPath?: string): ServerConfig {
 
     // The default config lives inside the project it serves, so its root is always cwd.
     // A different stored root means the project was moved or the config was copied from
-    // another project - rebase it, even if the old root still exists (else we'd serve it)
+    // another project - rebase it, even if the old root still exists (else we'd serve it).
+    // Compare like generateProjectId does: on Windows, c:\proj and C:\Proj share this config
     let needsSave = false;
-    if (!configPath && typeof config.root === 'string' && path.resolve(config.root) !== process.cwd()) {
+    if (!configPath && typeof config.root === 'string' && hostPathKey(config.root) !== hostPathKey(process.cwd())) {
       console.warn('⚠️  ' + t('config.rootRebased', { from: config.root, to: process.cwd() }));
       config.root = process.cwd();
       needsSave = true;

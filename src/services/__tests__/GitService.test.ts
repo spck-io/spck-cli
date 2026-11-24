@@ -30,6 +30,19 @@ async function execGit(args: string[], cwd: string): Promise<string> {
   });
 }
 
+// Exit code of a git command; execGit above rejects on any failure
+function gitExitCode(args: string[], cwd: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    spawn('git', args, { cwd, stdio: 'ignore' }).on('close', (code) => resolve(code));
+  });
+}
+
+// Like `git init -b main`, which needs Git 2.28
+async function initRepoOnMain(cwd: string): Promise<void> {
+  await execGit(['init'], cwd);
+  await execGit(['symbolic-ref', 'HEAD', 'refs/heads/main'], cwd);
+}
+
 describe('GitService', () => {
   let service: GitService;
   let testRoot: string;
@@ -82,7 +95,7 @@ describe('GitService', () => {
     it('rejects a normal history rewrite and permits an explicit force push', async () => {
       const remote = path.join(testRoot, 'remote.git');
       await execGit(['init', '--bare', remote], testRoot);
-      await execGit(['init', '-b', 'main'], repoPath);
+      await initRepoOnMain(repoPath);
       await execGit(['config', 'user.name', 'Test'], repoPath);
       await execGit(['config', 'user.email', 'test@example.com'], repoPath);
       await fs.writeFile(path.join(repoPath, 'file.txt'), 'original\n');
@@ -1155,14 +1168,20 @@ describe('GitService', () => {
   });
 
   describe('Git Operations - resolveRef', () => {
-    it.each(['refs/remotes/origin/missing', '@{upstream}', 'HEAD'])(
-      'should return null without error logging for absent %s', async (ref) => {
+    it.for(['refs/remotes/origin/missing', '@{upstream}', 'HEAD'])(
+      'should return null without error logging for absent %s', async (ref, { skip }) => {
         const errorLog = vi.spyOn(console, 'error');
-        await execGit(['init', '-b', 'main'], repoPath);
+        await initRepoOnMain(repoPath);
         if (ref !== 'HEAD') {
           await execGit(['-c', 'user.name=Test', '-c', 'user.email=test@example.com',
             'commit', '--allow-empty', '-m', 'Initial'], repoPath);
         }
+        // Older Git (2.23, for one) dies with exit 128 on a missing upstream even
+        // with --quiet, which can't be told apart from a real failure
+        skip(
+          ref === '@{upstream}' && await gitExitCode(['rev-parse', '--verify', '--quiet', ref], repoPath) !== 1,
+          'this Git fails loudly on a missing upstream'
+        );
 
         const result = await service.handle('resolveRef', { dir: '/repo', ref }, mockSocket);
 

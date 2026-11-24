@@ -60,6 +60,8 @@ describe('AcpProcess', () => {
 
     await proc.stop();
     expect(proc.isAlive()).toBe(false);
+    // The agent is gone too, not just cmd.exe: Windows can't delete a running process's cwd
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 
   it('starts an executable directly with its arguments', async () => {

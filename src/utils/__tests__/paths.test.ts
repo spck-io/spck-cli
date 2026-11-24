@@ -19,6 +19,21 @@ import {
 
 const { posix, win32 } = path;
 
+// Windows only lets administrators or Developer Mode create symlinks
+function canSymlink(): boolean {
+  if (process.platform !== 'win32') return true;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spck-symlink-probe-'));
+  try {
+    fs.symlinkSync(path.join(dir, 'target'), path.join(dir, 'link'));
+    return true;
+  } catch (error: any) {
+    if (error.code === 'EPERM') return false;
+    throw error;
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 describe('paths', () => {
   describe('resolveClientPath', () => {
     it('resolves editor paths under the project root on Windows', () => {
@@ -120,12 +135,23 @@ describe('paths', () => {
       expect(isMainModule(pathToFileURL(script).href, script)).toBe(true);
     });
 
-    it('follows a symlinked script to the module', () => {
+    it.runIf(canSymlink())('follows a symlinked script to the module', () => {
       const script = path.join(dir, 'index.js');
       const link = path.join(dir, 'spck');
       fs.writeFileSync(script, '');
       fs.symlinkSync(script, link);
       expect(isMainModule(pathToFileURL(script).href, link)).toBe(true);
+    });
+
+    // npm link on Windows joins the package in with a junction, which needs no
+    // privileges. argv[1] keeps the junction path; import.meta.url is the real one.
+    it('follows a script in a junctioned directory to the module', () => {
+      const pkg = path.join(dir, 'pkg');
+      const link = path.join(dir, 'linked');
+      fs.mkdirSync(pkg);
+      fs.writeFileSync(path.join(pkg, 'index.js'), '');
+      fs.symlinkSync(pkg, link, 'junction');
+      expect(isMainModule(pathToFileURL(path.join(pkg, 'index.js')).href, path.join(link, 'index.js'))).toBe(true);
     });
 
     it('rejects other scripts and a missing argv[1]', () => {

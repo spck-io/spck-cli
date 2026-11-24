@@ -1,5 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'child_process';
+import * as path from 'path';
 import { pickWindowsCommand, resolveAcpAgents } from '../acp-agents.js';
 
 vi.mock('child_process', () => ({ spawnSync: vi.fn() }));
@@ -18,7 +19,12 @@ vi.mock('module', () => ({
   ),
 }));
 
+// The bundled entry point is joined with the host's separators
+const bundledBin = (pkg: string) => path.join('/bundled', pkg, 'dist', 'index.js');
+
 describe('resolveAcpAgents', () => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+
   beforeEach(() => {
     packages.clear();
     packages.set('/bundled/@agentclientprotocol/claude-agent-acp/package.json', {
@@ -28,13 +34,18 @@ describe('resolveAcpAgents', () => {
       bin: { 'codex-acp': 'dist/index.js' }, version: '2.6.0',
     });
     vi.mocked(spawnSync).mockReturnValue({ status: 1, stdout: '' } as any);
+    // The lookups below answer like `which`; the Windows test switches to `where`
+    Object.defineProperty(process, 'platform', { value: 'linux' });
   });
-  afterEach(() => vi.resetAllMocks());
+  afterEach(() => {
+    vi.resetAllMocks();
+    Object.defineProperty(process, 'platform', platform);
+  });
 
   it('resolves both bundled adapters without any global ACP executables', () => {
     expect(resolveAcpAgents()).toEqual([
-      { name: 'claude', binary: process.execPath, args: ['/bundled/@agentclientprotocol/claude-agent-acp/dist/index.js'], version: '0.100.0' },
-      { name: 'codex', binary: process.execPath, args: ['/bundled/@agentclientprotocol/codex-acp/dist/index.js'], version: '2.6.0' },
+      { name: 'claude', binary: process.execPath, args: [bundledBin('@agentclientprotocol/claude-agent-acp')], version: '0.100.0' },
+      { name: 'codex', binary: process.execPath, args: [bundledBin('@agentclientprotocol/codex-acp')], version: '2.6.0' },
     ]);
     expect(spawnSync).toHaveBeenCalledTimes(1);
   });
@@ -45,13 +56,11 @@ describe('resolveAcpAgents', () => {
     }) as any);
     const agents = resolveAcpAgents();
     expect(agents.filter((agent) => agent.name === 'codex')).toEqual([
-      { name: 'codex', binary: process.execPath, args: ['/bundled/@agentclientprotocol/codex-acp/dist/index.js'], version: '2.6.0' },
+      { name: 'codex', binary: process.execPath, args: [bundledBin('@agentclientprotocol/codex-acp')], version: '2.6.0' },
     ]);
     expect(agents).toContainEqual({ name: 'gemini', binary: '/usr/local/bin/gemini', args: ['--acp'], version: '' });
     expect(spawnSync).toHaveBeenCalledTimes(1);
-    expect(spawnSync).toHaveBeenCalledWith(
-      process.platform === 'win32' ? 'where' : 'which', ['gemini'], { encoding: 'utf8' }
-    );
+    expect(spawnSync).toHaveBeenCalledWith('which', ['gemini'], { encoding: 'utf8' });
   });
 
   it('falls back to a global Codex adapter if the package is missing', () => {
@@ -63,20 +72,15 @@ describe('resolveAcpAgents', () => {
   });
 
   it('resolves Windows PATH agents from where output, running .cmd shims through cmd.exe', () => {
-    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
     Object.defineProperty(process, 'platform', { value: 'win32' });
-    try {
-      vi.mocked(spawnSync).mockImplementation((_lookup, args) => ({
-        status: (args as string[])[0] === 'gemini' ? 0 : 1,
-        stdout: 'C:\\Users\\me\\AppData\\Roaming\\npm\\gemini\r\nC:\\Users\\me\\AppData\\Roaming\\npm\\gemini.cmd\r\n',
-      }) as any);
-      expect(resolveAcpAgents()).toContainEqual({
-        name: 'gemini', binary: 'C:\\Users\\me\\AppData\\Roaming\\npm\\gemini.cmd', args: ['--acp'], version: '', shell: true,
-      });
-      expect(spawnSync).toHaveBeenCalledWith('where', ['gemini'], { encoding: 'utf8' });
-    } finally {
-      Object.defineProperty(process, 'platform', platform);
-    }
+    vi.mocked(spawnSync).mockImplementation((_lookup, args) => ({
+      status: (args as string[])[0] === 'gemini' ? 0 : 1,
+      stdout: 'C:\\Users\\me\\AppData\\Roaming\\npm\\gemini\r\nC:\\Users\\me\\AppData\\Roaming\\npm\\gemini.cmd\r\n',
+    }) as any);
+    expect(resolveAcpAgents()).toContainEqual({
+      name: 'gemini', binary: 'C:\\Users\\me\\AppData\\Roaming\\npm\\gemini.cmd', args: ['--acp'], version: '', shell: true,
+    });
+    expect(spawnSync).toHaveBeenCalledWith('where', ['gemini'], { encoding: 'utf8' });
   });
 
   it('omits missing adapter executables', () => {

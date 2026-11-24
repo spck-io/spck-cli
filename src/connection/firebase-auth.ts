@@ -63,6 +63,12 @@ interface TokenResult {
   refreshToken: string;
 }
 
+// Body of a 200 from the token poll endpoint; the tokens are absent until the browser posts them
+interface TokenPollResponse {
+  idToken?: string;
+  refreshToken?: string;
+}
+
 /**
  * Long-poll proxy server for token (manual flow).
  * The server holds the connection open until the browser posts the token (up to 30s),
@@ -94,7 +100,7 @@ async function pollServerForToken(
         continue;
       }
 
-      const result = await response.json();
+      const result = await response.json() as TokenPollResponse;
       if (result.idToken && result.refreshToken) {
         // A token that fails to open is ignored, so a bad submission can't end sign-in.
         return { token: result.idToken, refreshToken: openRefreshToken(result.refreshToken) };
@@ -421,6 +427,20 @@ export async function authenticateWithFirebase(onInteractiveAuth?: () => void): 
 // Firebase API key for token refresh
 const FIREBASE_API_KEY = 'AIzaSyCFgtHhWiM-EdFBdiDw9ISHfcGOqbV3OCU';
 
+// Token refresh response. Fields are optional because each one is checked or defaulted below.
+interface FirebaseRefreshResponse {
+  id_token?: string;
+  refresh_token?: string;
+  expires_in?: string; // seconds, as a string
+  token_type?: string;
+  user_id?: string;
+}
+
+// Error body from the token refresh endpoint, e.g. { error: { message: 'TOKEN_EXPIRED' } }
+interface FirebaseErrorResponse {
+  error?: { message?: string };
+}
+
 /**
  * Refresh Firebase ID token using refresh token
  *
@@ -459,7 +479,7 @@ export async function refreshFirebaseToken(
     );
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
+      const errorData = await response.json().catch(() => ({})) as FirebaseErrorResponse;
       const errorMessage = errorData.error?.message || `HTTP ${response.status}`;
 
       // Handle specific Firebase errors
@@ -476,12 +496,12 @@ export async function refreshFirebaseToken(
       throw new Error(`Token refresh failed: ${errorMessage}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as FirebaseRefreshResponse;
 
     // Firebase returns: id_token, refresh_token, expires_in, token_type, user_id
     const newToken = data.id_token;
     const newRefreshToken = data.refresh_token;
-    const parsedExpiresIn = parseInt(data.expires_in, 10);
+    const parsedExpiresIn = parseInt(data.expires_in ?? '', 10);
     const expiresIn = isNaN(parsedExpiresIn) ? 3600 : parsedExpiresIn; // Default 1 hour
     const userId = data.user_id;
 

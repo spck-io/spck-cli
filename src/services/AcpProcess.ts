@@ -138,9 +138,21 @@ export class AcpProcess {
   async stop(): Promise<void> {
     if (!this.proc || this.exited) return;
     const proc = this.proc;
+    let released: Promise<void> = Promise.resolve();
     if (process.platform === 'win32' && this.opts.shell && proc.pid) {
       // kill() ends only cmd.exe; the agent it started would keep running
-      // with our stdio pipes open. taskkill /T ends the whole tree.
+      // with our stdio pipes open. taskkill /T ends the whole tree, but
+      // cmd.exe exits first and taskkill returns before the agent is gone
+      // (still holding its cwd, for one), so wait for 'close': the agent
+      // has let go of our pipes.
+      released = new Promise((resolve) => {
+        // Don't wait forever if the tree couldn't be ended
+        const giveUp = setTimeout(resolve, 5000);
+        proc.once('close', () => {
+          clearTimeout(giveUp);
+          resolve();
+        });
+      });
       spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
         .on('error', () => proc.kill());
     } else {
@@ -154,7 +166,7 @@ export class AcpProcess {
     const timer = setTimeout(() => {
       try { this.proc?.kill('SIGKILL'); } catch { /* ignore */ }
     }, 2000);
-    await this.exitPromise;
+    await Promise.all([this.exitPromise, released]);
     clearTimeout(timer);
   }
 

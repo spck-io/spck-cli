@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi, type Mocked } from 'vi
 
 import * as fs from 'fs';
 import * as os from 'os';
+import * as path from 'path';
 import {
   loadCredentials,
   saveCredentials,
@@ -44,15 +45,13 @@ describe('credentials', () => {
 
   describe('getCredentialsPath()', () => {
     it('should return path in user home directory', () => {
-      const path = getCredentialsPath();
-      expect(path).toBe(`${mockHomedir}/.spck-editor/.credentials.json`);
+      expect(getCredentialsPath()).toBe(path.join(mockHomedir, '.spck-editor', '.credentials.json'));
     });
   });
 
   describe('getConnectionSettingsPath()', () => {
     it('should return path in .spck-editor/config subdirectory', () => {
-      const path = getConnectionSettingsPath();
-      expect(path).toBe(`${mockCwd}/.spck-editor/config/connection-settings.json`);
+      expect(getConnectionSettingsPath()).toBe(path.join(mockCwd, '.spck-editor', 'config', 'connection-settings.json'));
     });
   });
 
@@ -165,7 +164,7 @@ describe('credentials', () => {
       saveCredentials(mockCredentials);
 
       expect(mockFs.mkdirSync).toHaveBeenCalledWith(
-        `${mockHomedir}/.spck-editor`,
+        path.join(mockHomedir, '.spck-editor'),
         { recursive: true, mode: 0o700 }
       );
     });
@@ -183,7 +182,7 @@ describe('credentials', () => {
       };
 
       expect(mockFs.writeFileSync).toHaveBeenCalledWith(
-        `${mockHomedir}/.spck-editor/.credentials.json`,
+        path.join(mockHomedir, '.spck-editor', '.credentials.json'),
         JSON.stringify(expectedStored, null, 2),
         { encoding: 'utf8', mode: 0o600 }
       );
@@ -287,7 +286,7 @@ describe('credentials', () => {
       saveConnectionSettings(mockSettings);
 
       expect(mockFs.mkdirSync).toHaveBeenCalledWith(
-        `${mockCwd}/.spck-editor/config`,
+        path.join(mockCwd, '.spck-editor', 'config'),
         { recursive: true, mode: 0o700 }
       );
     });
@@ -299,7 +298,7 @@ describe('credentials', () => {
       saveConnectionSettings(mockSettings);
 
       expect(mockFs.writeFileSync).toHaveBeenCalledWith(
-        `${mockCwd}/.spck-editor/config/connection-settings.json`,
+        path.join(mockCwd, '.spck-editor', 'config', 'connection-settings.json'),
         JSON.stringify(mockSettings, null, 2),
         { encoding: 'utf8', mode: 0o600 }
       );
@@ -360,7 +359,7 @@ describe('credentials', () => {
       clearCredentials();
 
       expect(mockFs.unlinkSync).toHaveBeenCalledWith(
-        `${mockHomedir}/.spck-editor/.credentials.json`
+        path.join(mockHomedir, '.spck-editor', '.credentials.json')
       );
     });
 
@@ -381,7 +380,7 @@ describe('credentials', () => {
       clearConnectionSettings();
 
       expect(mockFs.unlinkSync).toHaveBeenCalledWith(
-        `${mockCwd}/.spck-editor/config/connection-settings.json`
+        path.join(mockCwd, '.spck-editor', 'config', 'connection-settings.json')
       );
     });
 
@@ -397,7 +396,7 @@ describe('credentials', () => {
   describe('getGlobalConfigPath()', () => {
     it('should return path in user home directory', () => {
       const configPath = getGlobalConfigPath();
-      expect(configPath).toBe(`${mockHomedir}/.spck-editor/global.config`);
+      expect(configPath).toBe(path.join(mockHomedir, '.spck-editor', 'global.config'));
     });
   });
 
@@ -464,7 +463,7 @@ describe('credentials', () => {
       saveGlobalConfig(mockConfig);
 
       expect(mockFs.mkdirSync).toHaveBeenCalledWith(
-        `${mockHomedir}/.spck-editor`,
+        path.join(mockHomedir, '.spck-editor'),
         { recursive: true, mode: 0o700 }
       );
     });
@@ -476,7 +475,7 @@ describe('credentials', () => {
       saveGlobalConfig(mockConfig);
 
       expect(mockFs.writeFileSync).toHaveBeenCalledWith(
-        `${mockHomedir}/.spck-editor/global.config`,
+        path.join(mockHomedir, '.spck-editor', 'global.config'),
         JSON.stringify(mockConfig, null, 2),
         { encoding: 'utf8', mode: 0o600 }
       );
