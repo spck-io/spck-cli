@@ -3,16 +3,16 @@
  *
  * Most terminals draw the half-block characters (▀ ▄ █) as exact halves of a
  * cell, so two rows of modules fit in each line. The classic Windows console
- * (conhost) draws them with the font's own glyphs instead. On Chinese, Japanese
- * and Korean Windows it forces a CJK font whose blocks are drawn wider than a
- * cell with gaps between them, and the code can't be scanned. Cells avoid
- * glyphs: each module is two spaces with a background color, which is exact
- * in any font but twice the size.
+ * (conhost) draws them with the font's own glyphs instead. That works in
+ * Consolas or Lucida Console, but Chinese fonts (which Chinese Windows uses
+ * for cmd and PowerShell) draw █ and ▄ wider than a cell, over the next one,
+ * and the code can't be scanned. Cells avoid glyphs: each module is two spaces
+ * with a background color, which is exact in any font but twice the size.
  */
 
 import { createRequire } from 'module';
 import qrcode from 'qrcode-terminal';
-import { isClassicWindowsConsole, wideInConsole } from './windows-console.js';
+import { consoleHasCjkFont, isClassicWindowsConsole } from './windows-console.js';
 
 export type QrStyle = 'halfBlocks' | 'cells';
 
@@ -32,11 +32,13 @@ const DARK = '\x1b[40m'; // black background
 const RESET = '\x1b[0m';
 
 /**
- * 'cells' in the classic Windows console. Cells draw correctly in any
- * terminal, so one taken for the classic console only gets a larger code.
+ * 'cells' in the classic Windows console with a Chinese, Japanese or Korean
+ * font, or whose font wasn't measured: cells are exact in any font. (Japanese
+ * fonts draw half blocks correctly, but measuring can't tell them apart.)
  */
 export function terminalQrStyle(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): QrStyle {
-  return isClassicWindowsConsole(platform, env) ? 'cells' : 'halfBlocks';
+  if (!isClassicWindowsConsole(platform, env)) return 'halfBlocks';
+  return consoleHasCjkFont() === false ? 'halfBlocks' : 'cells';
 }
 
 /** The code as terminal lines, with a one-module light margin. */
@@ -68,16 +70,7 @@ export function renderQr(text: string, style: QrStyle): string[] {
 
 /** Print a code for a phone to scan, in the style this terminal draws correctly. */
 export function printQr(text: string): void {
-  const { stdout } = process;
-  if (stdout.isTTY && terminalQrStyle() === 'cells') {
-    const lines = renderQr(text, 'cells');
-    // Cells are twice the size: use half blocks if cells don't fit on screen,
-    // unless the console's font draws block characters wide and distorts them
-    const fits = lines.length < (stdout.rows || 0) && lines.length * 2 <= (stdout.columns || 0);
-    if (fits || wideInConsole('█▀▄').length > 0) {
-      console.log(lines.join('\n'));
-      return;
-    }
-  }
-  qrcode.generate(text, { small: true });
+  // Cells may be taller than the window, but the output scrolls
+  const style = process.stdout.isTTY ? terminalQrStyle() : 'halfBlocks';
+  console.log(renderQr(text, style).join('\n'));
 }

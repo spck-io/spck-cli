@@ -18,8 +18,8 @@ vi.mock('../../utils/windows-console.js', () => ({
   isClassicWindowsConsole: () => winConsole.classic,
   wideInConsole: (chars: string) => [...chars].filter((ch) => winConsole.wide.includes(ch)),
 }));
-// What the classic console draws wide with a Chinese code page (936)
-const WIDE_IN_GBK = [...'·●○★↑↓←→—–…‘’“”█▄'];
+// What the classic console lays out two columns wide with a Chinese font (新宋体)
+const WIDE_IN_NSIMSUN = [...'·●○★↑↓←→—–…‘’“”'];
 
 const pkg = createRequire(import.meta.url)('../../../package.json') as { version: string };
 const SECRET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQR';
@@ -243,12 +243,12 @@ describe('Dashboard', () => {
     });
   });
 
-  describe('in a classic Windows console with a CJK code page', () => {
+  describe('in a classic Windows console with a Chinese font', () => {
     const header = () => screen()[0];
 
     beforeEach(() => {
       winConsole.classic = true;
-      winConsole.wide = WIDE_IN_GBK;
+      winConsole.wide = WIDE_IN_NSIMSUN;
     });
 
     it('counts the symbols the console draws two columns wide', () => {
@@ -386,11 +386,13 @@ describe('Dashboard', () => {
       expect(text().replace(/\s/g, '')).toContain(SECRET);
     });
 
-    describe('in the classic Windows console', () => {
+    describe('in the classic Windows console with a CJK font', () => {
       const cellRows = () => rawRows().filter((row) => row.includes('\x1b[107m'));
 
       beforeEach(() => {
         qr.style = 'cells';
+        winConsole.classic = true;
+        winConsole.wide = WIDE_IN_NSIMSUN;
         clients = [];
       });
 
@@ -402,15 +404,7 @@ describe('Dashboard', () => {
         for (const row of screen()) expect(visibleWidth(row)).toBeLessThanOrEqual(120);
       });
 
-      it('falls back to half blocks when the larger code does not fit', () => {
-        start(80, 24);
-        expect(cellRows()).toHaveLength(0);
-        expect(qrRows().length).toBeGreaterThan(15);
-      });
-
-      it('shows the details instead of half blocks when the font draws block characters wide', () => {
-        winConsole.classic = true;
-        winConsole.wide = WIDE_IN_GBK;
+      it('shows the details instead of distorted half blocks when the larger code does not fit', () => {
         start(80, 24);
         expect(qrRows()).toHaveLength(0);
         expect(cellRows()).toHaveLength(0);

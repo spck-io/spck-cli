@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { isClassicWindowsConsole, parseCodePage, wideInConsole } from '../windows-console.js';
+import { PassThrough, Writable } from 'stream';
+import { consoleHasCjkFont, isClassicWindowsConsole, measureConsoleWidths, wideInConsole } from '../windows-console.js';
 
 describe('isClassicWindowsConsole()', () => {
   it('is false outside Windows', () => {
@@ -22,32 +23,81 @@ describe('isClassicWindowsConsole()', () => {
   });
 });
 
-describe('parseCodePage()', () => {
-  it('reads chcp output in any language', () => {
-    expect(parseCodePage('Active code page: 936\r\n')).toBe(936);
-    expect(parseCodePage('活动代码页: 936\r\n')).toBe(936);
-    expect(parseCodePage('Page de codes active : 850.\r\n')).toBe(850);
-    expect(parseCodePage('')).toBeNull();
-  });
-});
+// How a Windows 10 console lays out the dashboard's symbols in each font, as
+// measured in one
+const NSIMSUN = '·●○★↑↓←→—–…‘’“”'; // Chinese (新宋体)
+const LUCIDA_CONSOLE = '●★';
+const SYMBOLS = '·●○★↑↓←→—–…‘’“”';
 
-describe('wideInConsole()', () => {
-  // As a Chinese Windows 10 console (code page 936) stores them: checked
-  // against its screen buffer
-  it('finds the symbols a Chinese code page draws two columns wide', () => {
-    expect(wideInConsole('·●○★↑→—…’“█▀▄', 936)).toEqual([...'·●○★↑→—…’“█▄']);
+/**
+ * A console that answers cursor position requests for symbols printed at the
+ * start of a line, laying out `wide` two columns wide. Like Windows 10, it
+ * answers requests written together in reverse order.
+ */
+function fakeConsole(wide: string, { answer = true, typed = '' } = {}) {
+  const input = Object.assign(new PassThrough(), {
+    isRaw: false,
+    setRawMode(mode: boolean) { input.isRaw = mode; },
+  });
+  let output = '';
+  const writable = new Writable({
+    write(chunk, _encoding, done) {
+      output += String(chunk);
+      const replies = [...String(chunk).matchAll(/\r(.)\x1b\[6n/gu)].map(([, ch]) => `\x1b[1;${wide.includes(ch) ? 3 : 2}R`);
+      if (answer && replies.length) {
+        const data = typed + replies.reverse().join('');
+        typed = '';
+        setImmediate(() => input.write(data));
+      }
+      done();
+    },
+  });
+  return { input, writable, output: () => output };
+}
+
+describe('measureConsoleWidths()', () => {
+  it('finds the symbols a Chinese font lays out two columns wide', async () => {
+    const { input, writable } = fakeConsole(NSIMSUN);
+    await measureConsoleWidths(SYMBOLS, input, writable);
+    expect(wideInConsole(SYMBOLS + 'aé█')).toEqual([...NSIMSUN]);
+    expect(consoleHasCjkFont()).toBe(true);
   });
 
-  it('keeps letters narrow, which have half-width glyphs', () => {
-    expect(wideInConsole('éóàüñ', 936)).toEqual([]);
+  it('tells Lucida Console, with a wide ●, from a CJK font', async () => {
+    const { input, writable } = fakeConsole(LUCIDA_CONSOLE);
+    await measureConsoleWidths(SYMBOLS, input, writable);
+    expect(wideInConsole(SYMBOLS)).toEqual([...LUCIDA_CONSOLE]);
+    expect(consoleHasCjkFont()).toBe(false);
   });
 
-  it('follows the code page: Japanese has no middle dot or blocks', () => {
-    expect(wideInConsole('·●█', 932)).toEqual(['●']);
+  it('measures on the alternate screen, one symbol at a time, and restores the input', async () => {
+    const { input, writable, output } = fakeConsole(NSIMSUN);
+    await measureConsoleWidths('·●', input, writable);
+    expect(output()).toBe('\x1b[?1049h\r·\x1b[6n\r●\x1b[6n\r…\x1b[6n\r\x1b[K\x1b[?1049l');
+    expect(input.isRaw).toBe(false);
+    expect(input.isPaused()).toBe(true);
+    expect(input.listenerCount('data')).toBe(0);
   });
 
-  it('finds none with other code pages', () => {
-    for (const cp of [437, 850, 1252, 65001]) expect(wideInConsole('·●○█▀▄—…', cp)).toEqual([]);
-    expect(wideInConsole('·●', null)).toEqual([]);
+  it('keeps keys typed during the measurement for whoever reads next', async () => {
+    const { input, writable } = fakeConsole('', { typed: 'y\r' });
+    await measureConsoleWidths('·', input, writable);
+    expect(String(input.read())).toBe('y\r');
+  });
+
+  it('measures nothing when the console does not answer', async () => {
+    const { input, writable } = fakeConsole(NSIMSUN, { answer: false });
+    await measureConsoleWidths(SYMBOLS, input, writable, 20);
+    expect(wideInConsole(SYMBOLS)).toEqual([]);
+    expect(consoleHasCjkFont()).toBeNull();
+    expect(input.isRaw).toBe(false);
+  });
+
+  it('measures nothing when the input is not a console', async () => {
+    const { input, writable, output } = fakeConsole(NSIMSUN);
+    input.setRawMode = () => { throw new Error('not a TTY'); };
+    await measureConsoleWidths(SYMBOLS, input, writable);
+    expect(consoleHasCjkFont()).toBeNull();
+    expect(output()).toBe('');
   });
 });

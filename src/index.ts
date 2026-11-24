@@ -33,6 +33,8 @@ import { t, detectLocale, setLocale } from './i18n/index.js';
 import { Dashboard } from './dashboard/Dashboard.js';
 import { LogBuffer } from './dashboard/LogBuffer.js';
 import { WakeLock } from './dashboard/WakeLock.js';
+import { AMBIGUOUS_WIDTH_CHARS } from './dashboard/screen.js';
+import { isClassicWindowsConsole, measureConsoleWidths } from './utils/windows-console.js';
 
 let proxyClient: ProxyClient | null = null;
 let dashboard: Dashboard | null = null;
@@ -54,6 +56,9 @@ export async function startProxyClient(
   // The dashboard needs an interactive terminal; piped / service runs keep
   // plain log output. Buffer routine startup output for the dashboard's log view.
   const useDashboard = !!process.stdout.isTTY && !!process.stdin.isTTY;
+  // Before anything reads the keyboard: the classic Windows console's font
+  // decides how wide it draws the dashboard's symbols and how to draw QR codes
+  if (useDashboard && isClassicWindowsConsole()) await measureConsoleWidths(AMBIGUOUS_WIDTH_CHARS);
   const logBuffer = useDashboard ? new LogBuffer() : null;
   logBuffer?.install();
   let startupOutputVisible = !logBuffer;

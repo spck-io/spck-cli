@@ -53,12 +53,13 @@ export function sanitizeLine(text: string): string {
 }
 
 /**
- * Characters the dashboard draws whose width depends on the terminal: Unicode
- * calls them ambiguous. Terminals draw them one column wide, except with a CJK
- * font, which can draw them two wide: the classic Windows console uses one on
- * Chinese, Japanese and Korean systems.
+ * Symbols the dashboard draws whose width depends on the terminal: Unicode
+ * calls them ambiguous. Terminals draw them one column wide, but the classic
+ * Windows console takes two for some, depending on its font: most of them in
+ * a Chinese, Japanese or Korean font, ● in Lucida Console, ★ in any. (It keeps
+ * block characters like █ one column wide in every font.)
  */
-export const AMBIGUOUS_WIDTH_CHARS = '·●○★↑↓←→—–…‘’“”█▀▄';
+export const AMBIGUOUS_WIDTH_CHARS = '·●○★↑↓←→—–…‘’“”';
 
 const wideChars = new Set<number>();
 

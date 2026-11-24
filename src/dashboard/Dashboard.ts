@@ -24,7 +24,7 @@ import {
 import { RPCRouter } from '../rpc/router.js';
 import type { TerminalSummary } from '../services/TerminalService.js';
 import { pinSettingLabel, pinSetupText, saveConnectionPin } from './pin-settings.js';
-import { QrStyle, renderQr, terminalQrStyle } from '../utils/qr.js';
+import { renderQr, terminalQrStyle } from '../utils/qr.js';
 import { isClassicWindowsConsole, wideInConsole } from '../utils/windows-console.js';
 
 type View = 'main' | 'logs' | 'qr' | 'terminals' | 'pinSetup' | 'relays';
@@ -85,7 +85,7 @@ export class Dashboard {
   private quitArmedAt = 0;
   private flash: { text: string; at: number } | null = null;
   private readonly qrStyle = terminalQrStyle();
-  private qrCache: { url: string; codes: Map<QrStyle, { lines: string[]; width: number }> } | null = null;
+  private qrCache: { url: string; lines: string[]; width: number } | null = null;
   // New projects show the pairing QR until an editor finishes connecting.
   private autoQr = false;
   // Terminals view: selected terminal and a pending kill awaiting a second [x]
@@ -117,9 +117,8 @@ export class Dashboard {
     this.active = true;
     const { stdin, stdout } = process;
 
-    // With a CJK code page the classic Windows console draws some symbols two
-    // columns wide. (Asking it with cursor position reports doesn't work: on
-    // Windows 10 they disagree with how it draws the characters.)
+    // The classic Windows console takes two columns for some symbols,
+    // depending on its font (measured at startup)
     if (isClassicWindowsConsole()) setWideChars(wideInConsole(AMBIGUOUS_WIDTH_CHARS));
 
     this.options.logs.setPassthrough(false);
@@ -954,18 +953,12 @@ export class Dashboard {
     const available = height - 1; // the footer takes the last row
     const indented = (text: string, style: (line: string) => string = (line) => line) =>
       wrap(text, Math.max(20, width - 2)).map((line) => '  ' + style(line));
-    const fits = (code: { lines: string[]; width: number }) => code.lines.length + 1 <= available && code.width + 2 <= width;
-
-    // Half blocks need block characters one column wide (CJK fonts draw them
-    // wider). Cells are twice their size: fall back to half blocks if they fit.
-    const halfBlocksDrawable = visibleWidth('█▀▄') === 3;
-    const style: QrStyle = halfBlocksDrawable ? this.qrStyle : 'cells';
-    let code = this.qrCode(url, style);
-    if (!fits(code) && style === 'cells' && halfBlocksDrawable) code = this.qrCode(url, 'halfBlocks');
-    const { lines: qr, width: qrWidth } = code;
+    // Cells are twice the size of half blocks, but are only used where half
+    // blocks could come out distorted (see terminalQrStyle): no fallback
+    const { lines: qr, width: qrWidth } = this.qrCode(url);
 
     // A clipped code can't be scanned, so never draw one that doesn't fit
-    if (!fits(code)) {
+    if (qr.length + 1 > available || qrWidth + 2 > width) {
       const message = t('dashboard.qrTooSmall', { cols: qrWidth + 2, rows: qr.length + 2 });
       return [header, '', ...indented(message, chalk.yellow), '', ...details.flatMap((line) => indented(line))];
     }
@@ -990,15 +983,12 @@ export class Dashboard {
     return [header, ...(showTitle ? title : []), ...qr.map((line) => '  ' + line), ...below];
   }
 
-  private qrCode(url: string, style: QrStyle): { lines: string[]; width: number } {
-    if (this.qrCache?.url !== url) this.qrCache = { url, codes: new Map() };
-    let code = this.qrCache.codes.get(style);
-    if (!code) {
-      const lines = renderQr(url, style);
-      code = { lines, width: Math.max(...lines.map((line) => visibleWidth(line))) };
-      this.qrCache.codes.set(style, code);
+  private qrCode(url: string): { lines: string[]; width: number } {
+    if (this.qrCache?.url !== url) {
+      const lines = renderQr(url, this.qrStyle);
+      this.qrCache = { url, lines, width: Math.max(...lines.map((line) => visibleWidth(line))) };
     }
-    return code;
+    return this.qrCache;
   }
 
   // ------------------------------------------------------------ log view

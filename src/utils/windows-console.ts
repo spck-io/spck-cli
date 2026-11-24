@@ -1,9 +1,9 @@
 /**
  * The classic Windows console (conhost), which still hosts cmd and PowerShell
- * on Windows 10 unless another terminal is installed, and how it draws text.
+ * on Windows 10 unless another terminal is installed, and how it lays out text.
  */
 
-import { execFileSync } from 'child_process';
+import type { Readable, Writable } from 'stream';
 
 /**
  * True in the classic Windows console. Other Windows terminals identify
@@ -16,56 +16,96 @@ export function isClassicWindowsConsole(platform: NodeJS.Platform = process.plat
   return !(env.WT_SESSION || env.TERM_PROGRAM || env.ConEmuPID || env.TERMINAL_EMULATOR || env.TERM);
 }
 
-/** The number in chcp's output ("Active code page: 936", localized) */
-export function parseCodePage(chcpOutput: string): number | null {
-  const match = /(\d+)\D*$/.exec(chcpOutput);
-  return match ? Number(match[1]) : null;
+export interface ConsoleInput extends Readable {
+  isRaw: boolean;
+  setRawMode(mode: boolean): unknown;
 }
 
-let codePage: number | null | undefined;
+const ENTER_ALT_SCREEN = '\x1b[?1049h';
+const LEAVE_ALT_SCREEN = '\x1b[?1049l';
+const CURSOR_POSITION_REPORT = /\x1b\[\d+;(\d+)R/;
+// Two columns wide in Chinese, Japanese and Korean fonts, one in the others
+const CJK_FONT_PROBE = '…';
 
-/** The console's code page, or null when it can't be read. */
-export function consoleCodePage(): number | null {
-  if (codePage === undefined) {
-    try {
-      // chcp reports the console it's attached to: ours
-      const output = execFileSync('chcp.com', { encoding: 'latin1', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000, windowsHide: true });
-      codePage = parseCodePage(output);
-    } catch {
-      codePage = null;
-    }
-  }
-  return codePage;
-}
-
-// Chinese, Japanese and Korean code pages, which encode some characters in two bytes
-const DOUBLE_BYTE_ENCODINGS: Record<number, string> = { 932: 'shift_jis', 936: 'gbk', 949: 'euc-kr', 950: 'big5' };
-const doubleByteSets = new Map<string, Set<string>>();
-
-function doubleByteChars(encoding: string): Set<string> {
-  let chars = doubleByteSets.get(encoding);
-  if (!chars) {
-    // Decode every lead/trail byte pair; a space after each keeps the decoder in step
-    const bytes: number[] = [];
-    for (let lead = 0x81; lead <= 0xfe; lead++) {
-      for (let trail = 0x40; trail <= 0xfe; trail++) bytes.push(lead, trail, 0x20);
-    }
-    const decoded = new TextDecoder(encoding).decode(new Uint8Array(bytes)).split(' ');
-    chars = new Set(decoded.filter((ch) => ch.length === 1 && ch !== '�'));
-    doubleByteSets.set(encoding, chars);
-  }
-  return chars;
-}
+/** Of the measured symbols, those the console lays out two columns wide; null before measuring or if it didn't answer. */
+let wideChars: Set<string> | null = null;
 
 /**
- * Those of `chars` that the classic console draws two columns wide. With a
- * Chinese, Japanese or Korean code page it switches to a CJK font, which draws
- * the symbols the code page encodes in two bytes (· ● … █) full width. Letters
- * such as é keep their usual half-width glyphs.
+ * Measure how the console lays out `chars`. It doesn't report its font, and
+ * the font decides: Chinese, Japanese and Korean fonts take two columns for
+ * symbols like · ● … ↑ “, Lucida Console takes two for ●, and every font
+ * takes two for ★. Code pages don't tell: a CJK font can stay in use after
+ * `chcp 65001`.
+ *
+ * Each symbol is printed at the start of a line, then the console is asked
+ * where the cursor went. One at a time: Windows 10 answers several requests
+ * in reverse order. On the alternate screen, which the dashboard draws on:
+ * after a code page change it can keep the widths of the console's original
+ * font while the main screen uses the new one.
+ *
+ * Run it before anything else reads the input. Keys typed meanwhile are kept.
  */
-export function wideInConsole(chars: string, cp: number | null = consoleCodePage()): string[] {
-  const encoding = cp === null ? undefined : DOUBLE_BYTE_ENCODINGS[cp];
-  if (!encoding) return [];
-  const doubleByte = doubleByteChars(encoding);
-  return [...chars].filter((ch) => doubleByte.has(ch) && !/\p{L}/u.test(ch));
+export async function measureConsoleWidths(
+  chars: string,
+  input: ConsoleInput = process.stdin as ConsoleInput,
+  output: Writable = process.stdout,
+  timeoutMs = 500,
+): Promise<void> {
+  wideChars = await measure([...new Set(chars + CJK_FONT_PROBE)], input, output, timeoutMs);
+}
+
+function measure(chars: string[], input: ConsoleInput, output: Writable, timeoutMs: number): Promise<Set<string> | null> {
+  return new Promise((resolve) => {
+    const wasRaw = input.isRaw;
+    try {
+      input.setRawMode(true);
+    } catch {
+      resolve(null); // not a console
+      return;
+    }
+
+    const wide = new Set<string>();
+    let index = -1;
+    let typed = '';
+    const next = () => {
+      index++;
+      if (index === chars.length) finish(wide);
+      else output.write(`\r${chars[index]}\x1b[6n`);
+    };
+    const onData = (data: Buffer) => {
+      typed += data.toString('latin1');
+      const reply = CURSOR_POSITION_REPORT.exec(typed);
+      if (!reply) return;
+      typed = typed.slice(0, reply.index) + typed.slice(reply.index + reply[0].length);
+      // Printed from column 1, so a two-column symbol leaves the cursor in column 3
+      if (Number(reply[1]) > 2) wide.add(chars[index]);
+      next();
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    function finish(result: Set<string> | null) {
+      clearTimeout(timer);
+      input.off('data', onData);
+      // Leave the alternate screen before raw mode, as the dashboard does (see Dashboard.stop)
+      output.write('\r\x1b[K' + LEAVE_ALT_SCREEN);
+      input.pause();
+      if (!wasRaw) input.setRawMode(false);
+      if (typed) input.unshift(Buffer.from(typed, 'latin1'));
+      resolve(result);
+    }
+
+    input.on('data', onData);
+    input.resume();
+    output.write(ENTER_ALT_SCREEN);
+    next();
+  });
+}
+
+/** Those of `chars` the console lays out two columns wide, as measured; none before measuring. */
+export function wideInConsole(chars: string): string[] {
+  return wideChars ? [...chars].filter((ch) => wideChars!.has(ch)) : [];
+}
+
+/** Whether the console uses a Chinese, Japanese or Korean font; null if it wasn't measured. */
+export function consoleHasCjkFont(): boolean | null {
+  return wideChars ? wideChars.has(CJK_FONT_PROBE) : null;
 }

@@ -2,12 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import qrcode from 'qrcode-terminal';
 import { printQr, renderQr, terminalQrStyle } from '../qr.js';
 
-// Whether the console draws block characters wide depends on the console
-// running the tests: pin it
-const blocks = vi.hoisted(() => ({ wide: [] as string[] }));
+// The classic console's font is measured at startup: pin it
+const font = vi.hoisted(() => ({ cjk: false as boolean | null }));
 vi.mock('../windows-console.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../windows-console.js')>()),
-  wideInConsole: () => blocks.wide,
+  consoleHasCjkFont: () => font.cjk,
 }));
 
 const URL_TEXT = 'spck://connect?clientId=abcdefghijkl&secret=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQR&rs=cli-na-1.spck.io';
@@ -38,12 +37,25 @@ function cellModules(lines: string[]): boolean[][] {
 }
 
 describe('terminalQrStyle()', () => {
+  afterEach(() => { font.cjk = false; });
+
   it('uses half blocks outside Windows', () => {
+    font.cjk = true;
     expect(terminalQrStyle('linux', {})).toBe('halfBlocks');
     expect(terminalQrStyle('darwin', {})).toBe('halfBlocks');
   });
 
-  it('uses cells in the classic Windows console', () => {
+  it('uses half blocks in the classic Windows console with a font like Consolas', () => {
+    expect(terminalQrStyle('win32', {})).toBe('halfBlocks');
+  });
+
+  it('uses cells in the classic Windows console with a CJK font, which draws blocks wide', () => {
+    font.cjk = true;
+    expect(terminalQrStyle('win32', {})).toBe('cells');
+  });
+
+  it('uses cells in the classic Windows console when its font is unknown', () => {
+    font.cjk = null;
     expect(terminalQrStyle('win32', {})).toBe('cells');
   });
 
@@ -54,6 +66,7 @@ describe('terminalQrStyle()', () => {
     ['TERMINAL_EMULATOR', 'JetBrains-JediTerm'],
     ['TERM', 'xterm-256color'],
   ])('uses half blocks in Windows terminals that set %s', (name, value) => {
+    font.cjk = null;
     expect(terminalQrStyle('win32', { [name]: value })).toBe('halfBlocks');
   });
 });
@@ -86,43 +99,43 @@ describe('renderQr()', () => {
 });
 
 describe('printQr()', () => {
-  const original = { platform: process.platform, isTTY: process.stdout.isTTY, rows: process.stdout.rows, columns: process.stdout.columns };
+  const original = { platform: process.platform, isTTY: process.stdout.isTTY };
 
-  function classicWindowsConsole(columns: number, rows: number) {
+  function classicWindowsConsole(isTTY = true) {
     Object.defineProperty(process, 'platform', { value: 'win32' });
     for (const name of ['WT_SESSION', 'TERM_PROGRAM', 'ConEmuPID', 'TERMINAL_EMULATOR', 'TERM']) vi.stubEnv(name, undefined);
-    Object.assign(process.stdout, { isTTY: true, columns, rows });
+    Object.assign(process.stdout, { isTTY });
   }
 
   afterEach(() => {
-    blocks.wide = [];
+    font.cjk = false;
     Object.defineProperty(process, 'platform', { value: original.platform });
-    Object.assign(process.stdout, { isTTY: original.isTTY, columns: original.columns, rows: original.rows });
+    Object.assign(process.stdout, { isTTY: original.isTTY });
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
-  it('prints cells in the classic Windows console when the whole code fits', () => {
-    classicWindowsConsole(120, 50);
+  it('prints half blocks in the classic Windows console with a font like Consolas', () => {
+    classicWindowsConsole();
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     printQr(URL_TEXT);
+    expect(log).toHaveBeenCalledExactlyOnceWith(renderQr(URL_TEXT, 'halfBlocks').join('\n'));
+  });
+
+  it('prints cells in the classic Windows console with a CJK font', () => {
+    classicWindowsConsole();
+    font.cjk = true;
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    printQr(URL_TEXT);
+    // Even when taller than the window: it scrolls, and half blocks couldn't be scanned
     expect(log).toHaveBeenCalledExactlyOnceWith(renderQr(URL_TEXT, 'cells').join('\n'));
   });
 
-  it('prints half blocks when cells would not fit on screen', () => {
-    classicWindowsConsole(120, 30);
+  it('prints half blocks, without colors, when the output is not a terminal', () => {
+    classicWindowsConsole(false);
+    font.cjk = true;
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     printQr(URL_TEXT);
-    expect(log).toHaveBeenCalledOnce();
-    expect(String(log.mock.calls[0][0]).trimEnd()).toBe(renderQr(URL_TEXT, 'halfBlocks').join('\n'));
-  });
-
-  it('prints cells anyway when the console draws block characters wide', () => {
-    classicWindowsConsole(120, 30);
-    blocks.wide = ['█', '▄'];
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-    printQr(URL_TEXT);
-    // Taller than the window, but scrollable; half blocks couldn't be scanned
-    expect(log).toHaveBeenCalledExactlyOnceWith(renderQr(URL_TEXT, 'cells').join('\n'));
+    expect(log).toHaveBeenCalledExactlyOnceWith(renderQr(URL_TEXT, 'halfBlocks').join('\n'));
   });
 });

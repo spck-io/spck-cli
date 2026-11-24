@@ -25,8 +25,10 @@ vi.mock('../rpc/router.js', () => ({ RPCRouter: { initialize: vi.fn() } }));
 vi.mock('../setup/wizard.js', () => ({ runSetup: vi.fn(), confirm: vi.fn() }));
 vi.mock('../dashboard/Dashboard.js', () => ({ Dashboard: vi.fn(class { start = vi.fn(); }) }));
 vi.mock('../dashboard/WakeLock.js', () => ({ WakeLock: class {} }));
+vi.mock('../utils/windows-console.js', () => ({ isClassicWindowsConsole: vi.fn(() => false), measureConsoleWidths: vi.fn(async () => {}) }));
 
 import { startProxyClient } from '../index.js';
+import { isClassicWindowsConsole, measureConsoleWidths } from '../utils/windows-console.js';
 import { ConfigNotFoundError, createDefaultConfig, loadConfig } from '../config/config.js';
 import { loadCredentials } from '../config/credentials.js';
 import { authenticateWithFirebase, getValidFirebaseToken } from '../connection/firebase-auth.js';
@@ -50,6 +52,7 @@ describe('startup output', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(isClassicWindowsConsole).mockReset().mockReturnValue(false);
     vi.mocked(loadConfig).mockReset().mockReturnValue(createDefaultConfig());
     vi.mocked(isDirectory).mockReturnValue(true);
     vi.mocked(loadCredentials).mockReturnValue({ refreshToken: 'refresh', userId: 'user' });
@@ -87,11 +90,23 @@ describe('startup output', () => {
 
   it('keeps plain output when stdout is redirected', async () => {
     Object.defineProperty(process.stdout, 'isTTY', { value: false, configurable: true });
+    vi.mocked(isClassicWindowsConsole).mockReturnValue(true);
     await startProxyClient();
 
     expect(console.log).toHaveBeenCalledWith('Feature summary');
     expect(console.log).toHaveBeenCalledWith('Connecting to relay');
     expect(Dashboard).not.toHaveBeenCalled();
+    expect(measureConsoleWidths).not.toHaveBeenCalled();
+  });
+
+  it('measures the classic Windows console before setup reads the keyboard', async () => {
+    vi.mocked(isClassicWindowsConsole).mockReturnValue(true);
+    vi.mocked(loadConfig).mockImplementationOnce(() => { throw new ConfigNotFoundError('config.json'); });
+    vi.mocked(runSetup).mockImplementationOnce(async () => createDefaultConfig());
+    await startProxyClient();
+
+    expect(measureConsoleWidths).toHaveBeenCalledOnce();
+    expect(vi.mocked(measureConsoleWidths).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(runSetup).mock.invocationCallOrder[0]);
   });
 
   it('shows setup instructions and buffers subsequent startup logs', async () => {
