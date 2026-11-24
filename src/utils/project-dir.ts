@@ -164,6 +164,20 @@ function migrateConfigData(oldTarget: string, dataPath: string, homeBaseDir: str
 }
 
 /**
+ * Link .spck-editor/config to the data directory. Windows can't create a
+ * junction on a network share: config files then go straight to the data
+ * directory (see getProjectFilePath).
+ */
+function linkConfig(dataPath: string, configSymlink: string): boolean {
+  try {
+    fs.symlinkSync(dataPath, configSymlink, configLinkType());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Setup the project directory with config symlink
  * Creates ~/.spck-editor/projects/{project_id}/ and symlinks .spck-editor/config to it
  */
@@ -200,21 +214,22 @@ export function setupProjectDir(projectRoot: string): void {
   // Use lstat (not existsSync) so dangling symlinks are detected - existsSync follows
   // the link and reports false for a broken one, which made symlinkSync fail with EEXIST
   const linkStats = lstatOrNull(configSymlink);
+  let linked = true;
   if (!linkStats) {
-    fs.symlinkSync(dataPath, configSymlink, configLinkType());
+    linked = linkConfig(dataPath, configSymlink);
   } else if (linkStats.isSymbolicLink()) {
     const target = path.resolve(projectDir, fs.readlinkSync(configSymlink));
     if (!isSamePath(target, dataPath)) {
       // Project moved or home dir renamed - carry the old config over before relinking
       migrateConfigData(target, dataPath, homeBaseDir);
       fs.unlinkSync(configSymlink);
-      fs.symlinkSync(dataPath, configSymlink, configLinkType());
+      linked = linkConfig(dataPath, configSymlink);
     }
   }
 
   console.log(`✅ ${t('projectDir.configured')}`);
   console.log(`   ${t('projectDir.directory', { path: projectDir })}`);
-  console.log(`   ${t('projectDir.configLink', { symlink: configSymlink, dataPath })}\n`);
+  console.log(`   ${linked ? t('projectDir.configLink', { symlink: configSymlink, dataPath }) : t('projectDir.configData', { dataPath })}\n`);
 }
 
 /**
@@ -234,11 +249,13 @@ export function ensureProjectDir(projectRoot: string): void {
 export function getProjectFilePath(projectRoot: string, filename: string): string {
   const projectDir = getProjectDirPath(projectRoot);
 
-  // Config files go in the symlinked config directory
+  // Config files go in the symlinked config directory, or straight in the
+  // data directory where the link couldn't be created (see linkConfig)
   const configFiles = ['connection-settings.json', '.credentials.json', 'spck-cli.config.json'];
   if (configFiles.includes(filename)) {
     const configSymlink = getConfigSymlinkPath(projectRoot);
-    return path.join(configSymlink, filename);
+    const configDir = lstatOrNull(configSymlink) ? configSymlink : getProjectDataPath(projectRoot);
+    return path.join(configDir, filename);
   }
 
   // All other files go in the local .spck-editor directory

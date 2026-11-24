@@ -35,6 +35,7 @@ import { LogBuffer } from './dashboard/LogBuffer.js';
 import { WakeLock } from './dashboard/WakeLock.js';
 import { AMBIGUOUS_WIDTH_CHARS } from './dashboard/screen.js';
 import { isClassicWindowsConsole, measureConsoleWidths } from './utils/windows-console.js';
+import { skipCurrentDirectoryInProgramSearch } from './utils/program-lookup.js';
 
 let proxyClient: ProxyClient | null = null;
 let dashboard: Dashboard | null = null;
@@ -619,6 +620,8 @@ function setupGracefulShutdown(): void {
  * Main CLI entry point - parse arguments and run appropriate command
  */
 export async function main(): Promise<void> {
+  // Before anything starts a program: git, rg or curl in the project must not run
+  skipCurrentDirectoryInProgramSearch();
   setupGracefulShutdown();
   detectLocale();
 

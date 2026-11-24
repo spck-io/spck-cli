@@ -44,6 +44,8 @@ describe('project-dir', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    // Back to the real symlinkSync
+    vi.mocked(fs.symlinkSync).mockReset();
     restoreEnv('HOME', originalHome);
     restoreEnv('USERPROFILE', originalUserProfile);
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -109,5 +111,47 @@ describe('project-dir', () => {
 
     expect(path.resolve(fs.readlinkSync(link))).toBe(dataPath);
     expect(fs.readFileSync(path.join(link, 'connection-settings.json'), 'utf8')).toBe('new');
+  });
+
+  // Windows can't create a junction on a network share
+  const linkRefused = () => {
+    throw Object.assign(new Error('EPERM: operation not permitted, symlink'), { code: 'EPERM' });
+  };
+
+  it('keeps config files in the home data directory when the link cannot be created', () => {
+    vi.mocked(fs.symlinkSync).mockImplementation(linkRefused);
+
+    expect(() => mod.ensureProjectDir(projectRoot)).not.toThrow();
+
+    const dataPath = mod.getProjectDataPath(projectRoot);
+    expect(fs.existsSync(mod.getConfigSymlinkPath(projectRoot))).toBe(false);
+    expect(mod.getProjectFilePath(projectRoot, 'connection-settings.json')).toBe(path.join(dataPath, 'connection-settings.json'));
+    expect(mod.getProjectFilePath(projectRoot, 'spck-cli.config.json')).toBe(path.join(dataPath, 'spck-cli.config.json'));
+    expect(fs.existsSync(dataPath)).toBe(true);
+    // Local files stay in the project
+    expect(mod.getProjectFilePath(projectRoot, 'notes.json')).toBe(path.join(mod.getProjectDirPath(projectRoot), 'notes.json'));
+    // And the next run tries again without failing
+    expect(() => mod.ensureProjectDir(projectRoot)).not.toThrow();
+  });
+
+  it('keeps the config it migrated when relinking fails', () => {
+    const otherData = path.join(home, '.spck-editor', 'projects', 'other');
+    fs.mkdirSync(otherData, { recursive: true });
+    fs.writeFileSync(path.join(otherData, 'connection-settings.json'), 'old');
+    fs.mkdirSync(mod.getProjectDirPath(projectRoot));
+    fs.symlinkSync(otherData, mod.getConfigSymlinkPath(projectRoot), linkType);
+    vi.mocked(fs.symlinkSync).mockImplementation(linkRefused);
+
+    expect(() => mod.ensureProjectDir(projectRoot)).not.toThrow();
+
+    const settings = mod.getProjectFilePath(projectRoot, 'connection-settings.json');
+    expect(settings).toBe(path.join(mod.getProjectDataPath(projectRoot), 'connection-settings.json'));
+    expect(fs.readFileSync(settings, 'utf8')).toBe('old');
+  });
+
+  it('reads config files through the link when it exists', () => {
+    mod.ensureProjectDir(projectRoot);
+    expect(mod.getProjectFilePath(projectRoot, 'connection-settings.json'))
+      .toBe(path.join(mod.getConfigSymlinkPath(projectRoot), 'connection-settings.json'));
   });
 });

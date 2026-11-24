@@ -9,6 +9,7 @@ import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types.js';
 import { logTerminalRead, logTerminalWrite } from '../utils/logger.js';
 import { createShellLaunch } from './shell-prompt.js';
 import { getTerminalShell } from '../utils/terminal-shell.js';
+import { userShellEnv } from '../utils/program-lookup.js';
 
 const { Terminal: XtermHeadless } = XtermHeadlessModule as any;
 const { SerializeAddon } = SerializeAddonModule as any;
@@ -188,7 +189,7 @@ export class TerminalService {
 
     // Spawn PTY process
     let ptyProcess: pty.IPty;
-    const launch = createShellLaunch(shell, this.getCompactPrompt());
+    const launch = createShellLaunch(shell, this.getCompactPrompt(), userShellEnv());
     try {
       ptyProcess = pty.spawn(shell, launch.args, {
         name: 'xterm-256color',

@@ -1603,12 +1603,14 @@ export class ProxyClient {
   async disconnect(): Promise<void> {
     this.resetReconnectState();
     this.resetEditorSessions();
-    if (!this.socket) return;
+    // Even when not connected. Agents started through cmd.exe on Windows would
+    // keep running if we exited before they stopped.
+    const stopped = RPCRouter.cleanup();
+    if (!this.socket) return stopped;
 
-    RPCRouter.cleanup();
     console.log(`\n🛑 ${t('connection.shuttingDown')}`);
 
-    return new Promise((resolve) => {
+    const disconnected = new Promise<void>((resolve) => {
       const timeout = setTimeout(() => {
         console.warn(`⚠️  ${t('connection.killTimeout')}`);
         this.socket?.disconnect();
@@ -1624,5 +1626,6 @@ export class ProxyClient {
 
       this.socket!.emit('kill');
     });
+    await Promise.all([stopped, disconnected]);
   }
 }

@@ -153,7 +153,8 @@ export class AcpProcess {
           resolve();
         });
       });
-      spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
+      // Detached, so it isn't ended along with us if we exit first
+      spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, detached: true })
         .on('error', () => proc.kill());
     } else {
       try {

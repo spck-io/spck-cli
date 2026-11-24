@@ -119,7 +119,7 @@ export class FilesystemService {
           logFsRead(method, params, deviceId, true, undefined, { isFile: result.isFile, isDirectory: result.isDirectory });
           return result;
         case 'mv':
-          result = await this.mv(await this.validatePath(params.src), await this.validatePath(params.target), params.opts);
+          result = await this.mv(await this.validatePath(params.src), await this.validateNewName(params.target), params.opts);
           logFsWrite(method, params, deviceId, true, undefined, { type: result });
           return result;
         case 'copy':
@@ -220,6 +220,31 @@ export class FilesystemService {
 
       // For other errors, continue with original path
       return absolute;
+    }
+  }
+
+  /**
+   * Validate a path to rename something to, in the case the editor asked for.
+   * validatePath returns an existing name's case on disk, and where names
+   * ignore case (Windows, macOS) a case-only rename's target is its source.
+   */
+  private async validateNewName(userPath: string): Promise<string> {
+    const safePath = await this.validatePath(userPath);
+    const requested = toRelativeClientPath(userPath.split('?')[0].split('#')[0]);
+    const onDisk = toRelativePosixPath(await this.getRealRootPath(), safePath);
+    // Anything but case differing means a link was followed
+    if (requested === onDisk || requested.toLowerCase() !== onDisk.toLowerCase()) return safePath;
+    return path.join(path.dirname(safePath), path.posix.basename(requested));
+  }
+
+  /** Whether two paths that differ only in case name the same file */
+  private async isSameFile(a: string, b: string): Promise<boolean> {
+    if (a.toLowerCase() !== b.toLowerCase()) return false;
+    try {
+      const [statA, statB] = await Promise.all([fs.stat(a, { bigint: true }), fs.stat(b, { bigint: true })]);
+      return statA.dev === statB.dev && statA.ino === statB.ino;
+    } catch {
+      return false;
     }
   }
 
@@ -712,7 +737,14 @@ export class FilesystemService {
         if (ignoreSet.has(name)) continue;
 
         const entryPath = path.join(safePath, name);
-        const stats = await fs.stat(entryPath);
+        let stats;
+        try {
+          stats = await fs.stat(entryPath);
+        } catch {
+          // Skip entries we can't stat, like System Volume Information in a
+          // Windows drive root or a dangling link (as readdirDeep does)
+          continue;
+        }
 
         // Skip based on filters
         if (params.skipFiles && stats.isFile()) continue;
@@ -913,8 +945,8 @@ export class FilesystemService {
         }
       }
 
-      // Check if target exists
-      if (!opts.overwrite) {
+      // Check if target exists, unless that is the source in another case
+      if (!opts.overwrite && !(await this.isSameFile(srcPath, targetPath))) {
         try {
           await fs.access(targetPath);
           throw createRPCError(

@@ -1,6 +1,7 @@
 import { spawnSync } from 'child_process';
 import * as path from 'path';
 import { createRequire } from 'module';
+import { findWindowsProgram } from './program-lookup.js';
 
 // One ACP-capable CLI agent on the host. We model this as a list so adding
 // codex/aider/etc. is purely a registry change — no call sites to update.
@@ -82,10 +83,25 @@ const PATH_AGENTS: ReadonlyArray<PathAgent> = [
   { name: 'gemini', binary: 'gemini', args: ['--acp'] },
 ];
 
+// What Windows can start: .exe and .com files directly, and .cmd and .bat
+// files (npm's shims for global installs) through cmd.exe. Not the
+// extensionless sh script npm installs beside its .cmd shim.
+const WINDOWS_PROGRAM_EXTENSIONS = ['.com', '.exe', '.bat', '.cmd'];
+
+function findPathAgent(binary: string): { binary: string; shell: boolean } | null {
+  if (process.platform === 'win32') {
+    const found = findWindowsProgram(binary, WINDOWS_PROGRAM_EXTENSIONS);
+    return found ? { binary: found, shell: /\.(cmd|bat)$/i.test(found) } : null;
+  }
+  const which = spawnSync('which', [binary], { encoding: 'utf8' });
+  const found = which.status === 0 ? (which.stdout || '').split('\n')[0]?.trim() : '';
+  return found ? { binary: found, shell: false } : null;
+}
+
 // Probe each agent: bundled ones come from node_modules and launch with the
-// current `node`; PATH-based fallbacks resolve their binary via
-// `which`/`where`. The actual ACP handshake — including the real model list
-// — happens later via probeAgentModels() in capabilities().
+// current `node`; PATH-based fallbacks are looked up in PATH. The actual ACP
+// handshake — including the real model list — happens later via
+// probeAgentModels() in capabilities().
 export function resolveAcpAgents(): ResolvedAgent[] {
   const resolved: ResolvedAgent[] = [];
   for (const agent of BUNDLED_AGENTS) {
@@ -98,16 +114,10 @@ export function resolveAcpAgents(): ResolvedAgent[] {
       version: bundled.version,
     });
   }
-  const isWindows = process.platform === 'win32';
-  const lookup = isWindows ? 'where' : 'which';
   for (const candidate of PATH_AGENTS) {
     if (resolved.some((agent) => agent.name === candidate.name)) continue;
-    const which = spawnSync(lookup, [candidate.binary], { encoding: 'utf8' });
-    if (which.status !== 0) continue;
-    const found = isWindows
-      ? pickWindowsCommand(which.stdout || '')
-      : { binary: (which.stdout || '').split('\n')[0]?.trim(), shell: false };
-    if (!found?.binary) continue;
+    const found = findPathAgent(candidate.binary);
+    if (!found) continue;
     resolved.push({
       name: candidate.name,
       binary: found.binary,
@@ -117,20 +127,4 @@ export function resolveAcpAgents(): ResolvedAgent[] {
     });
   }
   return resolved;
-}
-
-/**
- * Pick the match Windows can start from `where` output. `where` lists every
- * match in PATH order, including the extensionless sh script npm installs
- * beside its .cmd shim, which Windows can't run. .exe and .com files start
- * directly; .cmd and .bat files need cmd.exe.
- */
-export function pickWindowsCommand(whereOutput: string): { binary: string; shell: boolean } | null {
-  for (const line of whereOutput.split(/\r?\n/)) {
-    const binary = line.trim();
-    const ext = path.win32.extname(binary).toLowerCase();
-    if (ext === '.exe' || ext === '.com') return { binary, shell: false };
-    if (ext === '.cmd' || ext === '.bat') return { binary, shell: true };
-  }
-  return null;
 }

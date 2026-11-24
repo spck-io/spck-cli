@@ -116,6 +116,40 @@ describe('GitService', () => {
     });
   });
 
+  describe('askpass', () => {
+    // Git's password prompt includes the user name from the remote URL
+    const user = `a"&type nul>injected&rem $(touch injected)'`;
+
+    function credentialFill(env: Record<string, string>): Promise<string> {
+      return new Promise((resolve, reject) => {
+        const git = spawn('git', ['-c', 'credential.helper=', 'credential', 'fill'], { cwd: repoPath, env: { ...process.env, ...env } });
+        let stdout = '';
+        let stderr = '';
+        git.stdout.on('data', (data) => (stdout += data));
+        git.stderr.on('data', (data) => (stderr += data));
+        git.on('close', (code) => (code === 0 ? resolve(stdout) : reject(new Error(stderr))));
+        git.stdin.end(`protocol=https\nhost=example.com\nusername=${user}\n\n`);
+      });
+    }
+
+    it.each([['curl', true], ['node', false]])('passes the prompt to the editor unchanged, through %s', async (_name, curl) => {
+      (service as any)._hasCurl = curl;
+      const prompts: string[] = [];
+      vi.spyOn(service as any, 'requestAuth').mockImplementation(async (_socket: unknown, params: any) => {
+        prompts.push(params.prompt);
+        return { password: 'secret' };
+      });
+      const { env, cleanup } = await (service as any).setupAskpass(mockSocket);
+      try {
+        expect(await credentialFill(env)).toContain('password=secret\n');
+      } finally {
+        cleanup();
+      }
+      expect(prompts).toEqual([`Password for 'https://${user}@example.com': `]);
+      await expect(fs.access(path.join(repoPath, 'injected'))).rejects.toThrow();
+    });
+  });
+
   describe('Path Validation', () => {
     it('should accept valid paths', async () => {
       await execGit(['init'], repoPath);
@@ -306,6 +340,33 @@ describe('GitService', () => {
       expect(status).toContain('file1.txt');
       expect(status).toContain('file2.txt');
     });
+
+    // Windows limits a command line to 32,767 characters
+    it('handles more files and a longer message than fit on a Windows command line', async () => {
+      const folder = 'a-folder-with-a-long-name-to-fill-the-command-line';
+      await fs.mkdir(path.join(repoPath, folder));
+      const files = Array.from({ length: 600 }, (_, i) => `${folder}/file ${String(i).padStart(4, '0')}.txt`);
+      expect(files.join(' ').length).toBeGreaterThan(32767);
+      const staged = async () => (await execGit(['diff', '--cached', '--name-only'], repoPath)).split('\n').filter(Boolean);
+      const write = (content: string) => Promise.all(files.map((file) => fs.writeFile(path.join(repoPath, file), content)));
+
+      await write('first');
+      await service.handle('add', { dir: '/repo', filepaths: files }, mockSocket);
+      expect(await staged()).toHaveLength(600);
+
+      const message = 'Add many files\n\n' + 'A long line in the body. '.repeat(1600).trim();
+      expect(message.length).toBeGreaterThan(32767);
+      await service.handle('commit', { dir: '/repo', message, author: { name: 'Test', email: 'test@example.com' } }, mockSocket);
+      expect(await execGit(['log', '-1', '--format=%B'], repoPath)).toBe(message);
+
+      await write('second');
+      await execGit(['add', '.'], repoPath);
+      await service.handle('resetIndex', { dir: '/repo', filepaths: files }, mockSocket);
+      expect(await staged()).toHaveLength(0);
+
+      await service.handle('remove', { dir: '/repo', filepaths: files }, mockSocket);
+      expect(await staged()).toHaveLength(600);
+    }, 60000);
   });
 
   describe('Git Operations - commit', () => {
@@ -948,21 +1009,45 @@ describe('GitService', () => {
     });
 
     it('should unset config value when value is undefined', async () => {
-      await execGit(['config', 'core.pager', 'less'], repoPath);
+      await execGit(['config', 'core.loosecompression', '3'], repoPath);
 
       await service.handle(
         'setConfig',
-        { dir: '/repo', path: 'core.pager', value: undefined },
+        { dir: '/repo', path: 'core.loosecompression', value: undefined },
         mockSocket
       );
 
       const result = await service.handle(
         'getConfig',
-        { dir: '/repo', path: 'core.pager' },
+        { dir: '/repo', path: 'core.loosecompression' },
         mockSocket
       );
 
       expect(result.value).toBeUndefined();
+    });
+
+    it.each([
+      'core.fsmonitor', 'core.FSMonitor', 'core.sshCommand', 'core.pager', 'core.editor', 'core.hooksPath', 'core.worktree',
+      'remote.origin.uploadpack', 'remote.origin.receivepack', 'branch.main.mergeOptions', 'alias.st', 'Core.fsmonitor',
+    ])('refuses to change %s, which could run commands', async (key) => {
+      for (const params of [{ value: 'touch pwned' }, { value: 'touch pwned', append: true }, { value: undefined }]) {
+        await expect(service.handle('setConfig', { dir: '/repo', path: key, ...params }, mockSocket))
+          .rejects.toMatchObject({ code: ErrorCode.INVALID_PARAMS });
+      }
+      expect(await gitExitCode(['config', '--local', '--get', key], repoPath)).toBe(1);
+    });
+
+    it('still reads the keys it refuses to change', async () => {
+      await execGit(['config', 'core.sshCommand', 'ssh -i key'], repoPath);
+      const result = await service.handle('getConfig', { dir: '/repo', path: 'core.sshCommand' }, mockSocket);
+      expect(result.value).toBe('ssh -i key');
+    });
+
+    it('changes remote and branch settings', async () => {
+      await service.handle('setConfig', { dir: '/repo', path: 'remote.my.fork.url', value: 'https://example.com/x.git' }, mockSocket);
+      await service.handle('setConfig', { dir: '/repo', path: 'branch.feature/x.remote', value: 'my.fork' }, mockSocket);
+      expect(await execGit(['config', '--get', 'remote.my.fork.url'], repoPath)).toBe('https://example.com/x.git');
+      expect(await execGit(['config', '--get', 'branch.feature/x.remote'], repoPath)).toBe('my.fork');
     });
 
     it('should append config value when append is true', async () => {
@@ -984,7 +1069,7 @@ describe('GitService', () => {
       const errorLog = vi.spyOn(console, 'error');
       const result = await service.handle(
         'setConfig',
-        { dir: '/repo', path: 'core.pager', value: undefined },
+        { dir: '/repo', path: 'core.loosecompression', value: undefined },
         mockSocket
       );
 

@@ -328,6 +328,44 @@ describe('SearchService - Search Functionality', () => {
       expect(results.length).toBe(0);
     });
 
+    // Like System Volume Information in a Windows drive root
+    it('searches the other folders when one cannot be read', async () => {
+      const fsPromises = require('fs').promises;
+      const path = require('path');
+      const readdir = fsPromises.readdir;
+      let refused = false;
+      const spy = vi.spyOn(fsPromises, 'readdir').mockImplementation((dir: any, ...rest: any[]) => {
+        if (path.basename(dir) === 'subdir') {
+          refused = true;
+          return Promise.reject(Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' }));
+        }
+        return readdir(dir, ...rest);
+      });
+      const results: any[] = [];
+      mockSocket.emit.mockImplementation((event: string, data: any) => {
+        if (event === 'rpc' && data.method === 'search.results') {
+          results.push(...data.params.results);
+        }
+      });
+
+      try {
+        await service.handle('findWithStream', {
+          glob: '**/*.txt',
+          maxResults: 100,
+          maxLength: 100,
+          searchTerm: 'test',
+          matchCase: false,
+          useRegEx: false,
+          onlyWholeWords: false,
+        }, mockSocket);
+      } finally {
+        spy.mockRestore();
+      }
+
+      expect(refused).toBe(true);
+      expect(results.some((r: any) => r.path.includes('file1.txt'))).toBe(true);
+    });
+
     it('should support regex patterns', async () => {
       const results: any[] = [];
 

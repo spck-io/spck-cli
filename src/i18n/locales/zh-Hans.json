@@ -276,7 +276,8 @@
   "projectDir": {
     "configured": "项目目录已配置",
     "directory": "目录: {{path}}",
-    "configLink": "配置:    {{symlink}} -> {{dataPath}}"
+    "configLink": "配置:    {{symlink}} -> {{dataPath}}",
+    "configData": "配置:    {{dataPath}}"
   },
   "setup": {
     "title": "Spck Networking CLI - 初始设置",

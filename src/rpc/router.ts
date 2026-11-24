@@ -109,15 +109,16 @@ export class RPCRouter {
   }
 
   /**
-   * Shut down the file watcher. Called on graceful disconnect.
+   * Shut down the file watcher and stop agents. Called on graceful disconnect;
+   * resolves once the agents have stopped.
    */
-  static cleanup(): void {
+  static cleanup(): Promise<void> {
     if (this.fileWatcher) {
       this.fileWatcher.close();
       this.fileWatcher = null;
     }
     this.broadcastCallback = null;
-    this.acpService?.cleanup().catch(() => null);
+    return this.acpService?.cleanup().catch(() => undefined) ?? Promise.resolve();
   }
 
   private static startFileWatcher(rootPath: string): void {

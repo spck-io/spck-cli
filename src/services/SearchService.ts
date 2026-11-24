@@ -551,7 +551,15 @@ export class SearchService {
     const ignoreSet = new Set(['.git', '.spck-editor', '.DS_Store', 'node_modules', 'dist', 'build']);
 
     const walk = async (currentDir: string): Promise<void> => {
-      const entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
+      let entries: fs.Dirent[];
+      try {
+        entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
+      } catch (error) {
+        // Skip folders we can't read, like System Volume Information in a
+        // Windows drive root
+        if (currentDir === dir) throw error;
+        return;
+      }
 
       for (const entry of entries) {
         if (ignoreSet.has(entry.name)) continue;

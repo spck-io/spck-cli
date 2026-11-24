@@ -1116,4 +1116,27 @@ describe('ProxyClient Security', () => {
       }
     });
   });
+
+  // On Windows, agents started through cmd.exe keep running if we exit before they stop
+  describe('Disconnecting', () => {
+    it('waits for agents to stop', async () => {
+      let agentsStopped!: () => void;
+      mockRPCRouter.cleanup.mockReturnValueOnce(new Promise<void>((resolve) => { agentsStopped = resolve; }));
+      const client = await setupClient();
+      let disconnected = false;
+      const disconnecting = client.disconnect().then(() => { disconnected = true; });
+      await triggerEvent('killed', undefined);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(disconnected).toBe(false);
+      agentsStopped();
+      await disconnecting;
+      expect(mockRPCRouter.cleanup).toHaveBeenCalledOnce();
+    });
+
+    it('stops agents when not connected', async () => {
+      const client = new ProxyClient(defaultOptions as any);
+      await client.disconnect();
+      expect(mockRPCRouter.cleanup).toHaveBeenCalledOnce();
+    });
+  });
 });

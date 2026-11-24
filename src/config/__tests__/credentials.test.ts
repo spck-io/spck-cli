@@ -37,6 +37,8 @@ describe('credentials', () => {
     vi.clearAllMocks();
     mockOs.homedir.mockReturnValue(mockHomedir);
     vi.spyOn(process, 'cwd').mockReturnValue(mockCwd);
+    // The project's .spck-editor/config link exists
+    mockFs.lstatSync.mockReturnValue({} as fs.Stats);
   });
 
   afterEach(() => {

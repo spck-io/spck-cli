@@ -591,6 +591,18 @@ describe('FilesystemService', () => {
         code: ErrorCode.FILE_NOT_FOUND,
       });
     });
+
+    // Like System Volume Information in a Windows drive root
+    it('lists the other entries when one cannot be stat-ed', async () => {
+      const gone = path.join(testRoot, 'gone');
+      await fs.mkdir(gone);
+      await fs.symlink(gone, path.join(testRoot, 'readdir-test', 'dangling'), 'junction');
+      await fs.rmdir(gone);
+
+      const result = await service.handle('readdir', { path: '/readdir-test' }, mockSocket);
+
+      expect(result.entries.sort()).toEqual(['file1.txt', 'file2.txt', 'subdir']);
+    });
   });
 
   describe('Directory Operations - readdirDeep', () => {
@@ -925,6 +937,41 @@ describe('FilesystemService', () => {
 
       const content = await fs.readFile(path.join(testRoot, 'dst2.txt'), 'utf8');
       expect(content).toBe('source');
+    });
+
+    // Windows and macOS find a name in any case, so the target is the source
+    it.each([
+      ['file', 'Readme.md', 'README.md', undefined],
+      ['file with overwrite', 'Readme.md', 'README.md', { overwrite: true }],
+      ['folder', 'Components', 'components', undefined],
+    ])('changes only the case of a %s name', async (_, from, to, opts) => {
+      if (from === 'Components') {
+        await fs.mkdir(path.join(testRoot, from));
+        await fs.writeFile(path.join(testRoot, from, 'a.txt'), 'inside');
+      } else {
+        await fs.writeFile(path.join(testRoot, from), 'content');
+      }
+
+      await service.handle('mv', { src: `/${from}`, target: `/${to}`, opts }, mockSocket);
+
+      expect(await fs.readdir(testRoot)).toEqual([to]);
+      if (from === 'Components') {
+        expect(await fs.readdir(path.join(testRoot, to))).toEqual(['a.txt']);
+      } else {
+        expect(await fs.readFile(path.join(testRoot, to), 'utf8')).toBe('content');
+      }
+    });
+
+    it('still refuses to replace a different file whose name differs only in case', async (ctx) => {
+      await fs.writeFile(path.join(testRoot, 'Readme.md'), 'one');
+      await fs.writeFile(path.join(testRoot, 'README.md'), 'two');
+      // Both exist only where names are case-sensitive
+      if ((await fs.readdir(testRoot)).length < 2) ctx.skip();
+
+      await expect(
+        service.handle('mv', { src: '/Readme.md', target: '/README.md' }, mockSocket)
+      ).rejects.toMatchObject({ code: ErrorCode.INVALID_PATH, message: expect.stringContaining('already exists') });
+      expect(await fs.readFile(path.join(testRoot, 'README.md'), 'utf8')).toBe('two');
     });
   });
 

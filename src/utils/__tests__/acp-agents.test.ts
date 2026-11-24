@@ -1,7 +1,9 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
-import { pickWindowsCommand, resolveAcpAgents } from '../acp-agents.js';
+import { resolveAcpAgents } from '../acp-agents.js';
 
 vi.mock('child_process', () => ({ spawnSync: vi.fn() }));
 
@@ -71,38 +73,50 @@ describe('resolveAcpAgents', () => {
     expect(resolveAcpAgents()).toContainEqual({ name: 'codex', binary: '/usr/local/bin/codex-acp', args: [], version: '' });
   });
 
-  it('resolves Windows PATH agents from where output, running .cmd shims through cmd.exe', () => {
-    Object.defineProperty(process, 'platform', { value: 'win32' });
-    vi.mocked(spawnSync).mockImplementation((_lookup, args) => ({
-      status: (args as string[])[0] === 'gemini' ? 0 : 1,
-      stdout: 'C:\\Users\\me\\AppData\\Roaming\\npm\\gemini\r\nC:\\Users\\me\\AppData\\Roaming\\npm\\gemini.cmd\r\n',
-    }) as any);
-    expect(resolveAcpAgents()).toContainEqual({
-      name: 'gemini', binary: 'C:\\Users\\me\\AppData\\Roaming\\npm\\gemini.cmd', args: ['--acp'], version: '', shell: true,
+  describe('on Windows', () => {
+    let dir: string;
+    beforeEach(() => {
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spck-agents-'));
     });
-    expect(spawnSync).toHaveBeenCalledWith('where', ['gemini'], { encoding: 'utf8' });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    function install(folder: string, ...files: string[]): string {
+      const bin = path.join(dir, folder);
+      fs.mkdirSync(bin, { recursive: true });
+      for (const file of files) fs.writeFileSync(path.join(bin, file), '');
+      return bin;
+    }
+
+    // `where` printed this user's npm folder in the console's code page
+    it("runs npm's .cmd shim through cmd.exe, in a user folder with non-ASCII characters", () => {
+      const npm = install(path.join('José 张三', 'npm'), 'gemini', 'gemini.cmd');
+      vi.stubEnv('PATH', [path.join(dir, 'empty'), npm].join(path.delimiter));
+      expect(resolveAcpAgents()).toContainEqual({
+        name: 'gemini', binary: path.join(npm, 'gemini.cmd'), args: ['--acp'], version: '', shell: true,
+      });
+      expect(spawnSync).not.toHaveBeenCalled();
+    });
+
+    it('starts executables directly and keeps PATH order', () => {
+      const tools = install('tools', 'gemini.exe');
+      const npm = install('npm', 'gemini.cmd');
+      vi.stubEnv('PATH', [tools, npm].join(path.delimiter));
+      expect(resolveAcpAgents()).toContainEqual({ name: 'gemini', binary: path.join(tools, 'gemini.exe'), args: ['--acp'], version: '' });
+    });
+
+    it('omits agents with nothing Windows can start', () => {
+      vi.stubEnv('PATH', install('npm', 'gemini', 'gemini.ps1'));
+      expect(resolveAcpAgents().map((agent) => agent.name)).not.toContain('gemini');
+    });
   });
 
   it('omits missing adapter executables', () => {
     packages.clear();
     expect(resolveAcpAgents().map((agent) => agent.name)).not.toContain('codex');
     expect(resolveAcpAgents().map((agent) => agent.name)).not.toContain('gemini');
-  });
-});
-
-describe('pickWindowsCommand', () => {
-  it("skips npm's extensionless sh shim for the .cmd beside it", () => {
-    expect(pickWindowsCommand('C:\\npm\\gemini\r\nC:\\npm\\gemini.cmd\r\n'))
-      .toEqual({ binary: 'C:\\npm\\gemini.cmd', shell: true });
-  });
-
-  it('starts executables directly and keeps PATH order', () => {
-    expect(pickWindowsCommand('C:\\tools\\gemini.EXE\r\nC:\\npm\\gemini.cmd\r\n'))
-      .toEqual({ binary: 'C:\\tools\\gemini.EXE', shell: false });
-  });
-
-  it('returns null when nothing can be started', () => {
-    expect(pickWindowsCommand('C:\\npm\\gemini\r\nC:\\npm\\gemini.ps1\r\n')).toBeNull();
-    expect(pickWindowsCommand('')).toBeNull();
   });
 });

@@ -276,7 +276,8 @@
   "projectDir": {
     "configured": "Diretório do projeto configurado",
     "directory": "Diretório: {{path}}",
-    "configLink": "Config:    {{symlink}} -> {{dataPath}}"
+    "configLink": "Config:    {{symlink}} -> {{dataPath}}",
+    "configData": "Config:    {{dataPath}}"
   },
   "setup": {
     "title": "Spck Networking CLI - Configuração inicial",

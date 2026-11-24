@@ -27,6 +27,35 @@ interface ExecGitResult {
   stdoutBuffer?: Buffer;
 }
 
+/**
+ * Split paths into batches for separate git commands, each short enough for a
+ * Windows command line (at most 32,767 characters).
+ */
+function batchPaths(paths: string[], maxLength = 30000): string[][] {
+  const batches: string[][] = [];
+  let batch: string[] = [];
+  let length = 0;
+  for (const file of paths) {
+    // With the separating space, quotes, and escapes for quotes and backslashes
+    const size = file.length + 3 + (file.match(/["\\]/g)?.length ?? 0);
+    if (batch.length > 0 && length + size > maxLength) {
+      batches.push(batch);
+      batch = [];
+      length = 0;
+    }
+    batch.push(file);
+    length += size;
+  }
+  if (batch.length > 0) batches.push(batch);
+  return batches;
+}
+
+/** Quote a path for sh. Git for Windows' sh reads Windows paths with forward slashes. */
+function shellQuote(file: string): string {
+  const posixPath = process.platform === 'win32' ? file.replace(/\\/g, '/') : file;
+  return `'${posixPath.replace(/'/g, `'\\''`)}'`;
+}
+
 export class GitService {
   private submoduleCache: Map<string, { submodules: Array<{ name: string; path: string }>; timestamp: number }> = new Map();
   private static SUBMODULE_CACHE_TTL = 30000; // 30 seconds
@@ -409,6 +438,8 @@ export class GitService {
       });
 
       if (options.input !== undefined && git.stdin) {
+        // Git may exit before reading it all (nothing to commit); its exit code says why
+        git.stdin.on('error', () => {});
         git.stdin.write(options.input);
         git.stdin.end();
       }
@@ -859,7 +890,9 @@ export class GitService {
     const sanitizedPaths = params.filepaths.map((p: string) => this.sanitizeFilename(p));
 
     // Use -- separator to prevent filenames being interpreted as flags (command injection prevention)
-    await this.execGit(['add', '--', ...sanitizedPaths], { cwd: dir });
+    for (const batch of batchPaths(sanitizedPaths)) {
+      await this.execGit(['add', '--', ...batch], { cwd: dir });
+    }
 
     // Send change notification
     socket.broadcast.emit('rpc', {
@@ -884,7 +917,9 @@ export class GitService {
     const sanitizedPaths = params.filepaths.map((p: string) => this.sanitizeFilename(p));
 
     // Use -- separator to prevent filenames being interpreted as flags (command injection prevention)
-    await this.execGit(['rm', '--cached', '--', ...sanitizedPaths], { cwd: dir });
+    for (const batch of batchPaths(sanitizedPaths)) {
+      await this.execGit(['rm', '--cached', '--', ...batch], { cwd: dir });
+    }
 
     // Send change notification
     socket.broadcast.emit('rpc', {
@@ -912,7 +947,9 @@ export class GitService {
       // Sanitize filenames to prevent command injection
       const sanitizedPaths = params.filepaths.map((p: string) => this.sanitizeFilename(p));
 
-      await this.execGit(['reset', ref, '--', ...sanitizedPaths], { cwd: dir });
+      for (const batch of batchPaths(sanitizedPaths)) {
+        await this.execGit(['reset', ref, '--', ...batch], { cwd: dir });
+      }
     } else if (params.filepath) {
       // Reset single file (backward compatibility)
       const sanitizedPath = this.sanitizeFilename(params.filepath);
@@ -942,7 +979,8 @@ export class GitService {
       GIT_COMMITTER_EMAIL: params.author.email,
     };
 
-    await this.execGit(['commit', '-m', params.message], { cwd: dir, env });
+    // On stdin, as a long message would not fit on a Windows command line
+    await this.execGit(['commit', '-F', '-'], { cwd: dir, env, input: String(params.message ?? '') });
 
     const { stdout } = await this.execGit(['rev-parse', 'HEAD'], { cwd: dir });
     const oid = stdout.trim();
@@ -982,14 +1020,31 @@ export class GitService {
   ];
 
   /**
+   * The keys in those sections that can also be changed. Others run commands
+   * (core.fsmonitor, core.sshCommand, core.pager, core.hooksPath,
+   * remote.<name>.uploadpack) or point git outside the project (core.worktree).
+   */
+  private static WRITABLE_SECTION_KEYS: Record<string, ReadonlySet<string>> = {
+    'core.': new Set([
+      'autocrlf', 'bare', 'checkstat', 'compression', 'eol', 'filemode', 'ignorecase', 'logallrefupdates',
+      'loosecompression', 'precomposeunicode', 'quotepath', 'repositoryformatversion', 'safecrlf', 'symlinks', 'trustctime',
+    ]),
+    'remote.': new Set(['fetch', 'mirror', 'prune', 'prunetags', 'push', 'pushurl', 'skipdefaultupdate', 'skipfetchall', 'tagopt', 'url']),
+    'branch.': new Set(['description', 'merge', 'pushremote', 'rebase', 'remote']),
+  };
+
+  /**
    * Validate that a git config key is allowed
    */
-  private validateConfigKey(key: string): void {
+  private validateConfigKey(key: string, write = false): void {
     if (GitService.ALLOWED_CONFIG_KEYS.has(key)) {
       return;
     }
     for (const prefix of GitService.ALLOWED_CONFIG_PREFIXES) {
-      if (key.startsWith(prefix)) {
+      if (typeof key !== 'string' || !key.startsWith(prefix)) continue;
+      // Git ignores the case of the last part, the variable name
+      const variable = key.slice(key.lastIndexOf('.') + 1).toLowerCase();
+      if (!write || GitService.WRITABLE_SECTION_KEYS[prefix].has(variable)) {
         return;
       }
     }
@@ -1016,7 +1071,7 @@ export class GitService {
    */
   private async setConfig(dir: string, params: any): Promise<{ success: boolean }> {
     const { path, value, append } = params;
-    this.validateConfigKey(path);
+    this.validateConfigKey(path, true);
 
     if (value === undefined) {
       // Deleting an absent config entry is already satisfied (exit code 5).
@@ -1653,31 +1708,20 @@ export class GitService {
       server.listen(0, '127.0.0.1', () => {
         const addr = server.address() as { port: number };
         const port = addr.port;
-        const useCurl = this.hasCurl();
-        const isWindows = process.platform === 'win32';
-        const filesToClean: string[] = [];
+        const id = crypto.randomBytes(16).toString('hex');
+        // A sh script on Windows too: Git for Windows runs #! scripts with its
+        // own sh, as it does hooks. The prompt includes the user name from the
+        // remote URL, and cmd.exe would run what follows a quote and & in it.
+        const scriptPath = path.join(os.tmpdir(), `spck-askpass-${id}.sh`);
+        const filesToClean = [scriptPath];
+        let command: string;
 
-        let scriptPath: string;
-
-        if (useCurl) {
+        if (this.hasCurl()) {
           // Use curl directly — available on macOS, most Linux, and newer Windows
-          if (isWindows) {
-            scriptPath = path.join(os.tmpdir(), `spck-askpass-${crypto.randomBytes(16).toString('hex')}.cmd`);
-            fs.writeFileSync(scriptPath,
-              `@curl -s --max-time 0 -X POST -d "%~1" "http://127.0.0.1:${port}/askpass" 2>nul\r\n`
-            );
-          } else {
-            scriptPath = path.join(os.tmpdir(), `spck-askpass-${crypto.randomBytes(16).toString('hex')}.sh`);
-            fs.writeFileSync(scriptPath,
-              `#!/bin/sh\ncurl -s --max-time 0 -X POST -d "$1" "http://127.0.0.1:${port}/askpass" 2>/dev/null\n`,
-              { mode: 0o700 }
-            );
-          }
-          filesToClean.push(scriptPath);
+          command = `curl -s --max-time 0 -X POST -d "$1" "http://127.0.0.1:${port}/askpass" 2>/dev/null`;
         } else {
           // Fallback to Node.js script (node is always available since we're running on it)
-          const nodeExe = process.execPath;
-          const jsPath = path.join(os.tmpdir(), `spck-askpass-${crypto.randomBytes(16).toString('hex')}.js`);
+          const jsPath = path.join(os.tmpdir(), `spck-askpass-${id}.js`);
           fs.writeFileSync(jsPath, [
             `const h=require('http'),d=process.argv[2]||'';`,
             `const r=h.request({hostname:'127.0.0.1',port:${port},path:'/askpass',method:'POST',` +
@@ -1686,21 +1730,9 @@ export class GitService {
             ''
           ].join('\n'));
           filesToClean.push(jsPath);
-
-          if (isWindows) {
-            scriptPath = path.join(os.tmpdir(), `spck-askpass-${crypto.randomBytes(16).toString('hex')}.cmd`);
-            fs.writeFileSync(scriptPath,
-              `@"${nodeExe}" "${jsPath}" %1\r\n`
-            );
-          } else {
-            scriptPath = path.join(os.tmpdir(), `spck-askpass-${crypto.randomBytes(16).toString('hex')}.sh`);
-            fs.writeFileSync(scriptPath,
-              `#!/bin/sh\n"${nodeExe}" "${jsPath}" "$1"\n`,
-              { mode: 0o700 }
-            );
-          }
-          filesToClean.push(scriptPath);
+          command = `${shellQuote(process.execPath)} ${shellQuote(jsPath)} "$1"`;
         }
+        fs.writeFileSync(scriptPath, `#!/bin/sh\n${command}\n`, { mode: 0o700 });
 
         const cleanup = () => {
           server.close();

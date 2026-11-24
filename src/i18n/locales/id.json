@@ -276,7 +276,8 @@
   "projectDir": {
     "configured": "Direktori proyek dikonfigurasi",
     "directory": "Direktori: {{path}}",
-    "configLink": "Konfigurasi:    {{symlink}} -> {{dataPath}}"
+    "configLink": "Konfigurasi:    {{symlink}} -> {{dataPath}}",
+    "configData": "Konfigurasi:    {{dataPath}}"
   },
   "setup": {
     "title": "Spck Networking CLI - Pengaturan Awal",
