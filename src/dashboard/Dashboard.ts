@@ -17,11 +17,15 @@ import { t } from '../i18n/index.js';
 import { LogBuffer, LogEntry } from './LogBuffer.js';
 import { WakeLock } from './WakeLock.js';
 import { SETTINGS, SettingDef, toggleSetting, newTerminalsHint } from './settings.js';
-import { ESCAPE_TIMEOUT_MS, fit, formatBytes, formatDuration, skipColumns, stripAnsi, truncate, visibleWidth, wrap } from './screen.js';
+import {
+  AMBIGUOUS_WIDTH_CHARS, ESCAPE_TIMEOUT_MS, fit, formatBytes, formatDuration, setWideChars, skipColumns, stripAnsi, truncate,
+  visibleWidth, wrap,
+} from './screen.js';
 import { RPCRouter } from '../rpc/router.js';
 import type { TerminalSummary } from '../services/TerminalService.js';
 import { pinSettingLabel, pinSetupText, saveConnectionPin } from './pin-settings.js';
 import { QrStyle, renderQr, terminalQrStyle } from '../utils/qr.js';
+import { isClassicWindowsConsole, wideInConsole } from '../utils/windows-console.js';
 
 type View = 'main' | 'logs' | 'qr' | 'terminals' | 'pinSetup' | 'relays';
 
@@ -55,8 +59,9 @@ const QR_MIN_SIDE_WIDTH = 24;
 const RELAY_PING_REFRESH_MS = 10_000;
 
 // Alternate screen, hidden cursor, and no auto-wrap: a line that a terminal
-// measures wider than we do (emoji widths vary) is clipped instead of pushing
-// the whole frame down a row.
+// measures wider than we do (emoji widths vary) is clipped instead of wrapping.
+// The Windows 10 console ignores no-auto-wrap, so rows are also drawn at
+// absolute positions: a wrapped line can't push the rest of the frame down.
 const ENTER_ALT_SCREEN = '\x1b[?1049h\x1b[?25l\x1b[?7l';
 const LEAVE_ALT_SCREEN = '\x1b[?7h\x1b[?25h\x1b[?1049l';
 const CLEAR_SCREEN = '\x1b[2J';
@@ -111,6 +116,11 @@ export class Dashboard {
     if (this.active) return;
     this.active = true;
     const { stdin, stdout } = process;
+
+    // With a CJK code page the classic Windows console draws some symbols two
+    // columns wide. (Asking it with cursor position reports doesn't work: on
+    // Windows 10 they disagree with how it draws the characters.)
+    if (isClassicWindowsConsole()) setWideChars(wideInConsole(AMBIGUOUS_WIDTH_CHARS));
 
     this.options.logs.setPassthrough(false);
     stdout.write(ENTER_ALT_SCREEN);
@@ -453,12 +463,17 @@ export class Dashboard {
     const body = lines.slice(0, height - 1).map((line) => truncate(line, width));
     while (body.length < height - 1) body.push('');
     body.push(this.renderFooter(width));
-    const frame = body.map((line) => line + '\x1b[K').join('\r\n');
+    // Each row at its own position (see ENTER_ALT_SCREEN). Clearing the rest of
+    // a row that already fills the width would erase its last character in
+    // terminals that keep the cursor on it, like the Windows console.
+    const frame = body
+      .map((line, row) => `\x1b[${row + 1};1H${line}${visibleWidth(line) < width ? '\x1b[K' : ''}`)
+      .join('');
     // The tick re-renders every second; don't redraw an unchanged screen (this
     // matters over SSH, and when the uptime only changes once a minute).
     if (frame === this.lastFrame) return;
     this.lastFrame = frame;
-    process.stdout.write('\x1b[H' + frame);
+    process.stdout.write(frame);
   }
 
   /** Redraw from a blank screen, after a resize or when the user asks (Ctrl+L). */
@@ -941,9 +956,12 @@ export class Dashboard {
       wrap(text, Math.max(20, width - 2)).map((line) => '  ' + style(line));
     const fits = (code: { lines: string[]; width: number }) => code.lines.length + 1 <= available && code.width + 2 <= width;
 
-    // Cells are twice the size of half blocks: fall back when they don't fit
-    let code = this.qrCode(url, this.qrStyle);
-    if (!fits(code) && this.qrStyle !== 'halfBlocks') code = this.qrCode(url, 'halfBlocks');
+    // Half blocks need block characters one column wide (CJK fonts draw them
+    // wider). Cells are twice their size: fall back to half blocks if they fit.
+    const halfBlocksDrawable = visibleWidth('█▀▄') === 3;
+    const style: QrStyle = halfBlocksDrawable ? this.qrStyle : 'cells';
+    let code = this.qrCode(url, style);
+    if (!fits(code) && style === 'cells' && halfBlocksDrawable) code = this.qrCode(url, 'halfBlocks');
     const { lines: qr, width: qrWidth } = code;
 
     // A clipped code can't be scanned, so never draw one that doesn't fit

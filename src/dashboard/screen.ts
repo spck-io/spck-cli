@@ -52,8 +52,25 @@ export function sanitizeLine(text: string): string {
     .replace(/\x1b(?!\[[0-9;]*m)/g, ''); // an ESC left over from a malformed sequence
 }
 
+/**
+ * Characters the dashboard draws whose width depends on the terminal: Unicode
+ * calls them ambiguous. Terminals draw them one column wide, except with a CJK
+ * font, which can draw them two wide: the classic Windows console uses one on
+ * Chinese, Japanese and Korean systems.
+ */
+export const AMBIGUOUS_WIDTH_CHARS = '·●○★↑↓←→—–…‘’“”█▀▄';
+
+const wideChars = new Set<number>();
+
+/** Count these characters two columns wide, as this terminal draws them. None resets. */
+export function setWideChars(chars: Iterable<string>): void {
+  wideChars.clear();
+  for (const ch of chars) wideChars.add(ch.codePointAt(0)!);
+}
+
 /** Terminal column width of a code point (wide East Asian / emoji = 2). */
 function charWidth(cp: number): number {
+  if (wideChars.has(cp)) return 2;
   if (cp < 0x20 || (cp >= 0x7f && cp < 0xa0)) return 0;
   if (cp >= 0x300 && cp <= 0x36f) return 0; // combining marks
   if (cp === 0x200d || (cp >= 0xfe00 && cp <= 0xfe0f)) return 0; // ZWJ, variation selectors

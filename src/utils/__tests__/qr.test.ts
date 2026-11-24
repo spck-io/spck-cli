@@ -2,6 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import qrcode from 'qrcode-terminal';
 import { printQr, renderQr, terminalQrStyle } from '../qr.js';
 
+// Whether the console draws block characters wide depends on the console
+// running the tests: pin it
+const blocks = vi.hoisted(() => ({ wide: [] as string[] }));
+vi.mock('../windows-console.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../windows-console.js')>()),
+  wideInConsole: () => blocks.wide,
+}));
+
 const URL_TEXT = 'spck://connect?clientId=abcdefghijkl&secret=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQR&rs=cli-na-1.spck.io';
 
 /** Light (true) / dark (false) modules of a half-block drawing, margin included. */
@@ -87,6 +95,7 @@ describe('printQr()', () => {
   }
 
   afterEach(() => {
+    blocks.wide = [];
     Object.defineProperty(process, 'platform', { value: original.platform });
     Object.assign(process.stdout, { isTTY: original.isTTY, columns: original.columns, rows: original.rows });
     vi.unstubAllEnvs();
@@ -106,5 +115,14 @@ describe('printQr()', () => {
     printQr(URL_TEXT);
     expect(log).toHaveBeenCalledOnce();
     expect(String(log.mock.calls[0][0]).trimEnd()).toBe(renderQr(URL_TEXT, 'halfBlocks').join('\n'));
+  });
+
+  it('prints cells anyway when the console draws block characters wide', () => {
+    classicWindowsConsole(120, 30);
+    blocks.wide = ['█', '▄'];
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    printQr(URL_TEXT);
+    // Taller than the window, but scrollable; half blocks couldn't be scanned
+    expect(log).toHaveBeenCalledExactlyOnceWith(renderQr(URL_TEXT, 'cells').join('\n'));
   });
 });

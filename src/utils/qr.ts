@@ -12,6 +12,7 @@
 
 import { createRequire } from 'module';
 import qrcode from 'qrcode-terminal';
+import { isClassicWindowsConsole, wideInConsole } from './windows-console.js';
 
 export type QrStyle = 'halfBlocks' | 'cells';
 
@@ -31,16 +32,11 @@ const DARK = '\x1b[40m'; // black background
 const RESET = '\x1b[0m';
 
 /**
- * 'cells' in the classic Windows console. Other Windows terminals identify
- * themselves: Windows Terminal sets WT_SESSION, VS Code and others set
- * TERM_PROGRAM, ConEmu sets ConEmuPID, JetBrains IDEs set TERMINAL_EMULATOR,
- * and mintty/MSYS set TERM. Cells also draw correctly in any of them, so a
- * terminal missed here only gets a larger code.
+ * 'cells' in the classic Windows console. Cells draw correctly in any
+ * terminal, so one taken for the classic console only gets a larger code.
  */
 export function terminalQrStyle(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): QrStyle {
-  if (platform !== 'win32') return 'halfBlocks';
-  const knownTerminal = env.WT_SESSION || env.TERM_PROGRAM || env.ConEmuPID || env.TERMINAL_EMULATOR || env.TERM;
-  return knownTerminal ? 'halfBlocks' : 'cells';
+  return isClassicWindowsConsole(platform, env) ? 'cells' : 'halfBlocks';
 }
 
 /** The code as terminal lines, with a one-module light margin. */
@@ -75,8 +71,10 @@ export function printQr(text: string): void {
   const { stdout } = process;
   if (stdout.isTTY && terminalQrStyle() === 'cells') {
     const lines = renderQr(text, 'cells');
-    // Cells are twice the size: use them only if the whole code is on screen at once
-    if (lines.length < (stdout.rows || 0) && lines.length * 2 <= (stdout.columns || 0)) {
+    // Cells are twice the size: use half blocks if cells don't fit on screen,
+    // unless the console's font draws block characters wide and distorts them
+    const fits = lines.length < (stdout.rows || 0) && lines.length * 2 <= (stdout.columns || 0);
+    if (fits || wideInConsole('█▀▄').length > 0) {
       console.log(lines.join('\n'));
       return;
     }

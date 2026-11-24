@@ -1,18 +1,25 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { Dashboard } from '../Dashboard.js';
 import { LogBuffer } from '../LogBuffer.js';
-import { stripAnsi, visibleWidth } from '../screen.js';
+import { setWideChars, stripAnsi, visibleWidth } from '../screen.js';
 import { RPCRouter } from '../../rpc/router.js';
 import * as pinSettings from '../pin-settings.js';
 import { createRequire } from 'module';
 
-// The style depends on the terminal running the tests (it's 'cells' in the
-// classic Windows console): pin it.
+// The QR style and character widths depend on the terminal running the tests
+// (the classic Windows console differs): pin them.
 const qr = vi.hoisted(() => ({ style: 'halfBlocks' as 'halfBlocks' | 'cells' }));
 vi.mock('../../utils/qr.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../utils/qr.js')>()),
   terminalQrStyle: () => qr.style,
 }));
+const winConsole = vi.hoisted(() => ({ classic: false, wide: [] as string[] }));
+vi.mock('../../utils/windows-console.js', () => ({
+  isClassicWindowsConsole: () => winConsole.classic,
+  wideInConsole: (chars: string) => [...chars].filter((ch) => winConsole.wide.includes(ch)),
+}));
+// What the classic console draws wide with a Chinese code page (936)
+const WIDE_IN_GBK = [...'·●○★↑↓←→—–…‘’“”█▄'];
 
 const pkg = createRequire(import.meta.url)('../../../package.json') as { version: string };
 const SECRET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQR';
@@ -48,8 +55,10 @@ describe('Dashboard', () => {
   let relays: { list: Mock; ping: Mock; switchTo: Mock };
   const original = { columns: process.stdout.columns, rows: process.stdout.rows, setRawMode: process.stdin.setRawMode };
 
+  /** Rows of the most recent frame, as written (each is drawn at its own position). */
+  const rawRows = () => frames[frames.length - 1].split(/\x1b\[\d+;1H/).slice(1);
   /** Plain text of the most recent frame, one string per row. */
-  const screen = () => stripAnsi(frames[frames.length - 1]).split('\r\n').map((line) => line.replace(/\x1b\[K/g, ''));
+  const screen = () => rawRows().map((row) => stripAnsi(row));
   const text = () => screen().join('\n');
   const settle = () => new Promise((resolve) => setImmediate(resolve));
   const press = async (name: string, modifiers: Record<string, boolean> = {}) => {
@@ -85,6 +94,8 @@ describe('Dashboard', () => {
 
   beforeEach(() => {
     qr.style = 'halfBlocks';
+    winConsole.classic = false;
+    winConsole.wide = [];
     frames = [];
     clients = [fakeClient('device-1')];
     tools = { git: true, ripgrep: true, claude: true, codex: true, gemini: false };
@@ -104,7 +115,7 @@ describe('Dashboard', () => {
     (process.stdin as any).setRawMode = vi.fn();
     vi.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => {
       const data = String(chunk);
-      if (data.startsWith('\x1b[H')) frames.push(data.slice(3));
+      if (data.startsWith('\x1b[1;1H')) frames.push(data);
       return true;
     });
     vi.spyOn(RPCRouter, 'getTerminalSummaries').mockReturnValue([]);
@@ -112,6 +123,7 @@ describe('Dashboard', () => {
 
   afterEach(() => {
     dashboard.stop();
+    setWideChars([]);
     logs.uninstall();
     vi.restoreAllMocks();
     process.stdout.columns = original.columns;
@@ -209,6 +221,49 @@ describe('Dashboard', () => {
       expect(leave).toBeGreaterThanOrEqual(0);
       expect(rawOff).toBeGreaterThanOrEqual(0);
       expect(write.mock.invocationCallOrder[leave]).toBeLessThan(setRawMode.mock.invocationCallOrder[rawOff]);
+    });
+
+    it('draws each row at its own position, so a line that wraps cannot push the frame down', () => {
+      start(80, 24);
+      const positions = frames[frames.length - 1].match(/\x1b\[(\d+);1H/g)!;
+      expect(positions).toEqual(Array.from({ length: 24 }, (_, i) => `\x1b[${i + 1};1H`));
+      expect(frames[frames.length - 1]).not.toContain('\n');
+    });
+
+    it('does not clear past a row that fills the width, which would erase its last character', () => {
+      start(80, 24);
+      const rows = rawRows();
+      // The header and the footer are padded to the full width
+      expect(visibleWidth(rows[0])).toBe(80);
+      expect(rows[0]).not.toContain('\x1b[K');
+      expect(rows[23]).not.toContain('\x1b[K');
+      // Shorter rows clear what an earlier frame left after them
+      expect(visibleWidth(rows[1])).toBeLessThan(80);
+      expect(rows[1].endsWith('\x1b[K')).toBe(true);
+    });
+  });
+
+  describe('in a classic Windows console with a CJK code page', () => {
+    const header = () => screen()[0];
+
+    beforeEach(() => {
+      winConsole.classic = true;
+      winConsole.wide = WIDE_IN_GBK;
+    });
+
+    it('counts the symbols the console draws two columns wide', () => {
+      start(80, 24);
+      expect(visibleWidth('·●')).toBe(4);
+      // The header's "·" takes two columns, and the row still ends with the uptime
+      expect(visibleWidth(header())).toBe(80);
+      expect(header()).toMatch(/project .*\d+s$/);
+      for (const row of screen()) expect(visibleWidth(row)).toBeLessThanOrEqual(80);
+    });
+
+    it('leaves the usual widths in any other terminal', () => {
+      winConsole.classic = false;
+      start(80, 24);
+      expect(visibleWidth('·●')).toBe(2);
     });
   });
 
@@ -332,7 +387,7 @@ describe('Dashboard', () => {
     });
 
     describe('in the classic Windows console', () => {
-      const cellRows = () => frames[frames.length - 1].split('\r\n').filter((row) => row.includes('\x1b[107m'));
+      const cellRows = () => rawRows().filter((row) => row.includes('\x1b[107m'));
 
       beforeEach(() => {
         qr.style = 'cells';
@@ -351,6 +406,16 @@ describe('Dashboard', () => {
         start(80, 24);
         expect(cellRows()).toHaveLength(0);
         expect(qrRows().length).toBeGreaterThan(15);
+      });
+
+      it('shows the details instead of half blocks when the font draws block characters wide', () => {
+        winConsole.classic = true;
+        winConsole.wide = WIDE_IN_GBK;
+        start(80, 24);
+        expect(qrRows()).toHaveLength(0);
+        expect(cellRows()).toHaveLength(0);
+        expect(text()).toContain('too small');
+        expect(text()).toContain(SECRET);
       });
     });
   });
