@@ -122,7 +122,9 @@ describe('GitService', () => {
 
     function credentialFill(env: Record<string, string>): Promise<string> {
       return new Promise((resolve, reject) => {
-        const git = spawn('git', ['-c', 'credential.helper=', 'credential', 'fill'], { cwd: repoPath, env: { ...process.env, ...env } });
+        // Newer versions of Git percent-encode the user name in the prompt; older ones pass it as is
+        const args = ['-c', 'credential.helper=', '-c', 'credential.sanitizePrompt=false', 'credential', 'fill'];
+        const git = spawn('git', args, { cwd: repoPath, env: { ...process.env, ...env } });
         let stdout = '';
         let stderr = '';
         git.stdout.on('data', (data) => (stdout += data));
