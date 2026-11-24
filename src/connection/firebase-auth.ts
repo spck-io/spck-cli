@@ -12,10 +12,10 @@ import * as http from 'http';
 import * as crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import open from 'open';
-import qrcode from 'qrcode-terminal';
 import { FirebaseCredentials, StoredCredentials } from '../types.js';
 import { saveCredentials } from '../config/credentials.js';
 import { logAuth } from '../utils/logger.js';
+import { printQr } from '../utils/qr.js';
 import { t } from '../i18n/index.js';
 import { fetchServerList, selectBestServer, isValidDomain } from '../config/server-selection.js';
 import { createAuthKeyPair } from './auth-seal.js';
@@ -202,7 +202,7 @@ export async function authenticateWithFirebase(onInteractiveAuth?: () => void): 
   console.log(t('auth.manualAuthHint') + '\n');
 
   // Display QR code
-  qrcode.generate(manualUrl, { small: true });
+  printQr(manualUrl);
 
   console.log('\n' + t('auth.visitUrl', { url: manualUrl }) + '\n');
   console.log(t('auth.waiting') + '\n');

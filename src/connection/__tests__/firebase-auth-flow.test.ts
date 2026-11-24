@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('http', () => ({ createServer: vi.fn() }));
 vi.mock('open', () => ({ default: vi.fn() }));
-vi.mock('qrcode-terminal', () => ({ default: { generate: vi.fn() } }));
+vi.mock('../../utils/qr.js', () => ({ printQr: vi.fn() }));
 vi.mock('jsonwebtoken', () => ({ default: { decode: vi.fn() } }));
 vi.mock('../../config/credentials.js', () => ({ saveCredentials: vi.fn() }));
 vi.mock('../../utils/logger.js', () => ({ logAuth: vi.fn() }));
@@ -16,7 +16,7 @@ vi.mock('../../config/server-selection.js', () => ({
 
 import * as http from 'http';
 import open from 'open';
-import qrcode from 'qrcode-terminal';
+import { printQr } from '../../utils/qr.js';
 import jwt from 'jsonwebtoken';
 import { saveCredentials } from '../../config/credentials.js';
 import { abortCurrentAuth, authenticateWithFirebase, getValidFirebaseToken } from '../firebase-auth.js';
@@ -101,7 +101,7 @@ describe('authenticateWithFirebase()', () => {
     expect(params.get('redirect')).toBe('http://localhost:45678/callback');
     expect(params.get('pk')).toMatch(/^[A-Za-z0-9_-]{87}$/);
 
-    const manualUrl = new URL(vi.mocked(qrcode.generate).mock.calls[0][0]);
+    const manualUrl = new URL(vi.mocked(printQr).mock.calls[0][0]);
     expect(manualUrl.search).toBe('');
     const manualParams = linkParams(manualUrl);
     expect(manualParams.get('code')).toBe(code);
@@ -170,6 +170,6 @@ describe('authenticateWithFirebase()', () => {
     const { result } = await startAuth();
     completeViaRelay();
     await expect(result).resolves.toMatchObject({ firebaseToken: 'id-token' });
-    expect(qrcode.generate).toHaveBeenCalledOnce();
+    expect(printQr).toHaveBeenCalledOnce();
   });
 });

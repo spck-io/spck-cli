@@ -7,7 +7,7 @@ import { StoredCredentials } from '../../types.js';
 
 // Mock all external dependencies before importing the module
 vi.mock('open', () => ({ default: vi.fn() }));
-vi.mock('qrcode-terminal', () => ({ default: { generate: vi.fn() } }));
+vi.mock('../../utils/qr.js', () => ({ printQr: vi.fn() }));
 vi.mock('jsonwebtoken', () => ({ default: { decode: vi.fn() } }));
 vi.mock('../../config/credentials.js', () => ({
   saveCredentials: vi.fn(),

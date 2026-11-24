@@ -10,7 +10,6 @@
 import * as readline from 'readline';
 import { createRequire } from 'module';
 import chalk from 'chalk';
-import qrcode from 'qrcode-terminal';
 import { ProxyClient, ProxyStatus, ClientStatus } from '../proxy/ProxyClient.js';
 import { ServerConfig, ToolDetectionResult } from '../types.js';
 import { CLIServer, formatServerName, getServerLabel, isSameServer, serverLabel } from '../config/server-selection.js';
@@ -22,6 +21,7 @@ import { ESCAPE_TIMEOUT_MS, fit, formatBytes, formatDuration, skipColumns, strip
 import { RPCRouter } from '../rpc/router.js';
 import type { TerminalSummary } from '../services/TerminalService.js';
 import { pinSettingLabel, pinSetupText, saveConnectionPin } from './pin-settings.js';
+import { QrStyle, renderQr, terminalQrStyle } from '../utils/qr.js';
 
 type View = 'main' | 'logs' | 'qr' | 'terminals' | 'pinSetup' | 'relays';
 
@@ -79,7 +79,8 @@ export class Dashboard {
   private lastFrame: string | null = null;
   private quitArmedAt = 0;
   private flash: { text: string; at: number } | null = null;
-  private qrCache: { url: string; lines: string[]; width: number } | null = null;
+  private readonly qrStyle = terminalQrStyle();
+  private qrCache: { url: string; codes: Map<QrStyle, { lines: string[]; width: number }> } | null = null;
   // New projects show the pairing QR until an editor finishes connecting.
   private autoQr = false;
   // Terminals view: selected terminal and a pending kill awaiting a second [x]
@@ -157,9 +158,13 @@ export class Dashboard {
     this.unsubscribers = [];
 
     const { stdin, stdout } = process;
-    try { stdin.setRawMode(false); } catch { /* stdin already closed */ }
-    stdin.pause();
+    // Leave the alternate screen first. Turning raw mode off while stdin is
+    // reading starts a line-mode console read, and on Windows 10 the console
+    // host crashes if that read began on the alternate screen, closing the
+    // shell that ran the CLI.
     stdout.write(LEAVE_ALT_SCREEN);
+    stdin.pause();
+    try { stdin.setRawMode(false); } catch { /* stdin already closed */ }
     this.options.logs.setPassthrough(true);
 
     if (options.printTail) {
@@ -928,22 +933,21 @@ export class Dashboard {
     if (!url || !settings) {
       return [header, '', '  ' + chalk.gray(t('dashboard.qrUnavailable'))];
     }
-    if (this.qrCache?.url !== url) {
-      let qr = '';
-      qrcode.generate(url, { small: true }, (output: string) => { qr = output; });
-      const lines = qr.split('\n').filter((line) => line.length > 0);
-      this.qrCache = { url, lines, width: Math.max(...lines.map((line) => visibleWidth(line))) };
-    }
-    const { lines: qr, width: qrWidth } = this.qrCache;
     const details = [t('connection.clientId', { id: settings.clientId }), t('connection.secret', { secret: settings.secret })];
     if (this.options.config.name) details.push(t('connection.name', { name: this.options.config.name }));
 
     const available = height - 1; // the footer takes the last row
     const indented = (text: string, style: (line: string) => string = (line) => line) =>
       wrap(text, Math.max(20, width - 2)).map((line) => '  ' + style(line));
+    const fits = (code: { lines: string[]; width: number }) => code.lines.length + 1 <= available && code.width + 2 <= width;
+
+    // Cells are twice the size of half blocks: fall back when they don't fit
+    let code = this.qrCode(url, this.qrStyle);
+    if (!fits(code) && this.qrStyle !== 'halfBlocks') code = this.qrCode(url, 'halfBlocks');
+    const { lines: qr, width: qrWidth } = code;
 
     // A clipped code can't be scanned, so never draw one that doesn't fit
-    if (qr.length + 1 > available || qrWidth + 2 > width) {
+    if (!fits(code)) {
       const message = t('dashboard.qrTooSmall', { cols: qrWidth + 2, rows: qr.length + 2 });
       return [header, '', ...indented(message, chalk.yellow), '', ...details.flatMap((line) => indented(line))];
     }
@@ -966,6 +970,17 @@ export class Dashboard {
     const below = details.flatMap((line) => indented(line));
     const showTitle = 1 + title.length + qr.length + below.length <= available;
     return [header, ...(showTitle ? title : []), ...qr.map((line) => '  ' + line), ...below];
+  }
+
+  private qrCode(url: string, style: QrStyle): { lines: string[]; width: number } {
+    if (this.qrCache?.url !== url) this.qrCache = { url, codes: new Map() };
+    let code = this.qrCache.codes.get(style);
+    if (!code) {
+      const lines = renderQr(url, style);
+      code = { lines, width: Math.max(...lines.map((line) => visibleWidth(line))) };
+      this.qrCache.codes.set(style, code);
+    }
+    return code;
   }
 
   // ------------------------------------------------------------ log view

@@ -6,6 +6,14 @@ import { RPCRouter } from '../../rpc/router.js';
 import * as pinSettings from '../pin-settings.js';
 import { createRequire } from 'module';
 
+// The style depends on the terminal running the tests (it's 'cells' in the
+// classic Windows console): pin it.
+const qr = vi.hoisted(() => ({ style: 'halfBlocks' as 'halfBlocks' | 'cells' }));
+vi.mock('../../utils/qr.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../utils/qr.js')>()),
+  terminalQrStyle: () => qr.style,
+}));
+
 const pkg = createRequire(import.meta.url)('../../../package.json') as { version: string };
 const SECRET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQR';
 
@@ -76,6 +84,7 @@ describe('Dashboard', () => {
   }
 
   beforeEach(() => {
+    qr.style = 'halfBlocks';
     frames = [];
     clients = [fakeClient('device-1')];
     tools = { git: true, ripgrep: true, claude: true, codex: true, gemini: false };
@@ -186,6 +195,20 @@ describe('Dashboard', () => {
       start(60, 20);
       expect(screen()).toHaveLength(20);
       for (const row of screen()) expect(visibleWidth(row)).toBeLessThanOrEqual(60);
+    });
+
+    it('leaves the alternate screen before stdin leaves raw mode', () => {
+      // On Windows 10 the console host crashes, closing the shell, if turning
+      // raw mode off starts a line-mode read while the alternate screen is up
+      start(80, 24);
+      dashboard.stop();
+      const write = vi.mocked(process.stdout.write);
+      const leave = write.mock.calls.findIndex(([chunk]) => String(chunk).includes('\x1b[?1049l'));
+      const setRawMode = process.stdin.setRawMode as unknown as Mock;
+      const rawOff = setRawMode.mock.calls.findIndex(([flag]) => flag === false);
+      expect(leave).toBeGreaterThanOrEqual(0);
+      expect(rawOff).toBeGreaterThanOrEqual(0);
+      expect(write.mock.invocationCallOrder[leave]).toBeLessThan(setRawMode.mock.invocationCallOrder[rawOff]);
     });
   });
 
@@ -306,6 +329,29 @@ describe('Dashboard', () => {
       expect(qrRows().length).toBeGreaterThan(15);
       expect(text()).toContain('Client ID: abcdefghijkl');
       expect(text().replace(/\s/g, '')).toContain(SECRET);
+    });
+
+    describe('in the classic Windows console', () => {
+      const cellRows = () => frames[frames.length - 1].split('\r\n').filter((row) => row.includes('\x1b[107m'));
+
+      beforeEach(() => {
+        qr.style = 'cells';
+        clients = [];
+      });
+
+      it('draws the code with background colors beside the details', () => {
+        start(120, 50);
+        expect(qrRows()).toHaveLength(0);
+        expect(cellRows().length).toBeGreaterThan(30);
+        expect(text()).toContain('Client ID: abcdefghijkl');
+        for (const row of screen()) expect(visibleWidth(row)).toBeLessThanOrEqual(120);
+      });
+
+      it('falls back to half blocks when the larger code does not fit', () => {
+        start(80, 24);
+        expect(cellRows()).toHaveLength(0);
+        expect(qrRows().length).toBeGreaterThan(15);
+      });
     });
   });
 
