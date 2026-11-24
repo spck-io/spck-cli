@@ -11,7 +11,9 @@ import {
   hostPathKey,
   isMainModule,
   isPathInside,
+  linksStayInside,
   resolveClientPath,
+  resolveLinks,
   toClientPath,
   toRelativeClientPath,
   toRelativePosixPath,
@@ -161,6 +163,60 @@ describe('paths', () => {
       fs.writeFileSync(other, '');
       expect(isMainModule(pathToFileURL(script).href, other)).toBe(false);
       expect(isMainModule(pathToFileURL(script).href, undefined)).toBe(false);
+    });
+  });
+
+  // Junctions need no privileges on Windows (a plain directory symlink elsewhere)
+  describe('resolveLinks', () => {
+    let dir: string;
+    let project: string;
+    let outside: string;
+
+    beforeEach(() => {
+      dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'spck-links-')));
+      project = path.join(dir, 'project');
+      outside = path.join(dir, 'outside');
+      fs.mkdirSync(project);
+      fs.mkdirSync(outside);
+      fs.writeFileSync(path.join(outside, 'secret.txt'), '');
+      fs.symlinkSync(outside, path.join(project, 'link'), 'junction');
+    });
+
+    afterEach(() => {
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('follows the links to an existing path', async () => {
+      expect(await resolveLinks(path.join(project, 'link', 'secret.txt'))).toBe(path.join(outside, 'secret.txt'));
+      expect(await resolveLinks(project)).toBe(project);
+    });
+
+    it('follows the links in the folders of a path that does not exist yet', async () => {
+      expect(await resolveLinks(path.join(project, 'link', 'a', 'b.txt'))).toBe(path.join(outside, 'a', 'b.txt'));
+      expect(await resolveLinks(path.join(project, 'new', 'b.txt'))).toBe(path.join(project, 'new', 'b.txt'));
+    });
+
+    it('follows a dangling link to where it points', async () => {
+      const gone = path.join(dir, 'gone');
+      fs.mkdirSync(gone);
+      fs.symlinkSync(gone, path.join(project, 'dangling'), 'junction');
+      fs.rmdirSync(gone);
+      expect(await resolveLinks(path.join(project, 'dangling'))).toBe(gone);
+      expect(await resolveLinks(path.join(project, 'dangling', 'sub', 'c.txt'))).toBe(path.join(gone, 'sub', 'c.txt'));
+    });
+
+    it('gives up on links in a loop', async () => {
+      const a = path.join(project, 'a');
+      const b = path.join(project, 'b');
+      fs.symlinkSync(b, a, 'junction');
+      fs.symlinkSync(a, b, 'junction');
+      expect(await resolveLinks(path.join(a, 'x.txt'))).toBeNull();
+      expect(await linksStayInside(project, path.join(a, 'x.txt'))).toBe(false);
+    });
+
+    it('tells whether the links keep a path inside a folder', async () => {
+      expect(await linksStayInside(project, path.join(project, 'new.txt'))).toBe(true);
+      expect(await linksStayInside(project, path.join(project, 'link', 'new.txt'))).toBe(false);
     });
   });
 });

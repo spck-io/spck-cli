@@ -233,6 +233,116 @@ describe('FilesystemService', () => {
     });
   });
 
+  // Junctions on Windows, which need no admin rights (plain symlinks elsewhere)
+  describe('Links leading outside the root', () => {
+    let outside: string;
+
+    beforeEach(async () => {
+      outside = `${testRoot}-outside`;
+      await fs.mkdir(outside);
+      await fs.writeFile(path.join(outside, 'secret.txt'), 'secret');
+      await fs.symlink(outside, path.join(testRoot, 'link'), 'junction');
+      await fs.writeFile(path.join(testRoot, 'inside.txt'), 'inside');
+    });
+
+    afterEach(async () => {
+      await fs.rm(outside, { recursive: true, force: true });
+    });
+
+    it('refuses to create files and folders or move and copy through the link', async () => {
+      const calls: Array<[string, any]> = [
+        ['write', { path: '/link/new.txt', contents: 'x' }],
+        ['mkdir', { path: '/link/a' }],
+        ['mkdirp', { path: '/link/a/b' }],
+        ['mv', { src: '/inside.txt', target: '/link/moved.txt' }],
+        ['copy', { oldpath: '/inside.txt', path: '/link/copied.txt' }],
+      ];
+      for (const [method, params] of calls) {
+        await expect(service.handle(method, params, mockSocket)).rejects.toMatchObject({
+          code: ErrorCode.INVALID_PATH,
+          message: expect.stringContaining('followLinksOutsideRoot'),
+        });
+      }
+      expect(await fs.readdir(outside)).toEqual(['secret.txt']);
+      expect(await fs.readFile(path.join(testRoot, 'inside.txt'), 'utf8')).toBe('inside');
+    });
+
+    it('refuses to create anything through a dangling link to a folder outside', async () => {
+      const gone = `${testRoot}-gone`;
+      await fs.mkdir(gone);
+      await fs.symlink(gone, path.join(testRoot, 'dangling'), 'junction');
+      await fs.rmdir(gone);
+
+      await expect(
+        service.handle('mkdirp', { path: '/dangling/sub' }, mockSocket)
+      ).rejects.toMatchObject({ code: ErrorCode.INVALID_PATH });
+      await expect(fs.stat(gone)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
+    it('lists the link but not what is in it, and finds nothing through it', async () => {
+      const listed = await service.handle('readdirDeep', { path: '/' }, mockSocket);
+      expect(listed.sort()).toEqual(['inside.txt', 'link']);
+
+      const found = await service.handle('bulkExists', { path: '/', paths: ['link/secret.txt', 'inside.txt'] }, mockSocket);
+      expect(found).toEqual([0, 1]);
+    });
+
+    it('refuses to copy a folder holding the link', async () => {
+      await fs.mkdir(path.join(testRoot, 'folder'));
+      await fs.symlink(outside, path.join(testRoot, 'folder', 'link'), 'junction');
+
+      await expect(
+        service.handle('copy', { oldpath: '/folder', path: '/folder-copy' }, mockSocket)
+      ).rejects.toMatchObject({ code: ErrorCode.INVALID_PATH });
+    });
+
+    it('still follows links that stay inside the root', async () => {
+      await fs.mkdir(path.join(testRoot, 'sub'));
+      await fs.symlink(path.join(testRoot, 'sub'), path.join(testRoot, 'inner'), 'junction');
+
+      await service.handle('write', { path: '/inner/new.txt', contents: 'x' }, mockSocket);
+      await service.handle('mkdirp', { path: '/inner/a/b' }, mockSocket);
+
+      expect((await fs.readdir(path.join(testRoot, 'sub'))).sort()).toEqual(['a', 'new.txt']);
+    });
+
+    describe('with filesystem.followLinksOutsideRoot', () => {
+      beforeEach(() => {
+        service = new FilesystemService(testRoot, {
+          maxFileSize: '10MB',
+          watchIgnorePatterns: [],
+          followLinksOutsideRoot: true,
+        });
+      });
+
+      it('reads, writes and moves through the link', async () => {
+        const read = await service.handle('readFile', { path: '/link/secret.txt' }, mockSocket);
+        expect(read.contents).toBe('secret');
+
+        await service.handle('write', { path: '/link/new.txt', contents: 'x' }, mockSocket);
+        await service.handle('mkdirp', { path: '/link/a/b' }, mockSocket);
+        await service.handle('mv', { src: '/inside.txt', target: '/link/moved.txt' }, mockSocket);
+
+        expect((await fs.readdir(outside)).sort()).toEqual(['a', 'moved.txt', 'new.txt', 'secret.txt']);
+      });
+
+      it('lists what is in the link under its path in the project', async () => {
+        const listed = await service.handle('readdirDeep', { path: '/link' }, mockSocket);
+        expect(listed).toEqual(['link/secret.txt']);
+
+        const found = await service.handle('bulkExists', { path: '/', paths: ['link/secret.txt'] }, mockSocket);
+        expect(found).toEqual([1]);
+      });
+
+      it('removes the link itself, not what it points to', async () => {
+        await service.handle('remove', { path: '/link' }, mockSocket);
+
+        await expect(fs.lstat(path.join(testRoot, 'link'))).rejects.toMatchObject({ code: 'ENOENT' });
+        expect(await fs.readdir(outside)).toEqual(['secret.txt']);
+      });
+    });
+  });
+
   describe('File Operations - writeFile', () => {
     it('should write text file', async () => {
       const content = 'test content';

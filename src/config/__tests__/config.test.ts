@@ -92,6 +92,19 @@ describe('config', () => {
       expect(() => loadConfig()).toThrow('Configuration file is corrupted');
     });
 
+    it('leaves links outside the root off unless the config file turns them on', () => {
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockReturnValue(JSON.stringify(validConfig));
+      expect(loadConfig().filesystem.followLinksOutsideRoot).toBeUndefined();
+      expect(createDefaultConfig().filesystem.followLinksOutsideRoot).toBeUndefined();
+
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ ...validConfig, filesystem: { ...validConfig.filesystem, followLinksOutsideRoot: true } }));
+      expect(loadConfig().filesystem.followLinksOutsideRoot).toBe(true);
+
+      mockFs.readFileSync.mockReturnValue(JSON.stringify({ ...validConfig, filesystem: { ...validConfig.filesystem, followLinksOutsideRoot: 'true' } }));
+      expect(() => loadConfig()).toThrow('Configuration file is corrupted');
+    });
+
     it('refuses PIN protection without a valid verifier instead of silently allowing connections', () => {
       mockFs.existsSync.mockReturnValue(true);
       mockFs.readFileSync.mockReturnValue(JSON.stringify({ ...validConfig, security: { ...validConfig.security, requirePin: true } }));

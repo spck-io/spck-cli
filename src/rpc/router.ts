@@ -48,7 +48,9 @@ export class RPCRouter {
     // client's transport-switcher falls back to the cloud (SSE) path.
     this.acpEnabled = config.acp?.enabled ?? true;
     this.filesystemService = new FilesystemService(rootPath, config.filesystem);
-    this.gitService = new GitService(rootPath);
+    this.gitService = new GitService(rootPath, {
+      followLinksOutsideRoot: config.filesystem?.followLinksOutsideRoot === true,
+    });
     this.browserProxyService = new BrowserProxyService();
     this.languageServerService = new LanguageServerService(rootPath, {
       enabled: this.languageServerEnabled,

@@ -8,9 +8,9 @@ import * as http from 'http';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as crypto from 'crypto';
-import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types.js';
+import { AuthenticatedSocket, ErrorCode, createRPCError, linkOutsideRootError } from '../types.js';
 import { logGitRead, logGitWrite } from '../utils/logger.js';
-import { isPathInside, toRelativeClientPath } from '../utils/paths.js';
+import { isPathInside, linksStayInside, toRelativeClientPath } from '../utils/paths.js';
 
 interface ExecGitOptions {
   cwd?: string;
@@ -62,8 +62,13 @@ export class GitService {
   private gitRepoCache: Map<string, { isRepo: boolean; timestamp: number }> = new Map();
   private static GIT_REPO_CACHE_TTL = 30000; // 30 seconds
   private _hasCurl: boolean | null = null;
+  private realRootPath: string | null = null;
 
-  constructor(private rootPath: string) {}
+  constructor(
+    private rootPath: string,
+    // filesystem.followLinksOutsideRoot: git may run in a linked folder outside the project
+    private options: { followLinksOutsideRoot?: boolean } = {}
+  ) {}
 
   /**
    * Check if curl is available on the system (cached)
@@ -139,6 +144,8 @@ export class GitService {
     const dir = this.validateGitDir(params.dir);
     // Resolve effective cwd for submodule support
     const gitCwd = this.resolveGitCwd(dir, params.gitRoot);
+    await this.checkLinks(dir);
+    if (gitCwd !== dir) await this.checkLinks(gitCwd);
 
     // Define read and write operations
     const readOps = ['readCommit', 'readObject', 'getHeadTree', 'getOidAtPath', 'listFiles', 'resolveRef',
@@ -347,6 +354,13 @@ export class GitService {
     }
 
     return absolute;
+  }
+
+  /** Refuse a folder whose links lead outside the project, unless the config allows it */
+  private async checkLinks(dir: string): Promise<void> {
+    if (this.options.followLinksOutsideRoot === true) return;
+    this.realRootPath ??= await fs.promises.realpath(this.rootPath);
+    if (!(await linksStayInside(this.realRootPath, dir))) throw linkOutsideRootError();
   }
 
   /**

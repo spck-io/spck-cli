@@ -181,6 +181,9 @@ function validateConfig(config: ServerConfig): void {
   if (!config.filesystem || typeof config.filesystem !== 'object') {
     throw new Error('Invalid or missing filesystem configuration.');
   }
+  if (config.filesystem.followLinksOutsideRoot !== undefined && typeof config.filesystem.followLinksOutsideRoot !== 'boolean') {
+    throw new Error('Invalid filesystem.followLinksOutsideRoot: expected a boolean.');
+  }
 }
 
 /**

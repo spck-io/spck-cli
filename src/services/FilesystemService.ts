@@ -8,10 +8,10 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { applyDelta } from 'fossil-delta';
 import writeFileAtomic from 'write-file-atomic';
-import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types.js';
+import { AuthenticatedSocket, ErrorCode, createRPCError, linkOutsideRootError } from '../types.js';
 import { parseFileSize } from '../config/config.js';
 import { logFsRead, logFsWrite } from '../utils/logger.js';
-import { isPathInside, toRelativeClientPath, toRelativePosixPath } from '../utils/paths.js';
+import { isPathInside, linksStayInside, toRelativeClientPath, toRelativePosixPath } from '../utils/paths.js';
 
 export class FilesystemService {
   private resolvedRootPath: string;
@@ -170,57 +170,29 @@ export class FilesystemService {
       throw createRPCError(ErrorCode.INVALID_PATH, 'Access denied: path outside root directory');
     }
 
-    // Resolve symlinks and verify they stay within root
-    try {
-      // Try to resolve the path (follows all symlinks including in rootPath)
-      const realPath = await fs.realpath(absolute);
-
-      // Get real root path (cached, in case rootPath itself contains symlinks like /tmp -> /private/tmp)
-      const realRoot = await this.getRealRootPath();
-
-      // Check resolved path is still within resolved root
-      if (!isPathInside(realRoot, realPath)) {
-        throw createRPCError(
-          ErrorCode.INVALID_PATH,
-          'Access denied: symlink points outside root directory'
-        );
-      }
-
-      return realPath;
-    } catch (error: any) {
-      // Path doesn't exist - validate parent directory instead
-      if (error.code === 'ENOENT') {
-        const parentDir = path.dirname(absolute);
-
-        try {
-          const parentReal = await fs.realpath(parentDir);
-          const realRoot = await this.getRealRootPath();
-
-          // Check parent directory is within root
-          if (!isPathInside(realRoot, parentReal)) {
-            throw createRPCError(
-              ErrorCode.INVALID_PATH,
-              'Access denied: parent directory symlink points outside root'
-            );
-          }
-
-          // Return original absolute path (not parent)
-          return absolute;
-        } catch (parentError: any) {
-          // Parent doesn't exist either - allow for mkdirp operations
-          // Just validate the normalized path structure
-          return absolute;
-        }
-      }
-
-      // Re-throw validation errors
-      if (error.code === ErrorCode.INVALID_PATH) {
-        throw error;
-      }
-
-      // For other errors, continue with original path
-      return absolute;
+    // Real root, in case rootPath itself contains symlinks like /tmp -> /private/tmp
+    const realRoot = await this.getRealRootPath();
+    const realPath = await fs.realpath(absolute).catch(() => null);
+    if (realPath !== null && isPathInside(realRoot, realPath)) return realPath;
+    // Leads outside the root: refused unless the config allows it. A new path
+    // would be created wherever the links in its folders lead
+    if (realPath === null ? await this.leadsOutsideRoot(absolute) : !this.followsLinksOutsideRoot()) {
+      throw linkOutsideRootError();
     }
+    // A new path stays as it is, so removing a dangling link removes the link
+    if (realPath === null) return absolute;
+    // Allowed to lead outside: keep the path in the project, which the editor knows
+    return path.join(realRoot, relative);
+  }
+
+  /** Whether the config lets links in the project lead outside it (off unless turned on) */
+  private followsLinksOutsideRoot(): boolean {
+    return this.config?.followLinksOutsideRoot === true;
+  }
+
+  /** Whether a path's links lead outside the root, when the config doesn't allow that */
+  private async leadsOutsideRoot(target: string): Promise<boolean> {
+    return !this.followsLinksOutsideRoot() && !(await linksStayInside(await this.getRealRootPath(), target));
   }
 
   /**
@@ -287,8 +259,9 @@ export class FilesystemService {
           // Ensure still within root
           if (!isPathInside(realRoot, absolute)) return 0;
 
-          await fs.access(absolute);
-          return 1;
+          // Throws if it doesn't exist. Links leading outside count as missing
+          const realPath = await fs.realpath(absolute);
+          return isPathInside(realRoot, realPath) || this.followsLinksOutsideRoot() ? 1 : 0;
         } catch {
           return 0;
         }
@@ -838,15 +811,16 @@ export class FilesystemService {
             break;
           }
 
-          let entries: string[];
+          let entries: fsSync.Dirent[];
           try {
-            entries = await fs.readdir(currentPath);
+            entries = await fs.readdir(currentPath, { withFileTypes: true });
           } catch (error: any) {
             // Skip subdirectories we can't read (but initial dir should have been validated)
             continue;
           }
 
-          for (const name of entries) {
+          for (const entry of entries) {
+            const name = entry.name;
             // Early exit if limit reached
             if (limit !== null && results.length >= limit) {
               break;
@@ -867,8 +841,10 @@ export class FilesystemService {
             }
 
             if (stats.isDirectory()) {
-              // Add to next level queue
-              queue.push(entryPath);
+              // Add to next level queue, unless it's a link leading outside the root
+              if (!entry.isSymbolicLink() || !(await this.leadsOutsideRoot(entryPath))) {
+                queue.push(entryPath);
+              }
 
               // Convert to relative path using real root
               const outputPath = toRelativePosixPath(realRoot, entryPath);
@@ -1022,6 +998,11 @@ export class FilesystemService {
     for (const entry of entries) {
       const srcPath = path.join(srcDir, entry.name);
       const destPath = path.join(destDir, entry.name);
+
+      // Copying a link copies what it points to
+      if (entry.isSymbolicLink() && await this.leadsOutsideRoot(srcPath)) {
+        throw linkOutsideRootError();
+      }
 
       if (entry.isDirectory()) {
         // Recursively copy subdirectory

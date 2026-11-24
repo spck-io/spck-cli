@@ -41,6 +41,9 @@ export interface ServerConfig {
   filesystem: {
     maxFileSize: string;
     watchIgnorePatterns: string[];
+    // Let links (symlinks, Windows junctions) in the project lead outside it,
+    // so the editor can read and write there. Off unless set in the config file.
+    followLinksOutsideRoot?: boolean;
   };
 
   browserProxy?: {
@@ -194,6 +197,14 @@ export function createRPCError(
   data?: any
 ): JSONRPCError {
   return { code, message, data };
+}
+
+/** A link in the project leads outside it, and the config doesn't allow that */
+export function linkOutsideRootError(): JSONRPCError {
+  return createRPCError(
+    ErrorCode.INVALID_PATH,
+    'Access denied: a link points outside root directory. To allow it, set filesystem.followLinksOutsideRoot to true in the config.'
+  );
 }
 
 // Proxy Protocol Messages

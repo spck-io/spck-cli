@@ -45,6 +45,43 @@ export function isPathInside(root: string, target: string, p: PathModule = nodeP
   return relative !== '..' && !relative.startsWith('..' + p.sep) && !p.isAbsolute(relative);
 }
 
+/**
+ * Where a host path really leads, with its links (symlinks, Windows
+ * junctions) followed. A path that doesn't exist yet leads wherever the
+ * links in its existing folders and any dangling link on the way point, as
+ * a new file is created through them. Returns null for links in a loop.
+ */
+export async function resolveLinks(target: string): Promise<string | null> {
+  const missing: string[] = [];
+  let current = nodePath.resolve(target);
+  let links = 0;
+  for (;;) {
+    try {
+      return nodePath.join(await fs.promises.realpath(current), ...missing);
+    } catch {
+      // A link realpath couldn't follow, as its target is missing
+      const link = await fs.promises.readlink(current).catch(() => null);
+      if (link !== null) {
+        if (++links > 40) return null;
+        // A relative target starts from the folder the link is really in
+        const folder = nodePath.dirname(current);
+        current = nodePath.resolve(await fs.promises.realpath(folder).catch(() => folder), link);
+        continue;
+      }
+      const parent = nodePath.dirname(current);
+      if (parent === current) return nodePath.join(current, ...missing);
+      missing.unshift(nodePath.basename(current));
+      current = parent;
+    }
+  }
+}
+
+/** Whether a host path's links (see resolveLinks) keep it inside realRoot, a realpath. */
+export async function linksStayInside(realRoot: string, target: string): Promise<boolean> {
+  const leadsTo = await resolveLinks(target);
+  return leadsTo !== null && isPathInside(realRoot, leadsTo);
+}
+
 /** Replace the host's separators with forward slashes (a no-op on POSIX). */
 export function toPosixPath(hostPath: string, p: PathModule = nodePath): string {
   return isWindowsPaths(p) ? hostPath.replace(/\\/g, '/') : hostPath;

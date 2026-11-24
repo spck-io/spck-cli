@@ -185,6 +185,28 @@ describe('GitService', () => {
       });
     });
 
+    // A junction on Windows, which needs no admin rights (a plain symlink elsewhere)
+    it('refuses a folder linked to outside the root, unless the config allows it', async () => {
+      const outside = `${testRoot}-outside`;
+      await fs.mkdir(outside);
+      try {
+        await initRepoOnMain(outside);
+        await fs.symlink(outside, path.join(testRoot, 'link'), 'junction');
+        await fs.symlink(outside, path.join(repoPath, 'link'), 'junction');
+        const refused = { code: ErrorCode.INVALID_PATH, message: expect.stringContaining('followLinksOutsideRoot') };
+
+        await expect(service.handle('currentBranch', { dir: '/link' }, mockSocket)).rejects.toMatchObject(refused);
+        await expect(
+          service.handle('currentBranch', { dir: '/repo', gitRoot: 'link' }, mockSocket)
+        ).rejects.toMatchObject(refused);
+
+        const allowed = new GitService(testRoot, { followLinksOutsideRoot: true });
+        expect(await allowed.handle('currentBranch', { dir: '/link' }, mockSocket)).toEqual({ branch: 'main' });
+      } finally {
+        await fs.rm(outside, { recursive: true, force: true });
+      }
+    });
+
     it('should prevent access outside root', async () => {
       // Path validation clamps to root, so the directory just won't exist
       // This will result in a git error rather than a path validation error
