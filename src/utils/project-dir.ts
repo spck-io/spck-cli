@@ -9,9 +9,24 @@ import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
 import { t } from '../i18n/index.js';
+import { hostPathKey } from './paths.js';
 
 const PROJECT_DIR_NAME = '.spck-editor';
 const CONFIG_SUBDIR_NAME = 'config';
+
+/**
+ * Link type for .spck-editor/config. Windows only allows directory symlinks
+ * for administrators or with Developer Mode on; junctions need neither and
+ * work for local directories like the home data directory.
+ */
+function configLinkType(): fs.symlink.Type {
+  return process.platform === 'win32' ? 'junction' : 'dir';
+}
+
+/** Whether two paths name the same location (ignoring case on Windows). */
+function isSamePath(a: string, b: string): boolean {
+  return hostPathKey(a) === hostPathKey(b);
+}
 
 /**
  * Get the home base directory for projects
@@ -25,8 +40,9 @@ function getHomeBaseDir(): string {
  * Generate a consistent project ID from the project root path
  */
 export function generateProjectId(projectRoot: string): string {
-  // Resolve to absolute path and normalize
-  const absolutePath = path.resolve(projectRoot);
+  // Resolve to absolute path and normalize. Windows paths ignore case, so
+  // c:\proj and C:\Proj share one ID there.
+  const absolutePath = hostPathKey(projectRoot);
 
   // Generate SHA256 hash of the absolute path
   const hash = crypto.createHash('sha256').update(absolutePath).digest('hex');
@@ -108,7 +124,7 @@ export function isProjectDirSetup(projectRoot: string): boolean {
     if (!stats.isSymbolicLink()) {
       return false;
     }
-    if (path.resolve(projectDir, fs.readlinkSync(configSymlink)) !== dataPath) {
+    if (!isSamePath(path.resolve(projectDir, fs.readlinkSync(configSymlink)), dataPath)) {
       return false;
     }
   } catch (error) {
@@ -141,7 +157,7 @@ function migrateConfigData(oldTarget: string, dataPath: string, homeBaseDir: str
     return;
   }
   const candidates = [oldTarget, path.join(homeBaseDir, path.basename(oldTarget))];
-  const source = candidates.find((c) => c !== dataPath && lstatOrNull(c)?.isDirectory());
+  const source = candidates.find((c) => !isSamePath(c, dataPath) && lstatOrNull(c)?.isDirectory());
   if (source) {
     fs.cpSync(source, dataPath, { recursive: true });
   }
@@ -185,14 +201,14 @@ export function setupProjectDir(projectRoot: string): void {
   // the link and reports false for a broken one, which made symlinkSync fail with EEXIST
   const linkStats = lstatOrNull(configSymlink);
   if (!linkStats) {
-    fs.symlinkSync(dataPath, configSymlink, 'dir');
+    fs.symlinkSync(dataPath, configSymlink, configLinkType());
   } else if (linkStats.isSymbolicLink()) {
     const target = path.resolve(projectDir, fs.readlinkSync(configSymlink));
-    if (target !== dataPath) {
+    if (!isSamePath(target, dataPath)) {
       // Project moved or home dir renamed - carry the old config over before relinking
       migrateConfigData(target, dataPath, homeBaseDir);
       fs.unlinkSync(configSymlink);
-      fs.symlinkSync(dataPath, configSymlink, 'dir');
+      fs.symlinkSync(dataPath, configSymlink, configLinkType());
     }
   }
 

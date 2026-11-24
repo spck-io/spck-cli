@@ -7,6 +7,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return { ...actual, symlinkSync: vi.fn(actual.symlinkSync) };
+});
+
 describe('project-dir', () => {
   let tempDir: string;
   let home: string;
@@ -34,7 +39,21 @@ describe('project-dir', () => {
   it('creates the config symlink on a fresh project', () => {
     mod.ensureProjectDir(projectRoot);
     const link = mod.getConfigSymlinkPath(projectRoot);
-    expect(fs.readlinkSync(link)).toBe(mod.getProjectDataPath(projectRoot));
+    expect(path.resolve(fs.readlinkSync(link))).toBe(mod.getProjectDataPath(projectRoot));
+    expect(mod.isProjectDirSetup(projectRoot)).toBe(true);
+  });
+
+  it('links the config with a junction on Windows, which needs no admin rights or Developer Mode', () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    try {
+      mod.ensureProjectDir(projectRoot);
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
+    expect(fs.symlinkSync).toHaveBeenLastCalledWith(
+      mod.getProjectDataPath(projectRoot), mod.getConfigSymlinkPath(projectRoot), 'junction'
+    );
     expect(mod.isProjectDirSetup(projectRoot)).toBe(true);
   });
 
@@ -54,7 +73,7 @@ describe('project-dir', () => {
     expect(mod.isProjectDirSetup(projectRoot)).toBe(false);
     expect(() => mod.ensureProjectDir(projectRoot)).not.toThrow();
 
-    expect(fs.readlinkSync(link)).toBe(mod.getProjectDataPath(projectRoot));
+    expect(path.resolve(fs.readlinkSync(link))).toBe(mod.getProjectDataPath(projectRoot));
     expect(fs.readFileSync(path.join(link, 'connection-settings.json'), 'utf8')).toBe('{"ok":true}');
     expect(mod.isProjectDirSetup(projectRoot)).toBe(true);
   });
@@ -75,7 +94,7 @@ describe('project-dir', () => {
     expect(mod.isProjectDirSetup(projectRoot)).toBe(false);
     mod.ensureProjectDir(projectRoot);
 
-    expect(fs.readlinkSync(link)).toBe(dataPath);
+    expect(path.resolve(fs.readlinkSync(link))).toBe(dataPath);
     expect(fs.readFileSync(path.join(link, 'connection-settings.json'), 'utf8')).toBe('new');
   });
 });

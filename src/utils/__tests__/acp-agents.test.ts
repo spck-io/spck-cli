@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'child_process';
-import { resolveAcpAgents } from '../acp-agents.js';
+import { pickWindowsCommand, resolveAcpAgents } from '../acp-agents.js';
 
 vi.mock('child_process', () => ({ spawnSync: vi.fn() }));
 
@@ -62,9 +62,43 @@ describe('resolveAcpAgents', () => {
     expect(resolveAcpAgents()).toContainEqual({ name: 'codex', binary: '/usr/local/bin/codex-acp', args: [], version: '' });
   });
 
+  it('resolves Windows PATH agents from where output, running .cmd shims through cmd.exe', () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    try {
+      vi.mocked(spawnSync).mockImplementation((_lookup, args) => ({
+        status: (args as string[])[0] === 'gemini' ? 0 : 1,
+        stdout: 'C:\\Users\\me\\AppData\\Roaming\\npm\\gemini\r\nC:\\Users\\me\\AppData\\Roaming\\npm\\gemini.cmd\r\n',
+      }) as any);
+      expect(resolveAcpAgents()).toContainEqual({
+        name: 'gemini', binary: 'C:\\Users\\me\\AppData\\Roaming\\npm\\gemini.cmd', args: ['--acp'], version: '', shell: true,
+      });
+      expect(spawnSync).toHaveBeenCalledWith('where', ['gemini'], { encoding: 'utf8' });
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
+  });
+
   it('omits missing adapter executables', () => {
     packages.clear();
     expect(resolveAcpAgents().map((agent) => agent.name)).not.toContain('codex');
     expect(resolveAcpAgents().map((agent) => agent.name)).not.toContain('gemini');
+  });
+});
+
+describe('pickWindowsCommand', () => {
+  it("skips npm's extensionless sh shim for the .cmd beside it", () => {
+    expect(pickWindowsCommand('C:\\npm\\gemini\r\nC:\\npm\\gemini.cmd\r\n'))
+      .toEqual({ binary: 'C:\\npm\\gemini.cmd', shell: true });
+  });
+
+  it('starts executables directly and keeps PATH order', () => {
+    expect(pickWindowsCommand('C:\\tools\\gemini.EXE\r\nC:\\npm\\gemini.cmd\r\n'))
+      .toEqual({ binary: 'C:\\tools\\gemini.EXE', shell: false });
+  });
+
+  it('returns null when nothing can be started', () => {
+    expect(pickWindowsCommand('C:\\npm\\gemini\r\nC:\\npm\\gemini.ps1\r\n')).toBeNull();
+    expect(pickWindowsCommand('')).toBeNull();
   });
 });

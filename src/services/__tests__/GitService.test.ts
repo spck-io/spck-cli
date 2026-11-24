@@ -126,6 +126,18 @@ describe('GitService', () => {
       });
     });
 
+    it('should reject a gitRoot in a sibling directory that shares the dir name as a prefix', async () => {
+      await fs.mkdir(path.join(testRoot, 'repo2'));
+      await execGit(['init'], path.join(testRoot, 'repo2'));
+
+      await expect(
+        service.handle('currentBranch', { dir: '/repo', gitRoot: '../repo2' }, mockSocket)
+      ).rejects.toMatchObject({
+        code: ErrorCode.INVALID_PATH,
+        message: expect.stringContaining('gitRoot'),
+      });
+    });
+
     it('should prevent access outside root', async () => {
       // Path validation clamps to root, so the directory just won't exist
       // This will result in a git error rather than a path validation error

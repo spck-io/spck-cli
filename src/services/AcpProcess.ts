@@ -19,6 +19,8 @@ export interface AcpProcessOptions {
   env?: NodeJS.ProcessEnv;
   // Display name used in log messages (defaults to command basename).
   name?: string;
+  // Start through cmd.exe, for Windows .cmd/.bat agents (see ResolvedAgent).
+  shell?: boolean;
 }
 
 type Pending = {
@@ -31,6 +33,13 @@ export type NotificationHandler = (method: string, params: any) => void;
 // Request handlers return a result (resolved as the response) or throw a
 // JSON-RPC-shaped error. Resolving with undefined sends `result: null`.
 export type RequestHandler = (method: string, params: any) => Promise<unknown>;
+
+// Quote one argument for a cmd.exe command line. Only agent paths from
+// `where` (Windows file names can't contain double quotes) and the fixed
+// flags in PATH_AGENTS come through here.
+function quoteForCmd(arg: string): string {
+  return arg === '' || /[\s&|<>^()%!,;=]/.test(arg) ? `"${arg}"` : arg;
+}
 
 export class AcpProcess {
   private proc: ChildProcessWithoutNullStreams | null = null;
@@ -53,11 +62,17 @@ export class AcpProcess {
 
   start(): void {
     if (this.proc) return;
-    const proc = spawn(this.opts.command, this.opts.args || [], {
+    const options = {
       cwd: this.opts.cwd,
       env: this.opts.env || process.env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }) as ChildProcessWithoutNullStreams;
+      stdio: ['pipe', 'pipe', 'pipe'] as ['pipe', 'pipe', 'pipe'],
+    };
+    const args = this.opts.args || [];
+    // With shell: true, Node joins the command and args without quoting them
+    // (and warns when given args), so build the quoted command line here.
+    const proc = (this.opts.shell
+      ? spawn([this.opts.command, ...args].map(quoteForCmd).join(' '), { ...options, shell: true })
+      : spawn(this.opts.command, args, options)) as ChildProcessWithoutNullStreams;
 
     proc.stdout.setEncoding('utf8');
     proc.stdout.on('data', (chunk: string) => this.onData(chunk));
@@ -122,10 +137,18 @@ export class AcpProcess {
 
   async stop(): Promise<void> {
     if (!this.proc || this.exited) return;
-    try {
-      this.proc.kill('SIGTERM');
-    } catch {
-      // ignore
+    const proc = this.proc;
+    if (process.platform === 'win32' && this.opts.shell && proc.pid) {
+      // kill() ends only cmd.exe; the agent it started would keep running
+      // with our stdio pipes open. taskkill /T ends the whole tree.
+      spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
+        .on('error', () => proc.kill());
+    } else {
+      try {
+        proc.kill('SIGTERM');
+      } catch {
+        // ignore
+      }
     }
     // Give it a moment, then force-kill.
     const timer = setTimeout(() => {

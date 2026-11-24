@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
  */
 
 import { SearchService } from '../SearchService.js';
+import { isRipgrepAvailable, executeRipgrepStream } from '../../utils/ripgrep.js';
 
 // Mock ripgrep utilities to prevent spawning child processes during tests
 vi.mock('../../utils/ripgrep', () => ({
@@ -473,6 +474,70 @@ describe('SearchService - Search Functionality', () => {
 
       // Verify value is extracted correctly from line
       expect(match.line.substring(match.match.start, match.match.end)).toBe(match.value);
+    });
+  });
+
+  describe('result paths', () => {
+    function collectResults(): any[] {
+      const results: any[] = [];
+      mockSocket.emit.mockImplementation((event: string, data: any) => {
+        if (event === 'rpc' && data.method === 'search.results') {
+          results.push(...data.params.results);
+        }
+      });
+      return results;
+    }
+
+    const params = {
+      maxResults: 100,
+      maxLength: 100,
+      searchTerm: 'test',
+      matchCase: false,
+      useRegEx: false,
+      onlyWholeWords: false,
+    };
+
+    it('matches "**/" against the root and any depth without ripgrep', async () => {
+      const fs = require('fs/promises');
+      const path = require('path');
+      await fs.mkdir(path.join(testRoot, 'subdir', 'deeper'));
+      await fs.writeFile(path.join(testRoot, 'subdir', 'deeper', 'deep.txt'), 'deep test');
+      const results = collectResults();
+
+      await service.handle('findWithStream', { ...params, glob: '**/*.txt' }, mockSocket);
+
+      expect([...new Set(results.map((r) => r.path))].sort()).toEqual([
+        'file1.txt', 'file2.txt', 'subdir/deeper/deep.txt', 'subdir/nested.txt',
+      ]);
+    });
+
+    it('sends ripgrep paths relative to the project root, not the working directory', async () => {
+      expect(testRoot).not.toBe(process.cwd());
+      vi.mocked(isRipgrepAvailable).mockResolvedValue(true);
+      vi.mocked(executeRipgrepStream).mockImplementationOnce(async (_cwd, _args, { onLine }) => {
+        onLine(JSON.stringify({
+          type: 'match',
+          data: {
+            path: { text: './subdir/nested.txt' },
+            lines: { text: 'Nested test file\n' },
+            line_number: 1,
+            absolute_offset: 0,
+            submatches: [{ match: { text: 'test' }, start: 7, end: 11 }],
+          },
+        }));
+        return { exitCode: 0 };
+      });
+      try {
+        const ripgrepService = new SearchService(testRoot, 10 * 1024 * 1024, 64 * 1024);
+        const results = collectResults();
+
+        await ripgrepService.handle('findWithStream', { ...params, glob: '' }, mockSocket);
+
+        expect(executeRipgrepStream).toHaveBeenCalledWith(testRoot, expect.any(Array), expect.any(Object));
+        expect(results.map((r) => r.path)).toEqual(['subdir/nested.txt']);
+      } finally {
+        vi.mocked(isRipgrepAvailable).mockResolvedValue(false);
+      }
     });
   });
 

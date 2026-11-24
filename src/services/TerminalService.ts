@@ -5,10 +5,10 @@
 import * as pty from 'node-pty';
 import XtermHeadlessModule from '@xterm/headless';
 import SerializeAddonModule from '@xterm/addon-serialize';
-import defaultShell from 'default-shell';
 import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types.js';
 import { logTerminalRead, logTerminalWrite } from '../utils/logger.js';
 import { createShellLaunch } from './shell-prompt.js';
+import { getTerminalShell } from '../utils/terminal-shell.js';
 
 const { Terminal: XtermHeadless } = XtermHeadlessModule as any;
 const { SerializeAddon } = SerializeAddonModule as any;
@@ -183,8 +183,8 @@ export class TerminalService {
 
     const terminalId = this.generateId();
 
-    // Get default shell for the platform
-    const shell = defaultShell;
+    // Get default shell for the platform (PowerShell on Windows)
+    const shell = getTerminalShell();
 
     // Spawn PTY process
     let ptyProcess: pty.IPty;

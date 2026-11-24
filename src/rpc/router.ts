@@ -2,7 +2,6 @@
  * JSON-RPC 2.0 request router
  */
 
-import * as path from 'path';
 import { AuthenticatedSocket, JSONRPCRequest, ErrorCode, createRPCError, ToolDetectionResult } from '../types.js';
 import { FilesystemService } from '../services/FilesystemService.js';
 import { GitService } from '../services/GitService.js';
@@ -12,6 +11,7 @@ import { BrowserProxyService } from '../services/BrowserProxyService.js';
 import { LanguageServerService } from '../services/LanguageServerService.js';
 import { AcpService } from '../services/AcpService.js';
 import { FileWatcher } from '../watcher/FileWatcher.js';
+import { toClientPath } from '../utils/paths.js';
 
 export class RPCRouter {
   private static filesystemService: FilesystemService;
@@ -124,17 +124,17 @@ export class RPCRouter {
     this.fileWatcher = new FileWatcher(rootPath, ['.git', '.spck-editor', 'node_modules']);
 
     this.fileWatcher.on('change', (filePath: string) => {
-      const rel = '/' + path.relative(rootPath, filePath);
+      const rel = toClientPath(rootPath, filePath);
       this.broadcastFileChange(rel, 'write');
     });
 
     this.fileWatcher.on('added', (filePath: string) => {
-      const rel = '/' + path.relative(rootPath, filePath);
+      const rel = toClientPath(rootPath, filePath);
       this.broadcastFileChange(rel, 'write');
     });
 
     this.fileWatcher.on('removed', (filePath: string) => {
-      const rel = '/' + path.relative(rootPath, filePath);
+      const rel = toClientPath(rootPath, filePath);
       this.broadcastFileChange(rel, 'remove');
     });
   }

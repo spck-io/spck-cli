@@ -10,6 +10,7 @@ import * as os from 'os';
 import * as crypto from 'crypto';
 import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types.js';
 import { logGitRead, logGitWrite } from '../utils/logger.js';
+import { isPathInside, toRelativeClientPath } from '../utils/paths.js';
 
 interface ExecGitOptions {
   cwd?: string;
@@ -89,7 +90,7 @@ export class GitService {
     if (gitRoot) {
       const resolved = path.resolve(dir, gitRoot);
       // Security: ensure resolved path stays within dir
-      if (!resolved.startsWith(dir)) {
+      if (!isPathInside(dir, resolved)) {
         throw createRPCError(ErrorCode.INVALID_PATH, 'Invalid gitRoot: path traversal not allowed');
       }
       return resolved;
@@ -305,13 +306,14 @@ export class GitService {
    * Validate git directory
    */
   private validateGitDir(dir: string): string {
-    const normalized = path.normalize(dir);
-    if (normalized.includes('..')) {
+    // Editor paths are POSIX and rooted at the project ("/src")
+    const relative = toRelativeClientPath(dir);
+    if (relative.includes('..')) {
       throw createRPCError(ErrorCode.INVALID_PATH, 'Invalid path: directory traversal not allowed');
     }
 
-    const absolute = path.resolve(this.rootPath, normalized.startsWith('/') ? normalized.slice(1) : normalized);
-    if (!absolute.startsWith(path.resolve(this.rootPath))) {
+    const absolute = path.resolve(this.rootPath, relative);
+    if (!isPathInside(path.resolve(this.rootPath), absolute)) {
       throw createRPCError(ErrorCode.INVALID_PATH, 'Access denied: path outside root directory');
     }
 
@@ -1698,6 +1700,10 @@ export class GitService {
             SSH_ASKPASS_REQUIRE: 'force',
             DISPLAY: process.env.DISPLAY || ':0',
             GIT_TERMINAL_PROMPT: '0',
+            // Git Credential Manager (part of Git for Windows) is asked before
+            // askpass and would open its sign-in window on the host, which the
+            // editor's user may not be at. Saved credentials still work.
+            GCM_INTERACTIVE: 'never',
           },
           cleanup
         });

@@ -14,6 +14,7 @@ import * as path from 'path';
 import { ErrorCode, createRPCError, AuthenticatedSocket } from '../types.js';
 import { logSearchRead } from '../utils/logger.js';
 import { isRipgrepAvailable, executeRipgrepStream } from '../utils/ripgrep.js';
+import { toRelativePosixPath } from '../utils/paths.js';
 
 interface StreamSearchParams {
   glob: string;
@@ -35,6 +36,13 @@ interface SearchResult {
   match: { start: number; end: number };
   path: string;
 }
+
+const GLOB_TOKENS: Record<string, string> = {
+  '**/': '(?:.*/)?',
+  '**': '.*',
+  '*': '[^/]*',
+  '?': '.',
+};
 
 export class SearchService {
   private maxFileSize: number;
@@ -339,8 +347,9 @@ export class SearchService {
                 const relativeMatchStart = matchStart - trimOffset;
                 const relativeMatchEnd = matchEnd - trimOffset;
 
-                // Get file path relative to root
-                const relativePath = path.relative(searchRoot, data.path.text);
+                // rg prints paths relative to its cwd ("./src/a.ts", or
+                // ".\src\a.ts" on Windows); send "src/a.ts"
+                const relativePath = toRelativePosixPath(searchRoot, path.resolve(searchRoot, data.path.text));
 
                 batch.push({
                   start: {
@@ -452,7 +461,7 @@ export class SearchService {
         if (totalResults >= maxResults) break;
 
         try {
-          const relativePath = path.relative(this.rootPath, file);
+          const relativePath = toRelativePosixPath(this.rootPath, file);
 
           // Check file size
           const stats = await fs.promises.stat(file);
@@ -568,14 +577,14 @@ export class SearchService {
    * Simple glob pattern matching
    */
   private matchGlob(filePath: string, baseDir: string, pattern: string): boolean {
-    const relativePath = path.relative(baseDir, filePath);
+    // Globs use forward slashes on every platform
+    const relativePath = toRelativePosixPath(baseDir, filePath);
 
-    // Convert glob pattern to regex
+    // Convert glob pattern to regex in one pass, so the ".*" written for "**"
+    // isn't rewritten again by the "*" rule. "**/" also matches no directory.
     let regexPattern = pattern
       .replace(/\./g, '\\.')
-      .replace(/\*\*/g, '.*')
-      .replace(/\*/g, '[^/]*')
-      .replace(/\?/g, '.');
+      .replace(/\*\*\/|\*\*|\*|\?/g, (token) => GLOB_TOKENS[token]);
 
     const regex = new RegExp(`^${regexPattern}$`);
     return regex.test(relativePath);

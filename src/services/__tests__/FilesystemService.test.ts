@@ -75,6 +75,25 @@ describe('FilesystemService', () => {
       expect(result.exists).toBe(false);
     });
 
+    it('should reject symlinks into a sibling directory that shares the root name as a prefix', async () => {
+      // e.g. root /tmp/fs-test-abc and /tmp/fs-test-abc-other
+      const sibling = `${testRoot}-other`;
+      await fs.mkdir(sibling);
+      try {
+        await fs.writeFile(path.join(sibling, 'secret.txt'), 'secret');
+        await fs.symlink(sibling, path.join(testRoot, 'link'));
+
+        await expect(
+          service.handle('readFile', { path: '/link/secret.txt' }, mockSocket)
+        ).rejects.toMatchObject({
+          code: ErrorCode.INVALID_PATH,
+          message: expect.stringContaining('outside root'),
+        });
+      } finally {
+        await fs.rm(sibling, { recursive: true, force: true });
+      }
+    });
+
     it('should normalize paths correctly', async () => {
       await fs.writeFile(path.join(testRoot, 'test.txt'), 'content');
 

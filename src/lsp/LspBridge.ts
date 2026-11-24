@@ -10,6 +10,7 @@
 import * as path from 'path';
 import * as url from 'url';
 import { LspProcess } from './LspProcess.js';
+import { hostPathKey, isPathInside, resolveClientPath, toClientPath } from '../utils/paths.js';
 
 export interface LspBridgeConfig {
   // Display name (e.g. "pyright", "typescript-language-server").
@@ -58,16 +59,14 @@ const FENCE_RE = /```[^\n]*\n([\s\S]*?)```/g;
 
 export class LspBridge {
   private proc: LspProcess;
-  private docs: Map<string, OpenDoc> = new Map(); // by absolute path
-  private diagnostics: Map<string, any[]> = new Map(); // by absolute path
+  private docs: Map<string, OpenDoc> = new Map(); // by hostPathKey of the absolute path
+  private diagnostics: Map<string, any[]> = new Map(); // by hostPathKey of the absolute path
   private initialized = false;
   private initPromise: Promise<void> | null = null;
   private rootPath: string;
-  private rootPathWithSep: string;
 
   constructor(rootPath: string, private cfg: LspBridgeConfig) {
     this.rootPath = path.resolve(rootPath);
-    this.rootPathWithSep = this.rootPath + path.sep;
     this.proc = new LspProcess({
       command: cfg.command,
       args: cfg.args,
@@ -196,11 +195,10 @@ export class LspBridge {
     };
   }
 
+  // Editor path for a server path: "/src/a.ts" under the root. Others (e.g.
+  // TypeScript's lib files) stay absolute, with forward slashes on Windows.
   private toRelPath(absPath: string): string {
-    if (absPath.startsWith(this.rootPathWithSep) || absPath === this.rootPath) {
-      return absPath.slice(this.rootPath.length) || path.sep;
-    }
-    return absPath;
+    return toClientPath(this.rootPath, absPath);
   }
 
   private locationToTextSpan(loc: any): any {
@@ -216,12 +214,18 @@ export class LspBridge {
   }
 
   private resolveAbs(name: string): string {
-    // Paths already under rootPath pass through unchanged.
-    if (name === this.rootPath || name.startsWith(this.rootPathWithSep)) return name;
+    // Absolute host paths already under rootPath pass through.
+    if (isHostAbsolute(name) && isPathInside(this.rootPath, name)) return path.resolve(name);
     // Server-relative paths from the RLSC client start with '/' but are
-    // relative to rootPath, not the OS root — strip the leading separator.
-    const rel = name.startsWith(path.sep) ? name.slice(path.sep.length) : name;
-    return path.resolve(this.rootPath, rel);
+    // relative to rootPath, not the OS root.
+    return resolveClientPath(this.rootPath, name);
+  }
+
+  // Key for the docs and diagnostics maps. Servers may spell a path in a
+  // different case than the editor does (tsserver lowercases Windows drive
+  // letters), so the key ignores case where the file system does.
+  private keyFor(name: string): string {
+    return hostPathKey(this.resolveAbs(name));
   }
 
   private toUri(name: string): string {
@@ -239,7 +243,7 @@ export class LspBridge {
   private onNotification(method: string, params: any): void {
     if (method === 'textDocument/publishDiagnostics') {
       const filePath = url.fileURLToPath(params.uri);
-      this.diagnostics.set(filePath, params.diagnostics || []);
+      this.diagnostics.set(hostPathKey(filePath), params.diagnostics || []);
     }
   }
 
@@ -248,11 +252,11 @@ export class LspBridge {
   private async openOrUpdate(name: string, text: string): Promise<void> {
     const languageId = this.languageIdFor(name);
     if (!languageId) return;
-    const abs = this.resolveAbs(name);
+    const key = this.keyFor(name);
     const uri = this.toUri(name);
-    const existing = this.docs.get(abs);
+    const existing = this.docs.get(key);
     if (!existing) {
-      this.docs.set(abs, { uri, text, version: 1, languageId });
+      this.docs.set(key, { uri, text, version: 1, languageId });
       this.proc.notify('textDocument/didOpen', {
         textDocument: { uri, languageId, version: 1, text },
       });
@@ -267,8 +271,8 @@ export class LspBridge {
   }
 
   private async applyEdits(req: LscRequest): Promise<void> {
-    const abs = this.resolveAbs(req.name!);
-    const doc = this.docs.get(abs);
+    const key = this.keyFor(req.name!);
+    const doc = this.docs.get(key);
     if (!doc) { req.missing = true; return; }
     const edits = req.edits || [];
     doc.text = applyLspEdits(doc.text, edits);
@@ -281,30 +285,29 @@ export class LspBridge {
       // Doc is out of sync (e.g. git changed the file). Close so the next
       // addFile triggers a fresh didOpen with the correct content.
       this.proc.notify('textDocument/didClose', { textDocument: { uri: doc.uri } });
-      this.docs.delete(abs);
-      this.diagnostics.delete(abs);
+      this.docs.delete(key);
+      this.diagnostics.delete(key);
       req.missing = true;
     }
   }
 
   private async close(name: string): Promise<void> {
-    const abs = this.resolveAbs(name);
-    const doc = this.docs.get(abs);
+    const key = this.keyFor(name);
+    const doc = this.docs.get(key);
     if (!doc) return;
     this.proc.notify('textDocument/didClose', { textDocument: { uri: doc.uri } });
-    this.docs.delete(abs);
-    this.diagnostics.delete(abs);
+    this.docs.delete(key);
+    this.diagnostics.delete(key);
   }
 
   private async closeFolder(name: string): Promise<void> {
-    const folderAbs = this.resolveAbs(name);
-    const prefix = folderAbs.endsWith(path.sep) ? folderAbs : folderAbs + path.sep;
-    for (const abs of Array.from(this.docs.keys())) {
-      if (abs === folderAbs || abs.startsWith(prefix)) {
-        const doc = this.docs.get(abs)!;
+    const folderKey = this.keyFor(name);
+    for (const key of Array.from(this.docs.keys())) {
+      if (isPathInside(folderKey, key)) {
+        const doc = this.docs.get(key)!;
         this.proc.notify('textDocument/didClose', { textDocument: { uri: doc.uri } });
-        this.docs.delete(abs);
-        this.diagnostics.delete(abs);
+        this.docs.delete(key);
+        this.diagnostics.delete(key);
       }
     }
   }
@@ -429,8 +432,7 @@ export class LspBridge {
     // Diagnostics arrive via publishDiagnostics push notifications. Trigger
     // an open/update beforehand so the server has the latest content; then
     // return whatever we've cached.
-    const abs = this.resolveAbs(req.name!);
-    const diags = this.diagnostics.get(abs) || [];
+    const diags = this.diagnostics.get(this.keyFor(req.name!)) || [];
     req.validate = diags.map((d: any) => ({
       message: d.message,
       severity: d.severity,
@@ -502,6 +504,13 @@ export class LspBridge {
       req.renameInfo = { canRename: false };
     }
   }
+}
+
+// An absolute path in the host's own form: "/..." on POSIX, "C:\..." or a
+// UNC path on Windows. On Windows, "/src/a.ts" is an editor path instead.
+function isHostAbsolute(name: string): boolean {
+  if (path.sep === '/') return name.startsWith('/');
+  return /^[a-zA-Z]:[\\/]/.test(name) || /^[\\/]{2}[^\\/]/.test(name);
 }
 
 function lineCharToOffset(text: string, line: number, character: number): number {

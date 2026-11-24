@@ -14,6 +14,7 @@ import { resolveAcpAgents, type ResolvedAgent } from '../utils/acp-agents.js';
 import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types.js';
 import { AcpProcess } from './AcpProcess.js';
 import { logAcp } from '../utils/logger.js';
+import { isPathInside } from '../utils/paths.js';
 import {
   ACP_PROTOCOL_VERSION,
   ACP_ERROR_AUTH_REQUIRED,
@@ -194,6 +195,7 @@ export class AcpService {
     const proc = new AcpProcess({
       command: agent.binary,
       args: agent.args,
+      shell: agent.shell,
       cwd: this.rootPath,
       name: `${agent.name}-probe`,
     });
@@ -299,6 +301,7 @@ export class AcpService {
     const proc = new AcpProcess({
       command: args.agent.binary,
       args: args.agent.args,
+      shell: args.agent.shell,
       cwd: args.cwd,
       name: `${args.agent.name}:${args.chatId.slice(-8)}`,
     });
@@ -633,9 +636,9 @@ export class AcpService {
   // True when `child` is `root` or strictly nested under it. A raw
   // `startsWith` would falsely accept sibling directories that share the
   // root's name as a prefix (e.g. `/proj/foo-extra` vs root `/proj/foo`).
+  // Case is ignored on Windows, where agents may report "c:\..." paths.
   private isWithinRoot(child: string, root: string): boolean {
-    if (child === root) return true;
-    return child.startsWith(root + path.sep);
+    return isPathInside(root, child);
   }
 
   private resolveCwd(input: string): string {

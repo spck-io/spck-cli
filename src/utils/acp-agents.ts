@@ -11,6 +11,9 @@ export interface ResolvedAgent {
   // The argv to launch the agent's ACP loop. Most agents follow `<binary> acp`,
   // but some may differ; keep it explicit per-entry.
   args: string[];
+  // Start through cmd.exe. Set for Windows .cmd/.bat files (npm's shims for
+  // global installs), which Node can't spawn directly.
+  shell?: boolean;
 }
 
 // Built-in registry of ACP-capable CLI agents. Each entry names the PATH
@@ -95,19 +98,39 @@ export function resolveAcpAgents(): ResolvedAgent[] {
       version: bundled.version,
     });
   }
-  const lookup = process.platform === 'win32' ? 'where' : 'which';
+  const isWindows = process.platform === 'win32';
+  const lookup = isWindows ? 'where' : 'which';
   for (const candidate of PATH_AGENTS) {
     if (resolved.some((agent) => agent.name === candidate.name)) continue;
     const which = spawnSync(lookup, [candidate.binary], { encoding: 'utf8' });
     if (which.status !== 0) continue;
-    const binary = (which.stdout || '').split('\n')[0]?.trim();
-    if (!binary) continue;
+    const found = isWindows
+      ? pickWindowsCommand(which.stdout || '')
+      : { binary: (which.stdout || '').split('\n')[0]?.trim(), shell: false };
+    if (!found?.binary) continue;
     resolved.push({
       name: candidate.name,
-      binary,
+      binary: found.binary,
       args: candidate.args,
       version: '',
+      ...(found.shell ? { shell: true } : {}),
     });
   }
   return resolved;
+}
+
+/**
+ * Pick the match Windows can start from `where` output. `where` lists every
+ * match in PATH order, including the extensionless sh script npm installs
+ * beside its .cmd shim, which Windows can't run. .exe and .com files start
+ * directly; .cmd and .bat files need cmd.exe.
+ */
+export function pickWindowsCommand(whereOutput: string): { binary: string; shell: boolean } | null {
+  for (const line of whereOutput.split(/\r?\n/)) {
+    const binary = line.trim();
+    const ext = path.win32.extname(binary).toLowerCase();
+    if (ext === '.exe' || ext === '.com') return { binary, shell: false };
+    if (ext === '.cmd' || ext === '.bat') return { binary, shell: true };
+  }
+  return null;
 }

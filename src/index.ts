@@ -25,6 +25,7 @@ import { authenticateWithFirebase, getValidFirebaseToken, refreshFirebaseToken, 
 import { confirm, runSetup } from './setup/wizard.js';
 import { detectTools, displayFeatureSummary } from './utils/tool-detection.js';
 import { ensureProjectDir, isDirectory } from './utils/project-dir.js';
+import { isMainModule } from './utils/paths.js';
 import { ProxyClient } from './proxy/ProxyClient.js';
 import { RPCRouter } from './rpc/router.js';
 import { ServerConfig, FirebaseCredentials, StoredCredentials } from './types.js';
@@ -724,7 +725,7 @@ export async function main(): Promise<void> {
 }
 
 // Auto-run if executed directly (e.g., via npm start or node dist/index.js)
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule(import.meta.url, process.argv[1])) {
   main().catch((error: any) => {
     console.error(t('errors.cliError', { message: error.message }));
     process.exit(1);

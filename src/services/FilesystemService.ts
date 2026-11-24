@@ -11,6 +11,7 @@ import writeFileAtomic from 'write-file-atomic';
 import { AuthenticatedSocket, ErrorCode, createRPCError } from '../types.js';
 import { parseFileSize } from '../config/config.js';
 import { logFsRead, logFsWrite } from '../utils/logger.js';
+import { isPathInside, toRelativeClientPath, toRelativePosixPath } from '../utils/paths.js';
 
 export class FilesystemService {
   private resolvedRootPath: string;
@@ -153,19 +154,19 @@ export class FilesystemService {
     // Strip query string and fragment (cache-busters sent by the browser)
     const cleanPath = userPath.split('?')[0].split('#')[0];
 
-    // Normalize path
-    const normalized = path.normalize(cleanPath);
+    // Editor paths are POSIX and rooted at the project ("/src/a.ts")
+    const relative = toRelativeClientPath(cleanPath);
 
     // Prevent directory traversal
-    if (normalized.includes('..')) {
+    if (relative.includes('..')) {
       throw createRPCError(ErrorCode.INVALID_PATH, 'Invalid path: directory traversal not allowed');
     }
 
     // Resolve to absolute path
-    const absolute = path.resolve(this.rootPath, normalized.startsWith('/') ? normalized.slice(1) : normalized);
+    const absolute = path.resolve(this.rootPath, relative);
 
     // Check if within root (before symlink resolution)
-    if (!absolute.startsWith(this.resolvedRootPath)) {
+    if (!isPathInside(this.resolvedRootPath, absolute)) {
       throw createRPCError(ErrorCode.INVALID_PATH, 'Access denied: path outside root directory');
     }
 
@@ -178,7 +179,7 @@ export class FilesystemService {
       const realRoot = await this.getRealRootPath();
 
       // Check resolved path is still within resolved root
-      if (!realPath.startsWith(realRoot)) {
+      if (!isPathInside(realRoot, realPath)) {
         throw createRPCError(
           ErrorCode.INVALID_PATH,
           'Access denied: symlink points outside root directory'
@@ -196,7 +197,7 @@ export class FilesystemService {
           const realRoot = await this.getRealRootPath();
 
           // Check parent directory is within root
-          if (!parentReal.startsWith(realRoot)) {
+          if (!isPathInside(realRoot, parentReal)) {
             throw createRPCError(
               ErrorCode.INVALID_PATH,
               'Access denied: parent directory symlink points outside root'
@@ -259,7 +260,7 @@ export class FilesystemService {
           const absolute = path.resolve(basePath, normalized);
 
           // Ensure still within root
-          if (!absolute.startsWith(realRoot)) return 0;
+          if (!isPathInside(realRoot, absolute)) return 0;
 
           await fs.access(absolute);
           return 1;
@@ -838,7 +839,7 @@ export class FilesystemService {
               queue.push(entryPath);
 
               // Convert to relative path using real root
-              const outputPath = path.relative(realRoot, entryPath);
+              const outputPath = toRelativePosixPath(realRoot, entryPath);
 
               // Apply filter and check limit for folders
               if (includeFolders) {
@@ -849,7 +850,7 @@ export class FilesystemService {
               }
             } else if (stats.isFile() && includeFiles) {
               // Convert to relative path using real root
-              const outputPath = path.relative(realRoot, entryPath);
+              const outputPath = toRelativePosixPath(realRoot, entryPath);
 
               // Apply filter and check limit for files
               const matches = !matchRegex || matchRegex.test(outputPath);

@@ -73,12 +73,22 @@ function fish_right_prompt
 end
 `;
 
+// Overrides any prompt the user's profile sets, as the hooks above do. Drives
+// such as Env: have no provider path, so those show their own path (Env:\).
+// It has no double quotes, so the Windows command line passes it through unchanged.
+const powershellPrompt =
+  "function global:prompt { $p = $PWD.ProviderPath; if (-not $p) { $p = $PWD.Path }; " +
+  "$f = Split-Path -Leaf $p; if ($p -eq $HOME) { $f = '~' } elseif (-not $f) { $f = $p }; $f + '> ' }";
+
 export function createShellLaunch(shell: string, compactPrompt: boolean, parentEnv = process.env): ShellLaunch {
   const launch: ShellLaunch = { args: [], env: { ...parentEnv }, cleanup() {} };
   if (!compactPrompt) return launch;
   const name = shell.split(/[\\/]/).pop()?.replace(/\.exe$/i, '').toLowerCase();
   if (name === 'fish') {
     launch.args = ['--init-command', fishInit];
+  } else if (name === 'pwsh' || name === 'powershell') {
+    // Profiles load before -Command runs; -NoExit keeps the shell open
+    launch.args = ['-NoLogo', '-NoExit', '-Command', powershellPrompt];
   } else if (name === 'bash' || name === 'zsh') {
     const dir = mkdtempSync(join(tmpdir(), 'spck-prompt-'));
     launch.cleanup = () => rmSync(dir, { recursive: true, force: true });

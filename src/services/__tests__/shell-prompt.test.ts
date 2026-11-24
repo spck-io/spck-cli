@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createShellLaunch, type ShellLaunch } from '../shell-prompt.js';
 
+const hasPwsh = spawnSync('pwsh', ['-NoLogo', '-NoProfile', '-Command', 'exit 0'], { timeout: 20000 }).status === 0;
+
 describe('compact shell prompts', () => {
   let home: string;
   let folder: string;
@@ -39,7 +41,7 @@ describe('compact shell prompts', () => {
     return result;
   }
 
-  it.each(['bash', 'zsh', 'fish', 'cmd.exe'])('leaves %s untouched when disabled', (shell) => {
+  it.each(['bash', 'zsh', 'fish', 'cmd.exe', 'pwsh.exe'])('leaves %s untouched when disabled', (shell) => {
     const config = launch(shell, false);
     expect(config.args).toEqual([]);
     expect(config.env.ZDOTDIR).toBeUndefined();
@@ -52,6 +54,104 @@ describe('compact shell prompts', () => {
     expect(config.args).toEqual([]);
     expect(config.env).toEqual(env);
     expect(config.env).not.toBe(env);
+  });
+
+  it.each(['pwsh', 'pwsh.exe', 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', 'powershell.exe'])(
+    'starts %s with the compact prompt after its profile', (shell) => {
+      const { args } = launch(shell);
+      expect(args.slice(0, 3)).toEqual(['-NoLogo', '-NoExit', '-Command']);
+      // The Windows command line would need unescaped double quotes escaped
+      expect(args[3]).not.toContain('"');
+    }
+  );
+
+  describe.skipIf(!hasPwsh)('PowerShell', () => {
+    it('shows the folder name, ~ at home, or the path of a drive with no folders', () => {
+      const { args } = launch('pwsh');
+      // Strict mode, as some profiles set, turns sloppy prompt code into errors
+      const script = `Set-StrictMode -Version Latest; ${args[3]}; Set-Location -LiteralPath '${folder}'; prompt; ` +
+        'Set-Location -LiteralPath $HOME; prompt; Set-Location Env:; prompt';
+      const result = spawnSync('pwsh', ['-NoLogo', '-NoProfile', '-Command', script], {
+        env: { ...process.env, HOME: home }, encoding: 'utf8', timeout: 20000,
+      });
+      expect(result.stderr).toBe('');
+      const envPath = process.platform === 'win32' ? 'Env:\\' : 'Env:/';
+      expect(result.stdout.split(/\r?\n/)).toEqual(['project folder> ', '~> ', `${envPath}> `, '']);
+    });
+
+    // A profile in a temporary home; XDG paths keep history and caches there too
+    function writeProfile() {
+      const dir = join(home, '.config', 'powershell');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'Microsoft.PowerShell_profile.ps1'),
+        "$env:SPCK_TEST_STARTUP = 'loaded'\nfunction spck_test_fn { 'profile-ok' }\nfunction prompt { 'user@computer> ' }\n");
+      return {
+        XDG_CONFIG_HOME: join(home, '.config'),
+        XDG_DATA_HOME: join(home, '.local', 'share'),
+        XDG_CACHE_HOME: join(home, '.cache'),
+        POWERSHELL_TELEMETRY_OPTOUT: '1',
+        POWERSHELL_UPDATECHECK: 'Off',
+      };
+    }
+
+    // Starts PowerShell the way TerminalService does, in a real PTY. A headless
+    // xterm stands in for the editor's terminal: it answers PSReadLine's cursor
+    // position queries and gives the screen as the user would see it.
+    async function runInTerminal(config: ShellLaunch, steps: Array<[input: string, waitFor: RegExp]>): Promise<string> {
+      const pty = await import('node-pty');
+      const { Terminal } = (await import('@xterm/headless')).default as any;
+      const term = new Terminal({ cols: 120, rows: 60, allowProposedApi: true });
+      const env = Object.fromEntries(Object.entries(config.env).filter(([, value]) => value !== undefined)) as Record<string, string>;
+      const proc = pty.spawn('pwsh', config.args, { name: 'xterm-256color', cols: 120, rows: 60, cwd: folder, env });
+      const exited = new Promise<void>((resolve) => proc.onExit(() => resolve()));
+      term.onData((data: string) => proc.write(data));
+      proc.onData((data) => term.write(data));
+      // Lines as drawn; the space after a prompt is drawn too, so it stays
+      const screen = () => {
+        const lines: string[] = [];
+        for (let i = 0; i < term.buffer.active.length; i++) {
+          lines.push(term.buffer.active.getLine(i)?.translateToString(true) ?? '');
+        }
+        return lines.join('\n');
+      };
+      try {
+        for (const [input, pattern] of steps) {
+          if (input) proc.write(input + '\r');
+          const deadline = Date.now() + 15000;
+          while (!pattern.test(screen())) {
+            if (Date.now() > deadline) throw new Error(`Timed out waiting for ${pattern} in:\n${screen()}`);
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+        }
+        proc.write('exit\r');
+        await exited;
+        return screen();
+      } finally {
+        try { proc.kill(); } catch { /* already exited */ }
+        term.dispose();
+      }
+    }
+
+    it.skipIf(process.platform === 'win32')('keeps the profile, exit codes and line editing in a real terminal', async () => {
+      const text = await runInTerminal(launch('pwsh', true, writeProfile()), [
+        ['', /^project folder> $/m],
+        ["sh -c 'exit 3'", /^project folder> sh -c 'exit 3'\nproject folder> $/m],
+        ['"state:${LASTEXITCODE}:$env:SPCK_TEST_STARTUP"', /^state:/m],
+        ['spck_test_fn', /^profile-ok$/m],
+        ['"psreadline:$([bool](Get-Module PSReadLine))"', /^psreadline:/m],
+        ['cd /', /^\/> $/m],
+        ['cd ~', /^~> $/m],
+      ]);
+      expect(text).toMatch(/^state:3:loaded$/m);
+      expect(text).toMatch(/^psreadline:True$/m);
+      expect(text).not.toContain('user@computer>');
+      expect(text).not.toMatch(/PowerShell \d/);
+    }, 60000);
+
+    it.skipIf(process.platform === 'win32')('uses the profile prompt and banner when disabled', async () => {
+      const text = await runInTerminal(launch('pwsh', false, writeProfile()), [['', /^user@computer> $/m]]);
+      expect(text).toMatch(/PowerShell \d/);
+    }, 60000);
   });
 
   describe.skipIf(!existsSync('/bin/bash'))('Bash', () => {
