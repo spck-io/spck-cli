@@ -187,6 +187,39 @@ describe('GitService', () => {
       const branch = await execGit(['symbolic-ref', '--short', 'HEAD'], repoPath);
       expect(branch).toBe('main');
     });
+
+    describe('on Git before 2.28, which has no --initial-branch', () => {
+      beforeEach(() => {
+        const realExecGit = (service as any).execGit.bind(service);
+        vi.spyOn(service as any, 'execGit').mockImplementation((args: any, options: any) =>
+          args.includes('--initial-branch')
+            ? Promise.resolve({ stdout: '', stderr: '', code: 129 })
+            : realExecGit(args, options));
+      });
+
+      it('points the new repository at the default branch', async () => {
+        await service.handle('init', { dir: '/repo', defaultBranch: 'main' }, mockSocket);
+
+        expect(await execGit(['symbolic-ref', '--short', 'HEAD'], repoPath)).toBe('main');
+      });
+
+      it('rejects an invalid branch name without creating a repository', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        await expect(
+          service.handle('init', { dir: '/repo', defaultBranch: 'a..b' }, mockSocket)
+        ).rejects.toBeDefined();
+        await expect(fs.stat(path.join(repoPath, '.git'))).rejects.toThrow();
+      });
+
+      it('leaves HEAD alone when reinitializing', async () => {
+        await initRepoOnMain(repoPath);
+
+        await service.handle('init', { dir: '/repo', defaultBranch: 'trunk' }, mockSocket);
+
+        expect(await execGit(['symbolic-ref', '--short', 'HEAD'], repoPath)).toBe('main');
+      });
+    });
   });
 
   describe('Git Operations - currentBranch', () => {

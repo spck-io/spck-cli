@@ -1109,12 +1109,28 @@ export class GitService {
    * Initialize repository
    */
   private async init(dir: string, params: any): Promise<{ success: boolean }> {
-    const args = ['init'];
-    if (params.defaultBranch) {
-      args.push('--initial-branch', params.defaultBranch);
+    if (!params.defaultBranch) {
+      await this.execGit(['init'], { cwd: dir });
+      return { success: true };
     }
 
-    await this.execGit(args, { cwd: dir });
+    // Git before 2.28 has no --initial-branch and exits 129 (usage error)
+    const { code } = await this.execGit(
+      ['init', '--initial-branch', params.defaultBranch],
+      { cwd: dir, acceptExitCodes: [129] }
+    );
+    if (code === 129) {
+      // Do what it does by hand: point a new repository's unborn HEAD at the
+      // branch, and leave HEAD alone when reinitializing an existing one.
+      // Old symbolic-ref accepts any name, so check it as --initial-branch would.
+      const ref = `refs/heads/${params.defaultBranch}`;
+      await this.execGit(['check-ref-format', ref], { cwd: dir });
+      const isNew = !fs.existsSync(path.join(dir, '.git'));
+      await this.execGit(['init'], { cwd: dir });
+      if (isNew) {
+        await this.execGit(['symbolic-ref', 'HEAD', ref], { cwd: dir });
+      }
+    }
     return { success: true };
   }
 
