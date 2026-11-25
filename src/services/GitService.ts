@@ -1570,9 +1570,10 @@ export class GitService {
     if (params.fastForwardOnly) {
       args.push('--ff-only');
     } else {
-      // Merge when the branches have diverged. Without a pull.rebase setting,
-      // Git (2.33+) refuses to choose between merging and rebasing.
-      args.push('--no-rebase', '--ff', '--no-edit');
+      // Diverged branches merge, or rebase where the computer's Git is set to
+      // (pull.rebase). Without --ff, Git 2.33+ refuses to choose when
+      // pull.rebase isn't set, and pull.ff=only would refuse to merge.
+      args.push('--ff', '--no-edit');
     }
 
     args.push(remote);
@@ -1594,6 +1595,12 @@ export class GitService {
       result = await this.execGitWithAskpass(args, socket, { cwd: dir, env });
     } catch (error) {
       if (!(error instanceof GitCommandError && error.reason === 'MergeConflict')) throw error;
+      if (await this.rebaseInProgress(dir)) {
+        // The editor resolves conflicts in a merge, which a commit finishes; a
+        // rebase needs git rebase --continue. Leave the branch as it was.
+        await this.execGit(['rebase', '--abort'], { cwd: dir });
+        throw new GitCommandError(error.exitCode, 'RebaseConflict');
+      }
       // The merge stopped with conflicts for the user to resolve, as a local pull does
       socket.broadcast.emit('rpc', {
         jsonrpc: '2.0',
@@ -1605,9 +1612,11 @@ export class GitService {
     const output = result.stdout + result.stderr;
 
     // Parse output to determine merge type
-    const alreadyMerged = output.includes('Already up to date') || output.includes('Already up-to-date');
+    const alreadyMerged = /Already up[ -]to[ -]date|Current branch .* is up to date/.test(output);
     const fastForward = output.includes('Fast-forward');
     const recursiveMerge = !alreadyMerged && !fastForward;
+    // Rebased onto the remote. Editors that don't know this say the branches were merged.
+    const rebased = recursiveMerge && output.includes('Successfully rebased');
 
     // Send change notification
     socket.broadcast.emit('rpc', {
@@ -1621,7 +1630,19 @@ export class GitService {
       fastForward,
       recursiveMerge,
       mergeCommit: recursiveMerge ? true : undefined,
+      ...(rebased ? { rebased } : {}),
     };
+  }
+
+  /**
+   * Whether a rebase stopped partway in this repository
+   */
+  private async rebaseInProgress(dir: string): Promise<boolean> {
+    for (const name of ['rebase-merge', 'rebase-apply']) {
+      const { stdout } = await this.execGit(['rev-parse', '--git-path', name], { cwd: dir });
+      if (fs.existsSync(path.resolve(dir, stdout.trim()))) return true;
+    }
+    return false;
   }
 
   /**

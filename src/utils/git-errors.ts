@@ -11,6 +11,7 @@ export type GitFailureReason =
   | 'PushDeclined'
   | 'NotFastForward'
   | 'MergeConflict'
+  | 'RebaseConflict'
   | 'LocalChanges'
   | 'RepositoryNotFound'
   | 'RemoteRefNotFound'
@@ -42,6 +43,8 @@ const DESCRIPTIONS: Record<GitFailureReason, string> = {
   PushDeclined: 'the remote declined the push',
   NotFastForward: 'the local and remote branches have diverged',
   MergeConflict: 'merge conflicts',
+  // Set by pull, which undoes the rebase
+  RebaseConflict: 'the rebase stopped at conflicts, so it was undone',
   LocalChanges: 'local changes would be overwritten',
   RepositoryNotFound: 'repository not found',
   RemoteRefNotFound: 'remote branch not found',

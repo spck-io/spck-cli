@@ -184,6 +184,10 @@ describe('GitService', () => {
 
     beforeEach(async () => {
       vi.spyOn(console, 'error').mockImplementation(() => {});
+      // Leave out this computer's own Git settings, such as pull.rebase
+      const globalConfig = path.join(testRoot, 'gitconfig');
+      await fs.writeFile(globalConfig, '');
+      vi.stubEnv('GIT_CONFIG_GLOBAL', globalConfig);
       remote = path.join(testRoot, 'remote.git');
       await execGit(['init', '--bare', remote], testRoot);
       await execGit(['symbolic-ref', 'HEAD', 'refs/heads/main'], remote);
@@ -199,6 +203,10 @@ describe('GitService', () => {
       await setUser(other);
     });
 
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
     it('merges diverged branches unless the pull is fast-forward only', async () => {
       await commitLine(other, 'three', 'three (remote)');
       await execGit(['push', 'origin', 'main'], other);
@@ -210,11 +218,38 @@ describe('GitService', () => {
         code: ErrorCode.GIT_OPERATION_FAILED,
         data: { reason: 'NotFastForward' },
       });
-      // Whatever pull.rebase and pull.ff say
+      // Turning fast-forward only off in the editor wins over pull.ff=only
       await execGit(['config', 'pull.ff', 'only'], repoPath);
       expect(await pull(false)).toEqual({ alreadyMerged: false, fastForward: false, recursiveMerge: true, mergeCommit: true });
       expect((await execGit(['rev-list', '--parents', '-n', '1', 'HEAD'], repoPath)).split(' ')).toHaveLength(3);
       expect(await fs.readFile(path.join(repoPath, 'notes.md'), 'utf8')).toBe('one (local)\ntwo\nthree (remote)\n');
+    });
+
+    it('rebases instead where the computer’s Git is set to rebase on pull', async () => {
+      await commitLine(other, 'three', 'three (remote)');
+      await execGit(['push', 'origin', 'main'], other);
+      await commitLine(repoPath, 'one', 'one (local)');
+      await execGit(['config', 'pull.rebase', 'true'], repoPath);
+      const result = await service.handle('pull', { dir: '/repo', remote: 'origin', ref: 'main', fastForwardOnly: false }, mockSocket);
+      expect(result).toEqual({ alreadyMerged: false, fastForward: false, recursiveMerge: true, mergeCommit: true, rebased: true });
+      // One line of history, with the local commit on top of the remote's
+      expect((await execGit(['rev-list', '--parents', '-n', '1', 'HEAD'], repoPath)).split(' ')).toHaveLength(2);
+      expect(await execGit(['log', '-1', '--format=%s', 'HEAD~1'], repoPath)).toBe('three -> three (remote)');
+      expect(await fs.readFile(path.join(repoPath, 'notes.md'), 'utf8')).toBe('one (local)\ntwo\nthree (remote)\n');
+    });
+
+    it('undoes a rebase that stops at conflicts, which the editor can’t finish', async () => {
+      await commitLine(other, 'two', 'two (remote)');
+      await execGit(['push', 'origin', 'main'], other);
+      await commitLine(repoPath, 'two', 'two (local)');
+      await execGit(['config', 'pull.rebase', 'true'], repoPath);
+      const head = await execGit(['rev-parse', 'HEAD'], repoPath);
+      await expect(service.handle('pull', { dir: '/repo', remote: 'origin', ref: 'main', fastForwardOnly: false }, mockSocket)).rejects.toMatchObject({
+        code: ErrorCode.GIT_OPERATION_FAILED,
+        data: { reason: 'RebaseConflict' },
+      });
+      expect(await execGit(['rev-parse', 'HEAD'], repoPath)).toBe(head);
+      expect(await execGit(['status', '--porcelain'], repoPath)).toBe('');
     });
 
     it('stops at merge conflicts for the user to resolve', async () => {
